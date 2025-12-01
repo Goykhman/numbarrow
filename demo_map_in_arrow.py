@@ -117,7 +117,7 @@ def calculate(
 
 def map_in_arrow_func(iterator):
     for batch in iterator:
-        id_: pa.DoubleArray = batch.column("id")
+        id_: pa.StringArray = batch.column("id")
         id_data = create_str_array(id_)
         coordinate: pa.DoubleArray = batch.column("coordinate")
         data: pa.ListArray = batch.column("data")

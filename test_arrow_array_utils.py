@@ -8,7 +8,7 @@ from arrow_array_utils import (
 def test_create_str_array():
     pa_a = pa.array(["first", "second", None, "third", "fourth element", "f"], type=pa.string())
     np_a = create_str_array(pa_a)
-    ref =['first', 'second', '', 'third', 'fourth element', 'f']
+    ref = ['first', 'second', '', 'third', 'fourth element', 'f']
     assert all([np_a_e == ref_e for np_a_e, ref_e in zip(np_a, ref)])
 
 
