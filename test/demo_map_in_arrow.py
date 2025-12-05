@@ -9,10 +9,11 @@ from pyspark.sql.types import (
     DoubleType, IntegerType, LongType, StringType, StructField, StructType
 )
 
-from arrow_array_utils import (
-    create_str_array, is_null, structured_list_array_adapter, uniform_arrow_array_adapter
+from numbarrow.utils.arrow_array_utils import (
+    create_str_array, structured_list_array_adapter, uniform_arrow_array_adapter
 )
-from configurations import default_jit_options
+from numbarrow.core.is_null import is_null
+from numbarrow.core.configurations import default_jit_options
 
 
 spark = (
@@ -23,6 +24,10 @@ spark = (
     .config("spark.sql.execution.arrow.pyspark.enabled", "true")
     .getOrCreate()
 )
+
+
+# sc = spark.sparkContext
+# broadcasts = sc.broadcast({"broadcast_key": "broadcast_value"})
 
 
 def create_entities_df():
@@ -116,6 +121,7 @@ def calculate(
 
 
 def map_in_arrow_func(iterator):
+    # print(f"broadcasts.value = {broadcasts.value}")
     for batch in iterator:
         id_: pa.StringArray = batch.column("id")
         id_data = create_str_array(id_)
@@ -156,7 +162,7 @@ def map_in_arrow_func(iterator):
         })
 
 
-if __name__ == "__main__":
+def run_demo():
     df = join_data()
     res_schema = StructType([
         StructField("id", StringType()),
@@ -164,3 +170,7 @@ if __name__ == "__main__":
     ])
     df_out = df.mapInArrow(map_in_arrow_func, res_schema)
     df_out.show()
+
+
+if __name__ == "__main__":
+    run_demo()

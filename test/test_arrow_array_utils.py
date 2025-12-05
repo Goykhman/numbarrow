@@ -1,8 +1,9 @@
 import numpy as np
 import pyarrow as pa
-from arrow_array_utils import (
-    create_str_array, is_null, structured_array_adapter, uniform_arrow_array_adapter
+from numbarrow.utils.arrow_array_utils import (
+    create_str_array, structured_array_adapter, uniform_arrow_array_adapter
 )
+from numbarrow.core.is_null import is_null
 
 
 def test_create_str_array():

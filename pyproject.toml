@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools~=75.3.0", "wheel~=0.45.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["numbarrow*"]
+
+[project]
+name = "numbarrow"
+dependencies = [
+    "llvmlite>=0.43.0,<0.45.0",
+    "numba>=0.60.0,<0.62.0",
+    "numpy>=1.22.4,<2.0.0",
+    "pandas==1.5.0",
+    "py4j==0.10.9.5",
+    "pyarrow<=15.0.0",
+    "pyspark~=3.3.1",
+    "python-dateutil==2.9.0.post0",
+    "pytz==2025.2",
+    "six==1.17.0"
+]
+dynamic = ["version"]
+requires-python = "~=3.10"
+license = {file = "LICENSE"}
+keywords = ["pyarrow", "pyspark", "numba", "numpy"]
+authors = [
+  {name = "Mikhail Goykhman"}
+]
+readme = 'README.md'
+
+[tool.setuptools.dynamic]
+version = {attr = "numbarrow.__version__"}

@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.testing import assert_equal
-from utils import arrays_viewers
+from numbarrow.utils.utils import arrays_viewers
 
 
 def test_int32_array_from_ptr_as_int():

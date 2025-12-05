@@ -3,7 +3,7 @@ from numba import carray, float64, int32, int64, intp, njit
 from numba.core.types import Array, Type, uint8, voidptr
 from numba.extending import intrinsic
 
-from configurations import default_jit_options
+from numbarrow.core.configurations import default_jit_options
 
 
 @intrinsic

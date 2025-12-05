@@ -2,12 +2,9 @@ import ctypes
 import numpy as np
 import pyarrow as pa
 
-from numba import njit
-from numba.core.types import Array, boolean, int64, uint8
 from typing import Dict, Optional, Tuple
 
-from configurations import default_jit_options
-from utils import arrays_viewers
+from numbarrow.utils.utils import arrays_viewers
 
 
 def create_str_array(pa_str_array: pa.StringArray):
@@ -29,13 +26,6 @@ def create_str_array(pa_str_array: pa.StringArray):
         s = (ctypes.c_char * int(end - start)).from_address(data_p + int(start)).value
         str_array[i] = s
     return str_array
-
-
-@njit(boolean(int64, Array(uint8, 1, "C")), **default_jit_options)
-def is_null(index_: int, bitmap: np.ndarray) -> bool:
-    byte_for_index = bitmap[index_ // 8]
-    bit_position_in_byte = index_ % 8
-    return not (byte_for_index >> bit_position_in_byte) % 2
 
 
 def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
