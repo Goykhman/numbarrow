@@ -2,40 +2,21 @@ import ctypes
 import numpy as np
 import pyarrow as pa
 
-from functools import singledispatch
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple
 
 from numbarrow.utils.utils import arrays_viewers
 
 
-@singledispatch
-def arrow_array_adapter(pa_array: pa.Array):
-    """ Dispatcher for PyArrow array adapters of various types. """
-    raise NotImplementedError(f"Not implemented for {pa_array} of type {pa_array.type}")
-
-
-@arrow_array_adapter.register(pa.StructArray)
-def _(pa_array: pa.StructArray):
-    return structured_array_adapter(pa_array)
-
-
-@arrow_array_adapter.register(pa.DoubleArray)
-@arrow_array_adapter.register(pa.Int32Array)
-@arrow_array_adapter.register(pa.Int64Array)
-def _(pa_array: Union[
-    pa.DoubleArray, pa.Int32Array, pa.Int64Array
-]):
-    return uniform_arrow_array_adapter(pa_array)
-
-
-@arrow_array_adapter.register(pa.ListArray)
-def _(pa_array: pa.ListArray):
-    return structured_list_array_adapter(pa_array)
-
-
-@arrow_array_adapter.register(pa.StringArray)
-def _(pa_array: pa.StringArray):
-    return {}, create_str_array(pa_array)
+def create_bitmap(bitmap_buf: Optional[pa.Buffer]):
+    """ Create numpy array of uint8 type containing
+    bit-map of valid array entries """
+    if bitmap_buf is None:
+        return None
+    bitmap_p = bitmap_buf.address
+    bitmap_len = bitmap_buf.size
+    bitmap_viewer = arrays_viewers[np.uint8]
+    bitmap = bitmap_viewer(bitmap_p, bitmap_len)
+    return bitmap
 
 
 def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
@@ -117,12 +98,5 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> Tuple[Optional[np.ndarray
     data_item_byte_size = np.dtype(data_np_ty).itemsize
     data_len = data_buf_byte_size // data_item_byte_size
     data = data_viewer(data_p, data_len)
-
-    if bitmap_buf is not None:
-        bitmap_p = bitmap_buf.address
-        bitmap_len = bitmap_buf.size
-        bitmap_viewer = arrays_viewers[np.uint8]
-        bitmap = bitmap_viewer(bitmap_p, bitmap_len)
-    else:
-        bitmap = None
+    bitmap = create_bitmap(bitmap_buf)
     return bitmap, data

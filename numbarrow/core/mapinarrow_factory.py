@@ -3,7 +3,7 @@ import pyarrow as pa
 from pyspark.broadcast import Broadcast
 from typing import Callable, List, Optional
 
-from numbarrow.utils.arrow_array_utils import arrow_array_adapter
+from numbarrow.core.adapters import arrow_array_adapter
 
 
 def make_mapinarrow_func(

@@ -1,7 +1,8 @@
 import numpy as np
 import pyarrow as pa
 from numbarrow.utils.arrow_array_utils import (
-    create_str_array, structured_array_adapter, uniform_arrow_array_adapter
+    create_str_array, structured_array_adapter,
+    uniform_arrow_array_adapter
 )
 from numbarrow.core.is_null import is_null
 
@@ -9,7 +10,7 @@ from numbarrow.core.is_null import is_null
 def test_create_str_array():
     pa_a = pa.array(["first", "second", None, "third", "fourth element", "f"], type=pa.string())
     np_a = create_str_array(pa_a)
-    ref = ['first', 'second', '', 'third', 'fourth element', 'f']
+    ref = ["first", "second", "", "third", "fourth element", "f"]
     assert all([np_a_e == ref_e for np_a_e, ref_e in zip(np_a, ref)])
 
 
@@ -60,7 +61,7 @@ def test_structured_array_adapter():
     assert np.allclose([ratios_data[0], ratios_data[2], ratios_data[3]], [1.41, 1.72, 9.99])
 
 
-def test_uniform_arrow_array_adapter():
+def test_uniform_arrow_array_adapter_1():
     a = pa.array([141, None, 172, 314, 271], type=pa.int32())
     bitmap, data = uniform_arrow_array_adapter(a)
     assert data[0] == 141 and data[2] == 172 and data[3] == 314 and data[4] == 271
@@ -75,4 +76,4 @@ if __name__ == "__main__":
     test_is_null_1()
     test_is_null_2()
     test_structured_array_adapter()
-    test_uniform_arrow_array_adapter()
+    test_uniform_arrow_array_adapter_1()
