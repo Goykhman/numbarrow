@@ -2,12 +2,43 @@ import ctypes
 import numpy as np
 import pyarrow as pa
 
-from typing import Dict, Optional, Tuple
+from functools import singledispatch
+from typing import Dict, Optional, Tuple, Union
 
 from numbarrow.utils.utils import arrays_viewers
 
 
-def create_str_array(pa_str_array: pa.StringArray):
+@singledispatch
+def arrow_array_adapter(pa_array: pa.Array):
+    """ Dispatcher for PyArrow array adapters of various types. """
+    raise NotImplementedError(f"Not implemented for {pa_array} of type {pa_array.type}")
+
+
+@arrow_array_adapter.register(pa.StructArray)
+def _(pa_array: pa.StructArray):
+    return structured_array_adapter(pa_array)
+
+
+@arrow_array_adapter.register(pa.DoubleArray)
+@arrow_array_adapter.register(pa.Int32Array)
+@arrow_array_adapter.register(pa.Int64Array)
+def _(pa_array: Union[
+    pa.DoubleArray, pa.Int32Array, pa.Int64Array
+]):
+    return uniform_arrow_array_adapter(pa_array)
+
+
+@arrow_array_adapter.register(pa.ListArray)
+def _(pa_array: pa.ListArray):
+    return structured_list_array_adapter(pa_array)
+
+
+@arrow_array_adapter.register(pa.StringArray)
+def _(pa_array: pa.StringArray):
+    return {}, create_str_array(pa_array)
+
+
+def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
     """ Copy data from densely packed `pa.StringArray` into
      padded numpy array of the character sequence type determined
      by the length of the longest string. """

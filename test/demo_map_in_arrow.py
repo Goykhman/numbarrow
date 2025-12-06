@@ -123,7 +123,7 @@ def main(data_dict: dict, bitmap_dict: dict, broadcasts: dict):
         bitmap_dict["magnitude"],
         broadcasts["rescale"]
     )
-    return {"intensity": res}
+    return {"id": data_dict["id"], "intensity": res}
 
 
 def run_demo():
@@ -132,18 +132,12 @@ def run_demo():
         StructField("id", StringType()),
         StructField("intensity", DoubleType())
     ])
-    output_columns = output_schema.fieldNames()
-    string_type_columns = {"id"}
-    struct_type_columns = {"data"}
     sc = spark.sparkContext
     broadcast = sc.broadcast({"rescale": 10 ** (-4)})
     mapinarrow_func = make_mapinarrow_func(
         main,
         input_columns,
-        output_columns,
-        broadcast=broadcast,
-        string_type_columns=string_type_columns,
-        struct_type_columns=struct_type_columns
+        broadcast=broadcast
     )
     df_in = join_data()
     df_out = df_in.mapInArrow(mapinarrow_func, output_schema)
