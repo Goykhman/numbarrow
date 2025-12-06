@@ -1,5 +1,4 @@
 import numpy as np
-import pyarrow as pa
 
 from numba import njit
 from numba.core.types import Array, float64, int32, int64, Optional, uint8
@@ -9,11 +8,9 @@ from pyspark.sql.types import (
     DoubleType, IntegerType, LongType, StringType, StructField, StructType
 )
 
-from numbarrow.utils.arrow_array_utils import (
-    create_str_array, structured_list_array_adapter, uniform_arrow_array_adapter
-)
 from numbarrow.core.is_null import is_null
 from numbarrow.core.configurations import default_jit_options
+from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
 
 
 spark = (
@@ -24,10 +21,6 @@ spark = (
     .config("spark.sql.execution.arrow.pyspark.enabled", "true")
     .getOrCreate()
 )
-
-
-# sc = spark.sparkContext
-# broadcasts = sc.broadcast({"broadcast_key": "broadcast_value"})
 
 
 def create_entities_df():
@@ -95,7 +88,7 @@ magnitude_bmap_ty = Optional(bitmap_a_ty)
 calculate_ret_ty = Array(float64, 1, "C")
 
 calculate_sig = calculate_ret_ty(
-    size_a_ty, coordinate_a_ty, index_a_ty, magnitude_a_ty, magnitude_bmap_ty
+    size_a_ty, coordinate_a_ty, index_a_ty, magnitude_a_ty, magnitude_bmap_ty, float64
 )
 
 
@@ -105,7 +98,8 @@ def calculate(
     coordinate_a: np.ndarray,
     index_a: np.ndarray,
     magnitude_a: np.ndarray,
-    magnitude_bmap: np.ndarray
+    magnitude_bmap: np.ndarray,
+    rescale: float
 ) -> np.ndarray:
     res = np.empty(size_a.shape, np.float64)
     magnitudes_per_entity = len(magnitude_a) // len(size_a)
@@ -113,62 +107,46 @@ def calculate(
         area = size_a[i] * coordinate_a[i]
         total_magnitude = 1
         for j in range(magnitudes_per_entity * i, magnitudes_per_entity * (i + 1)):
-            if magnitude_bmap is None or not is_null(int64(j), magnitude_bmap):
+            if magnitude_bmap is None or not is_null(j, magnitude_bmap):
                 total_magnitude *= magnitude_a[j]
         scale = index_a[i] + np.sqrt(total_magnitude) / 121.0
-        res[i] = area * scale
+        res[i] = area * scale * rescale
     return res
 
 
-def map_in_arrow_func(iterator):
-    # print(f"broadcasts.value = {broadcasts.value}")
-    for batch in iterator:
-        id_: pa.StringArray = batch.column("id")
-        id_data = create_str_array(id_)
-        coordinate: pa.DoubleArray = batch.column("coordinate")
-        data: pa.ListArray = batch.column("data")
-        size: pa.Int32Array = batch.column("size")
-
-        coordinate_bitmap, coordinate_data = uniform_arrow_array_adapter(coordinate)
-        data_bitmap_dict, data_data_dict = structured_list_array_adapter(data)
-        # index_bitmap = data_bitmap_dict["index"]
-        index_data = data_data_dict["index"]
-        magnitude_bitmap = data_bitmap_dict["magnitude"]
-        magnitude_data = data_data_dict["magnitude"]
-        size_bitmap, size_data = uniform_arrow_array_adapter(size)
-
-        # print(f"id_bitmap = {id_bitmap}")
-        # print(f"id_data = {id_data}")
-        # print(f"coordinate_bitmap = {coordinate_bitmap}")
-        # print(f"coordinate_data = {coordinate_data}")
-        # print(f"index_bitmap = {index_bitmap}")
-        # print(f"index_data = {index_data}")
-        # print(f"magnitude_bitmap = {magnitude_bitmap}")
-        # print(f"magnitude_data = {magnitude_data}")
-        # print(f"size_bitmap = {size_bitmap}")
-        # print(f"size_data = {size_data}")
-
-        res = calculate(
-            size_data,
-            coordinate_data,
-            index_data,
-            magnitude_data,
-            magnitude_bitmap
-        )
-        # print(f"res = {res}")
-        yield pa.RecordBatch.from_pydict({
-            "id": pa.array(id_data),
-            "res": pa.array(res)
-        })
+def main(data_dict: dict, bitmap_dict: dict, broadcasts: dict):
+    res = calculate(
+        data_dict["size"],
+        data_dict["coordinate"],
+        data_dict["index"],
+        data_dict["magnitude"],
+        bitmap_dict["magnitude"],
+        broadcasts["rescale"]
+    )
+    return {"intensity": res}
 
 
 def run_demo():
-    df = join_data()
-    res_schema = StructType([
+    input_columns = ["size", "coordinate", "data", "id"]
+    output_schema = StructType([
         StructField("id", StringType()),
-        StructField("res", DoubleType())
+        StructField("intensity", DoubleType())
     ])
-    df_out = df.mapInArrow(map_in_arrow_func, res_schema)
+    output_columns = output_schema.fieldNames()
+    string_type_columns = {"id"}
+    struct_type_columns = {"data"}
+    sc = spark.sparkContext
+    broadcast = sc.broadcast({"rescale": 10 ** (-4)})
+    mapinarrow_func = make_mapinarrow_func(
+        main,
+        input_columns,
+        output_columns,
+        broadcast=broadcast,
+        string_type_columns=string_type_columns,
+        struct_type_columns=struct_type_columns
+    )
+    df_in = join_data()
+    df_out = df_in.mapInArrow(mapinarrow_func, output_schema)
     df_out.show()
 
 
