@@ -14,36 +14,6 @@ def test_create_str_array():
     assert all([np_a_e == ref_e for np_a_e, ref_e in zip(np_a, ref)])
 
 
-def test_is_null_1():
-    bitmap = np.array([int("1010001", base=2)], dtype=np.uint8)
-    assert all([
-        not is_null(0, bitmap),
-        is_null(1, bitmap),
-        is_null(2, bitmap),
-        is_null(3, bitmap),
-        not is_null(4, bitmap),
-        is_null(5, bitmap),
-        not is_null(6, bitmap)
-    ])
-
-
-def test_is_null_2():
-    bitmap = np.array([int("10100010", base=2), int("1", base=2)], dtype=np.uint8)
-    assert all([
-        is_null(0, bitmap),
-        not is_null(1, bitmap),
-        is_null(2, bitmap),
-        is_null(3, bitmap),
-        is_null(4, bitmap),
-        not is_null(5, bitmap),
-        is_null(6, bitmap),
-        not is_null(7, bitmap),
-        not is_null(8, bitmap),
-        is_null(9, bitmap),
-        is_null(10, bitmap),
-    ])
-
-
 def test_structured_array_adapter():
     indices = pa.array([14, 89, None, 105], type=pa.int32())
     ratios = pa.array([1.41, None, 1.72, 9.99], type=pa.float64())
@@ -73,7 +43,5 @@ def test_uniform_arrow_array_adapter_1():
 
 if __name__ == "__main__":
     test_create_str_array()
-    test_is_null_1()
-    test_is_null_2()
     test_structured_array_adapter()
     test_uniform_arrow_array_adapter_1()

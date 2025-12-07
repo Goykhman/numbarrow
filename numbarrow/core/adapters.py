@@ -12,17 +12,36 @@ from numbarrow.utils.arrow_array_utils import (
 from numbarrow.utils.utils import arrays_viewers
 
 
+def cast_64bit_date_arrow_to_numpy_array(pa_array: pa.Array, np_dtype: np.dtype):
+    """ Can be used to cast PyArrow arrays of date types that are represented by
+    64-bit integers to numpy arrays of various date types (np.datetime64[...],
+    which are always represented  by 64-bit integers whose meaning is determined
+    by the precision, such as, 's', 'ms', 'us').
+
+    Since underlying data layout of both arrays in int64, a copy is avoided,
+
+    The associated bitmap (if any) is also returned.
+    """
+    int64_array = pa_array.cast(pa.int64())
+    assert int64_array.buffers()[1].address == pa_array.buffers()[1].address, "got copied"
+    bitmap, int64_data = uniform_arrow_array_adapter(int64_array)
+    data = int64_data.view(np_dtype)
+    assert data.ctypes.data == int64_data.ctypes.data, "got copied"
+    return bitmap, data
+
+
 @singledispatch
 def arrow_array_adapter(pa_array: pa.Array):
     """ Dispatcher for PyArrow array adapters of various types. """
-    raise NotImplementedError(f"Not implemented for {pa_array} of type {pa_array.type}")
+    raise NotImplementedError(f"Not implemented for {pa_array} of type {type(pa_array)} and elements {pa_array.type}")
 
 
 @arrow_array_adapter.register(pa.BooleanArray)
 def _(pa_array: pa.BooleanArray):
     """ PyArrow stores boolean arrays bit-wise,
      following the same kind of layout it uses
-     for bitmaps. This requires creating a copy.
+     for bitmaps. This requires creating a copy
+     when casting to numpy arrays of booleans.
     """
     bitmap_buf, data_buf = pa_array.buffers()
     data_buf_p = data_buf.address
@@ -40,33 +59,29 @@ def _(pa_array: pa.BooleanArray):
 
 @arrow_array_adapter.register(pa.Date32Array)
 def _(pa_array: pa.Date32Array):
-    """ Creates a copy when re-interprets numpy array of integers
-     (number of days since 1970-01-01) as datetime64[D] """
+    """
+    PyArrow Date32 dates are represented by 32bit integers.
+    Since all numpy dates are represented by 64bit integers, this
+    creates a copy when it re-interprets numpy array of int32 integers
+     (number of days since 1970-01-01) as datetime64[D] (int64)"""
     int32_array = pa_array.cast(pa.int32())
     assert int32_array.buffers()[1].address == pa_array.buffers()[1].address, "got copied"
     bitmap, int32_data = uniform_arrow_array_adapter(int32_array)
     data = int32_data.astype(np.dtype("datetime64[D]"))
-    # assert data.ctypes.data == int32_data.ctypes.data, "got copied"
+    assert int32_data.ctypes.data != data.ctypes.data
     return bitmap, data
 
 
 @arrow_array_adapter.register(pa.Date64Array)
 def _(pa_array: pa.Date64Array):
-    """ Creates a copy when re-interprets numpy array of integers
-     (number of milliseconds since 1970-01-01) as datetime64[ms] """
-    int64_array = pa_array.cast(pa.int64())
-    assert int64_array.buffers()[1].address == pa_array.buffers()[1].address, "got copied"
-    bitmap, int64_data = uniform_arrow_array_adapter(int64_array)
-    data = int64_data.astype(np.dtype("datetime64[ms]"))
-    # assert data.ctypes.data == int32_data.ctypes.data, "got copied"
-    return bitmap, data
+    return cast_64bit_date_arrow_to_numpy_array(pa_array, np.dtype("datetime64[ms]"))
 
 
-@arrow_array_adapter.register(pa.DoubleArray)
+@arrow_array_adapter.register(pa.lib.DoubleArray)
 @arrow_array_adapter.register(pa.Int32Array)
 @arrow_array_adapter.register(pa.Int64Array)
 def _(pa_array: Union[
-    pa.DoubleArray, pa.Int32Array, pa.Int64Array
+    pa.lib.DoubleArray, pa.Int32Array, pa.Int64Array
 ]):
     return uniform_arrow_array_adapter(pa_array)
 
@@ -83,4 +98,11 @@ def _(pa_array: pa.StructArray):
 
 @arrow_array_adapter.register(pa.StringArray)
 def _(pa_array: pa.StringArray):
-    return {}, create_str_array(pa_array)
+    return None, create_str_array(pa_array)
+
+
+@arrow_array_adapter.register(pa.TimestampArray)
+def _(pa_array: pa.TimestampArray):
+    timestamp_type: pa.TimestampType = pa_array.type
+    timestamp_unit = timestamp_type.unit
+    return cast_64bit_date_arrow_to_numpy_array(pa_array, np.dtype(f"datetime64[{timestamp_unit}]"))

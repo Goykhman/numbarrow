@@ -19,6 +19,7 @@ spark = (
     .appName("numba arrow runner")
     .config("spark.sql.execution.arrow.maxRecordsPerBatch", "1000")
     .config("spark.sql.execution.arrow.pyspark.enabled", "true")
+    .config("spark.sql.session.timeZone", "UTC")
     .getOrCreate()
 )
 
@@ -127,18 +128,13 @@ def main(data_dict: dict, bitmap_dict: dict, broadcasts: dict):
 
 
 def run_demo():
-    input_columns = ["size", "coordinate", "data", "id"]
     output_schema = StructType([
         StructField("id", StringType()),
         StructField("intensity", DoubleType())
     ])
     sc = spark.sparkContext
     broadcast = sc.broadcast({"rescale": 10 ** (-4)})
-    mapinarrow_func = make_mapinarrow_func(
-        main,
-        input_columns,
-        broadcast=broadcast
-    )
+    mapinarrow_func = make_mapinarrow_func(main, broadcasts=broadcast.value)
     df_in = join_data()
     df_out = df_in.mapInArrow(mapinarrow_func, output_schema)
     df_out.show()

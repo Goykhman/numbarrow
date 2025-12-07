@@ -23,8 +23,6 @@ def numpy_array_from_ptr_factory(dtype_):
 arrays_viewers = {
     np_type: numpy_array_from_ptr_factory(np_type) for np_type in [
         np.bool_,
-        np.dtype("datetime64[D]"),
-        np.dtype("datetime64[ms]"),
         np.float64,
         np.int32,
         np.int64,

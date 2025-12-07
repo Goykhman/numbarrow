@@ -1,5 +1,9 @@
 import numpy as np
 import pyarrow as pa
+
+from datetime import date, datetime
+from dateutil import tz
+
 from numbarrow.core.adapters import arrow_array_adapter
 from numbarrow.core.is_null import is_null
 
@@ -15,7 +19,6 @@ def test_arrow_array_adapter_1():
 
 
 def test_arrow_array_adapter_2():
-    from datetime import date
     d0 = date(2012, 7, 4)
     d1 = date(2012, 12, 6)
     d3 = date(2013, 6, 11)
@@ -43,7 +46,20 @@ def test_arrow_array_adapter_3():
     )
 
 
+def test_arrow_array_adapter_4():
+    d0 = datetime(2012, 7, 4, 10, 11, 6, tzinfo=tz.tzutc())
+    d1 = datetime(2012, 12, 6, 4, 6, 59, tzinfo=tz.tzutc())
+    a = pa.array([d0, d1, None], type=pa.timestamp("us", "UTC"))
+    bitmap, data = arrow_array_adapter(a)
+    assert data[0] == np.datetime64("2012-07-04T10:11:06.000000")
+    assert data[1] == np.datetime64("2012-12-06T04:06:59.000000")
+    assert (
+        not is_null(0, bitmap) and not is_null(1, bitmap) and is_null(2, bitmap)
+    )
+
+
 if __name__ == "__main__":
     test_arrow_array_adapter_1()
     test_arrow_array_adapter_2()
     test_arrow_array_adapter_3()
+    test_arrow_array_adapter_4()
