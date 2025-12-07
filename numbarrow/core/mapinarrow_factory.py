@@ -1,7 +1,6 @@
 import numpy as np
 import pyarrow as pa
 
-from pyspark.broadcast import Broadcast
 from typing import Callable, Dict, List, Optional
 
 from numbarrow.core.adapters import arrow_array_adapter
