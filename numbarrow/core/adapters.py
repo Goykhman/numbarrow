@@ -1,3 +1,14 @@
+"""
+Type-dispatched adapters that convert PyArrow arrays into NumPy arrays for use
+in Numba ``@njit`` compiled functions.
+
+Uses :func:`functools.singledispatch` to route each PyArrow array type
+(BooleanArray, Int32Array, Date32Array, etc.) to a handler that extracts the
+underlying data buffer as a NumPy array and the validity bitmap as a uint8 array.
+Where possible, data is viewed without copying; types that require layout changes
+(e.g. Date32 → datetime64[D]) produce a copy.
+"""
+
 import numpy as np
 import pyarrow as pa
 
