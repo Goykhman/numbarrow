@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath('..'))
 
 
 project = "numbarrow"
-copyright = "2025, Mikhail Goykhman"
+copyright = "2025-2026, Mikhail Goykhman"
 author = "Mikhail Goykhman"
 
 # -- General configuration ---------------------------------------------------

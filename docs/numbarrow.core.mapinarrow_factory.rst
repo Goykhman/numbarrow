@@ -23,7 +23,7 @@ Usage::
     udf = make_mapinarrow_func(my_func, broadcasts={"scale": 1.5})
     df_out = df_in.mapInArrow(udf, output_schema)
 
-See `test/demo_map_in_arrow.py <../test/demo_map_in_arrow.py>`_ for a complete runnable example.
+See `test/demo_map_in_arrow.py <https://github.com/Goykhman/numbarrow/blob/main/test/demo_map_in_arrow.py>`_ for a complete runnable example.
 
 Module
 ++++++

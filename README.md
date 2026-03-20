@@ -49,9 +49,9 @@ result = sum_non_null(data, bitmap)  # 80
 | `Date32Array` | `datetime64[D]` | Yes (int32 → int64) |
 | `Date64Array` | `datetime64[ms]` | No (view) |
 | `TimestampArray` | `datetime64[unit]` | No (view) |
-| `StringArray` | Fixed-width Unicode | Yes (repacking) |
-| `StructArray` | Dict of field arrays | Per-field |
-| `ListArray` (of structs) | Dict of field arrays | Per-field |
+| `StringArray` | Fixed-width Unicode (bitmap not returned) | Yes (repacking) |
+| `StructArray` | Tuple of two dicts: (bitmaps, data) per field | Per-field |
+| `ListArray` (of structs) | Tuple of two dicts: (bitmaps, data) per field | Per-field |
 
 ## PySpark Integration
 
