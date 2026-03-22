@@ -1,3 +1,12 @@
+"""
+Factory for PySpark ``mapInArrow`` UDF functions.
+
+Bridges PySpark's Arrow-based batch processing with Numba JIT-compiled functions
+by converting each :class:`pyarrow.RecordBatch` column through
+:func:`~numbarrow.core.adapters.arrow_array_adapter` before passing the data
+to a user-supplied computation function.
+"""
+
 import numpy as np
 import pyarrow as pa
 

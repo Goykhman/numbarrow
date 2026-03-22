@@ -1,3 +1,11 @@
+"""
+Utilities for extracting data from PyArrow array buffers as NumPy arrays.
+
+Handles uniform arrays (fixed-width elements), string arrays (variable-length
+with offset buffers), struct arrays, and list-of-struct arrays. Validity
+bitmaps are extracted as uint8 arrays for use with :func:`~numbarrow.core.is_null.is_null`.
+"""
+
 import ctypes
 import numpy as np
 import pyarrow as pa
@@ -23,6 +31,8 @@ def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
     """ Copy data from densely packed `pa.StringArray` into
      padded numpy array of the character sequence type determined
      by the length of the longest string. """
+    # Arrow StringArray layout: [validity_bitmap, offsets (int32), char_data (uint8)]
+    # offsets[i] and offsets[i+1] delimit the byte range of string i in char_data
     bitmap_buf, offsets_buf, data_buf = pa_str_array.buffers()
     data_p = data_buf.address
     offsets_p = offsets_buf.address
@@ -32,6 +42,8 @@ def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
     str_array_len = len(diffs)
     item_sz = diffs.max()
     str_array = np.empty((str_array_len,), dtype=f"|U{item_sz}")
+    # Copy each variable-length string from the packed Arrow buffer into a
+    # fixed-width NumPy Unicode array (padded to the longest string's length)
     for i in range(len(offsets_array) - 1):
         start = offsets_array[i]
         end = offsets_array[i + 1]
