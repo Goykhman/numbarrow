@@ -50,15 +50,17 @@ def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
     offsets_p = offsets_buf.address
     offsets_len = offsets_buf.size // np.dtype(np.int32).itemsize
     offsets_array = arrays_viewers[np.int32](offsets_p, offsets_len)
-    diffs = np.diff(offsets_array)
-    str_array_len = len(diffs)
+    offset = pa_str_array.offset
+    n = len(pa_str_array)
+    logical_offsets = offsets_array[offset:offset + n + 1]
+    diffs = np.diff(logical_offsets)
+    if len(diffs) == 0:
+        return np.empty((0,), dtype="|U1")
     item_sz = diffs.max()
-    str_array = np.empty((str_array_len,), dtype=f"|U{item_sz}")
-    # Copy each variable-length string from the packed Arrow buffer into a
-    # fixed-width NumPy Unicode array (padded to the longest string's length)
-    for i in range(len(offsets_array) - 1):
-        start = offsets_array[i]
-        end = offsets_array[i + 1]
+    str_array = np.empty((n,), dtype=f"|U{item_sz}")
+    for i in range(n):
+        start = logical_offsets[i]
+        end = logical_offsets[i + 1]
         s = (ctypes.c_char * int(end - start)).from_address(data_p + int(start)).value
         str_array[i] = s
     return str_array
