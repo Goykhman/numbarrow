@@ -108,6 +108,15 @@ class TestStringOffset:
         assert result[1] == "gamma"
         assert result[2] == "delta"
 
+    def test_string_sliced_with_nulls(self):
+        a = pa.array(["alpha", None, "gamma", None, "epsilon"], type=pa.string())
+        s = a[1:]  # [None, "gamma", None, "epsilon"]
+        result = create_str_array(s)
+        assert len(result) == 4
+        # Null strings become empty strings in the NumPy array
+        assert result[1] == "gamma"
+        assert result[3] == "epsilon"
+
     def test_string_with_embedded_nul(self):
         a = pa.array(["ab\x00cd", "ef\x00\x00gh", "plain"], type=pa.string())
         result = create_str_array(a)
@@ -130,6 +139,26 @@ class TestStructOffset:
         assert np.isclose(datas["ratio"][0], 2.2)
         assert np.isclose(datas["ratio"][1], 3.3)
         assert np.isclose(datas["ratio"][2], 4.4)
+
+    def test_struct_sliced_with_nulls(self):
+        indices = pa.array([10, None, 30, None, 50], type=pa.int32())
+        ratios = pa.array([1.1, 2.2, None, 4.4, None], type=pa.float64())
+        sa = pa.StructArray.from_arrays([indices, ratios], ["idx", "ratio"])
+        s = sa[1:]  # offset=1: [None/2.2, 30/None, None/4.4, 50/None]
+        bitmaps, datas = arrow_array_adapter(s)
+        assert len(datas["idx"]) == 4
+        assert is_null(0, bitmaps["idx"])
+        assert not is_null(1, bitmaps["idx"])
+        assert datas["idx"][1] == 30
+        assert is_null(2, bitmaps["idx"])
+        assert not is_null(3, bitmaps["idx"])
+        assert datas["idx"][3] == 50
+        assert not is_null(0, bitmaps["ratio"])
+        assert np.isclose(datas["ratio"][0], 2.2)
+        assert is_null(1, bitmaps["ratio"])
+        assert not is_null(2, bitmaps["ratio"])
+        assert np.isclose(datas["ratio"][2], 4.4)
+        assert is_null(3, bitmaps["ratio"])
 
 
 class TestBitmapOffset:
