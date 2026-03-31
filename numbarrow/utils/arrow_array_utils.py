@@ -24,14 +24,19 @@ def create_bitmap(bitmap_buf: Optional[pa.Buffer], offset: int = 0, length: int 
     bitmap_len = bitmap_buf.size
     bitmap_viewer = arrays_viewers[np.uint8]
     raw_bitmap = bitmap_viewer(bitmap_p, bitmap_len)
-    if offset == 0:
-        return raw_bitmap
-    # Re-pack bitmap bits starting from the offset bit position
-    num_bytes = (length + 7) // 8
     if length == 0:
-        return np.zeros(num_bytes, dtype=np.uint8)
-    bits = np.unpackbits(raw_bitmap, bitorder="little")
-    sliced_bits = bits[offset:offset + length]
+        return raw_bitmap[:0]
+    num_bytes = (length + 7) // 8
+    if offset == 0:
+        return raw_bitmap[:num_bytes]
+    # Re-pack bitmap bits starting from the offset bit position,
+    # only reading the byte range that covers [offset, offset+length)
+    first_byte = offset // 8
+    last_byte = (offset + length + 7) // 8
+    relevant = raw_bitmap[first_byte:last_byte]
+    bit_offset = offset % 8
+    bits = np.unpackbits(relevant, bitorder="little")
+    sliced_bits = bits[bit_offset:bit_offset + length]
     pad = (-length) % 8
     if pad:
         sliced_bits = np.pad(sliced_bits, (0, pad), mode="constant")
