@@ -108,6 +108,13 @@ class TestStringOffset:
         assert result[1] == "gamma"
         assert result[2] == "delta"
 
+    def test_string_with_embedded_nul(self):
+        a = pa.array(["ab\x00cd", "ef\x00\x00gh", "plain"], type=pa.string())
+        result = create_str_array(a)
+        assert result[0] == "ab\x00cd"
+        assert result[1] == "ef\x00\x00gh"
+        assert result[2] == "plain"
+
 
 class TestStructOffset:
     def test_struct_sliced(self):

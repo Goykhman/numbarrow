@@ -66,7 +66,8 @@ def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
     for i in range(n):
         start = logical_offsets[i]
         end = logical_offsets[i + 1]
-        s = (ctypes.c_char * int(end - start)).from_address(data_p + int(start)).value
+        length = int(end - start)
+        s = ctypes.string_at(data_p + int(start), length).decode("utf-8")
         str_array[i] = s
     return str_array
 
