@@ -131,7 +131,8 @@ class TestStructOffset:
         ratios = pa.array([1.1, 2.2, 3.3, 4.4], type=pa.float64())
         sa = pa.StructArray.from_arrays([indices, ratios], ["idx", "ratio"])
         s = sa[1:]  # offset=1
-        bitmaps, datas = arrow_array_adapter(s)
+        struct_bitmap, bitmaps, datas = arrow_array_adapter(s)
+        assert struct_bitmap is None
         assert len(datas["idx"]) == 3
         assert datas["idx"][0] == 20
         assert datas["idx"][1] == 30
@@ -145,7 +146,8 @@ class TestStructOffset:
         ratios = pa.array([1.1, 2.2, None, 4.4, None], type=pa.float64())
         sa = pa.StructArray.from_arrays([indices, ratios], ["idx", "ratio"])
         s = sa[1:]  # offset=1: [None/2.2, 30/None, None/4.4, 50/None]
-        bitmaps, datas = arrow_array_adapter(s)
+        struct_bitmap, bitmaps, datas = arrow_array_adapter(s)
+        assert struct_bitmap is None  # only field-level nulls
         assert len(datas["idx"]) == 4
         assert is_null(0, bitmaps["idx"])
         assert not is_null(1, bitmaps["idx"])

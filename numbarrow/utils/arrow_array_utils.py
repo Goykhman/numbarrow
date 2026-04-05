@@ -72,17 +72,28 @@ def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
     return str_array
 
 
-def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+# Two-layer struct nullability inspired by Awkward Array's BitMaskedArray(RecordArray)
+# design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
+
+
+def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[
+    Optional[np.ndarray], Dict[str, Optional[np.ndarray]], Dict[str, np.ndarray]
+]:
     """
     NumPy adapter of PyArrow `StructArray`.
 
-    Returns tuple of two dictionaries, the first dictionary maps names of
-    the structure fields to the contiguous bitmap arrays, the second maps
-    these names to the contiguous value arrays.
+    Returns a 3-tuple:
+    - struct-level validity bitmap (None if all rows valid)
+    - dict mapping field names to per-field validity bitmaps
+    - dict mapping field names to per-field value arrays
     """
     assert isinstance(struct_array, pa.StructArray)
     data_type: pa.StructType = struct_array.type
     assert isinstance(data_type, pa.StructType)
+    struct_bitmap_buf = struct_array.buffers()[0]
+    struct_bitmap = create_bitmap(
+        struct_bitmap_buf, struct_array.offset, len(struct_array)
+    )
     bitmaps = {}
     datas = {}
     for field_ind in range(len(data_type)):
@@ -92,10 +103,12 @@ def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[Dict[str, np
         bitmap, data = uniform_arrow_array_adapter(pa_array)
         bitmaps[field_name] = bitmap
         datas[field_name] = data
-    return bitmaps, datas
+    return struct_bitmap, bitmaps, datas
 
 
-def structured_list_array_adapter(list_array: pa.ListArray) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+def structured_list_array_adapter(list_array: pa.ListArray) -> Tuple[
+    Optional[np.ndarray], Dict[str, Optional[np.ndarray]], Dict[str, np.ndarray]
+]:
     """
     NumPy adapter of PyArrow array of same-length lists of structures.
 
@@ -103,9 +116,10 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> Tuple[Dict[str, n
     Each list is in turn of the same length, and each element of the list
     is of `pa.StructType`.
 
-    Returns tuple of two dictionaries, the first dictionary maps names of
-    the structure fields to the contiguous bitmap array, the second maps
-    these names to the contiguous values arrays.
+    Returns a 3-tuple of: the struct-level validity bitmap (or ``None`` if
+    all values are valid), a dictionary mapping field names to per-field
+    validity bitmaps (each ``None`` if all values are valid), and a
+    dictionary mapping field names to the contiguous field data arrays.
 
     Data is not copied as it is uniformly stored in a columnar format,
     that is, the underlying values are stored contiguously in a

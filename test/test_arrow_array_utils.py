@@ -18,7 +18,8 @@ def test_structured_array_adapter():
     indices = pa.array([14, 89, None, 105], type=pa.int32())
     ratios = pa.array([1.41, None, 1.72, 9.99], type=pa.float64())
     struct_array = pa.StructArray.from_arrays([indices, ratios], ["indices", "ratios"])
-    bitmap, data = structured_array_adapter(struct_array)
+    struct_bitmap, bitmap, data = structured_array_adapter(struct_array)
+    assert struct_bitmap is None  # no struct-level nulls in this test
     indices_bitmap = bitmap["indices"]
     indices_data = data["indices"]
     assert len(indices_bitmap) == 1, "length of `indices` is less than 9"
