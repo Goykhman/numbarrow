@@ -15,16 +15,33 @@ from typing import Dict, Optional, Tuple
 from numbarrow.utils.utils import arrays_viewers
 
 
-def create_bitmap(bitmap_buf: Optional[pa.Buffer]):
+def create_bitmap(bitmap_buf: Optional[pa.Buffer], offset: int = 0, length: int = 0):
     """ Create numpy array of uint8 type containing
-    bit-map of valid array entries """
+    bit-map of valid array entries, adjusted for array offset. """
     if bitmap_buf is None:
         return None
     bitmap_p = bitmap_buf.address
     bitmap_len = bitmap_buf.size
     bitmap_viewer = arrays_viewers[np.uint8]
-    bitmap = bitmap_viewer(bitmap_p, bitmap_len)
-    return bitmap
+    raw_bitmap = bitmap_viewer(bitmap_p, bitmap_len)
+    if length == 0:
+        return raw_bitmap[:0]
+    num_bytes = (length + 7) // 8
+    if offset == 0:
+        return raw_bitmap[:num_bytes]
+    # Re-pack bitmap bits starting from the offset bit position,
+    # only reading the byte range that covers [offset, offset+length)
+    first_byte = offset // 8
+    last_byte = (offset + length + 7) // 8
+    relevant = raw_bitmap[first_byte:last_byte]
+    bit_offset = offset % 8
+    bits = np.unpackbits(relevant, bitorder="little")
+    sliced_bits = bits[bit_offset:bit_offset + length]
+    pad = (-length) % 8
+    if pad:
+        sliced_bits = np.pad(sliced_bits, (0, pad), mode="constant")
+    result = np.packbits(sliced_bits, bitorder="little")
+    return result[:num_bytes]
 
 
 def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
@@ -38,31 +55,45 @@ def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
     offsets_p = offsets_buf.address
     offsets_len = offsets_buf.size // np.dtype(np.int32).itemsize
     offsets_array = arrays_viewers[np.int32](offsets_p, offsets_len)
-    diffs = np.diff(offsets_array)
-    str_array_len = len(diffs)
+    offset = pa_str_array.offset
+    n = len(pa_str_array)
+    logical_offsets = offsets_array[offset:offset + n + 1]
+    diffs = np.diff(logical_offsets)
+    if len(diffs) == 0:
+        return np.empty((0,), dtype="|U1")
     item_sz = diffs.max()
-    str_array = np.empty((str_array_len,), dtype=f"|U{item_sz}")
-    # Copy each variable-length string from the packed Arrow buffer into a
-    # fixed-width NumPy Unicode array (padded to the longest string's length)
-    for i in range(len(offsets_array) - 1):
-        start = offsets_array[i]
-        end = offsets_array[i + 1]
-        s = (ctypes.c_char * int(end - start)).from_address(data_p + int(start)).value
+    str_array = np.empty((n,), dtype=f"|U{item_sz}")
+    for i in range(n):
+        start = logical_offsets[i]
+        end = logical_offsets[i + 1]
+        length = int(end - start)
+        s = ctypes.string_at(data_p + int(start), length).decode("utf-8")
         str_array[i] = s
     return str_array
 
 
-def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+# Two-layer struct nullability inspired by Awkward Array's BitMaskedArray(RecordArray)
+# design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
+
+
+def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[
+    Optional[np.ndarray], Dict[str, Optional[np.ndarray]], Dict[str, np.ndarray]
+]:
     """
     NumPy adapter of PyArrow `StructArray`.
 
-    Returns tuple of two dictionaries, the first dictionary maps names of
-    the structure fields to the contiguous bitmap arrays, the second maps
-    these names to the contiguous value arrays.
+    Returns a 3-tuple:
+    - struct-level validity bitmap (None if all rows valid)
+    - dict mapping field names to per-field validity bitmaps
+    - dict mapping field names to per-field value arrays
     """
     assert isinstance(struct_array, pa.StructArray)
     data_type: pa.StructType = struct_array.type
     assert isinstance(data_type, pa.StructType)
+    struct_bitmap_buf = struct_array.buffers()[0]
+    struct_bitmap = create_bitmap(
+        struct_bitmap_buf, struct_array.offset, len(struct_array)
+    )
     bitmaps = {}
     datas = {}
     for field_ind in range(len(data_type)):
@@ -72,10 +103,12 @@ def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[Dict[str, np
         bitmap, data = uniform_arrow_array_adapter(pa_array)
         bitmaps[field_name] = bitmap
         datas[field_name] = data
-    return bitmaps, datas
+    return struct_bitmap, bitmaps, datas
 
 
-def structured_list_array_adapter(list_array: pa.ListArray) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+def structured_list_array_adapter(list_array: pa.ListArray) -> Tuple[
+    Optional[np.ndarray], Dict[str, Optional[np.ndarray]], Dict[str, np.ndarray]
+]:
     """
     NumPy adapter of PyArrow array of same-length lists of structures.
 
@@ -83,9 +116,10 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> Tuple[Dict[str, n
     Each list is in turn of the same length, and each element of the list
     is of `pa.StructType`.
 
-    Returns tuple of two dictionaries, the first dictionary maps names of
-    the structure fields to the contiguous bitmap array, the second maps
-    these names to the contiguous values arrays.
+    Returns a 3-tuple of: the struct-level validity bitmap (or ``None`` if
+    all values are valid), a dictionary mapping field names to per-field
+    validity bitmaps (each ``None`` if all values are valid), and a
+    dictionary mapping field names to the contiguous field data arrays.
 
     Data is not copied as it is uniformly stored in a columnar format,
     that is, the underlying values are stored contiguously in a
@@ -105,10 +139,9 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> Tuple[Optional[np.ndarray
     data_viewer = arrays_viewers.get(data_np_ty, None)
     if data_viewer is None:
         raise ValueError(f"There is no {data_np_ty} in `utils.arrays_viewers`. Add it?")
-    data_p = data_buf.address
-    data_buf_byte_size = data_buf.size
     data_item_byte_size = np.dtype(data_np_ty).itemsize
-    data_len = data_buf_byte_size // data_item_byte_size
+    data_p = data_buf.address + pa_array.offset * data_item_byte_size
+    data_len = len(pa_array)
     data = data_viewer(data_p, data_len)
-    bitmap = create_bitmap(bitmap_buf)
+    bitmap = create_bitmap(bitmap_buf, pa_array.offset, len(pa_array))
     return bitmap, data

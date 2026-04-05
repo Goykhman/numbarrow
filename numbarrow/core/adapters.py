@@ -15,7 +15,7 @@ import pyarrow as pa
 from functools import singledispatch
 from typing import Union
 
-from numbarrow.core.is_null import is_null
+from numbarrow.core.is_null import is_null, unpack_booleans
 from numbarrow.utils.arrow_array_utils import (
     create_bitmap, create_str_array, structured_array_adapter,
     structured_list_array_adapter, uniform_arrow_array_adapter
@@ -57,14 +57,12 @@ def _(pa_array: pa.BooleanArray):
     bitmap_buf, data_buf = pa_array.buffers()
     data_buf_p = data_buf.address
     num_of_bool_elements = len(pa_array)
-    num_of_bytes = num_of_bool_elements // 8
-    if num_of_bool_elements % 8 > 0:
-        num_of_bytes += 1
+    total_bits = pa_array.offset + num_of_bool_elements
+    num_of_bytes = (total_bits + 7) // 8
     packed_boolean_data_viewer = arrays_viewers[np.uint8]
     packed_boolean_data = packed_boolean_data_viewer(data_buf_p, num_of_bytes)
-    data_lst = [not is_null(i, packed_boolean_data) for i in range(num_of_bool_elements)]
-    data = np.array(data_lst, dtype=np.bool_)
-    bitmap = create_bitmap(bitmap_buf)
+    data = unpack_booleans(pa_array.offset, num_of_bool_elements, packed_boolean_data)
+    bitmap = create_bitmap(bitmap_buf, pa_array.offset, len(pa_array))
     return bitmap, data
 
 
