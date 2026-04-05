@@ -163,7 +163,7 @@ class TestStructOffset:
         assert is_null(3, bitmaps["ratio"])
 
     def test_struct_null_rows_sliced(self):
-        """Goykhman's example: struct array with null rows, sliced."""
+        """Struct array with null rows, sliced."""
         arr = pa.array([
             {"a": 1, "b": 10},
             None,
