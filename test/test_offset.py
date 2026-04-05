@@ -162,6 +162,55 @@ class TestStructOffset:
         assert np.isclose(datas["ratio"][2], 4.4)
         assert is_null(3, bitmaps["ratio"])
 
+    def test_struct_null_rows_sliced(self):
+        """Goykhman's example: struct array with null rows, sliced."""
+        arr = pa.array([
+            {"a": 1, "b": 10},
+            None,
+            {"a": 3, "b": 30},
+            None,
+            {"a": 5, "b": 50},
+        ])
+        s = arr[2:]  # [{"a": 3, "b": 30}, None, {"a": 5, "b": 50}], offset=2
+        struct_bitmap, bitmaps, datas = arrow_array_adapter(s)
+        assert struct_bitmap is not None
+        assert not is_null(0, struct_bitmap)  # {"a": 3, "b": 30} valid
+        assert is_null(1, struct_bitmap)      # None
+        assert not is_null(2, struct_bitmap)  # {"a": 5, "b": 50} valid
+        assert bitmaps["a"] is None  # no field-level nulls
+        assert bitmaps["b"] is None
+        assert datas["a"][0] == 3
+        assert datas["a"][2] == 5
+        assert datas["b"][0] == 30
+        assert datas["b"][2] == 50
+
+    def test_struct_both_null_layers_sliced(self):
+        """Both struct-level and field-level nulls with offset."""
+        arr = pa.array([
+            {"a": 1, "b": None},
+            None,
+            {"a": None, "b": 30},
+            None,
+            {"a": 5, "b": 50},
+        ])
+        s = arr[1:]  # [None, {"a": None, "b": 30}, None, {"a": 5, "b": 50}], offset=1
+        struct_bitmap, bitmaps, datas = arrow_array_adapter(s)
+        # Struct-level: rows 0 and 2 are null structs
+        assert struct_bitmap is not None
+        assert is_null(0, struct_bitmap)
+        assert not is_null(1, struct_bitmap)
+        assert is_null(2, struct_bitmap)
+        assert not is_null(3, struct_bitmap)
+        # Field-level: field "a" has a null at index 1 (the {"a": None, "b": 30} row)
+        assert bitmaps["a"] is not None
+        assert is_null(1, bitmaps["a"])
+        assert not is_null(3, bitmaps["a"])
+        # Two-layer check with is_null_struct
+        assert is_null_struct(0, struct_bitmap, bitmaps["a"])      # struct null
+        assert is_null_struct(1, struct_bitmap, bitmaps["a"])      # field null
+        assert is_null_struct(2, struct_bitmap, bitmaps["a"])      # struct null
+        assert not is_null_struct(3, struct_bitmap, bitmaps["a"])  # both valid
+
 
 class TestBitmapOffset:
     def test_bitmap_offset_across_byte_boundary(self):
