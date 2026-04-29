@@ -1,0 +1,192 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.adapters &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/numbarrow.core.adapters.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbarrow.core.is_null" href="numbarrow.core.is_null.html" />
+    <link rel="prev" title="numbarrow" href="modules.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbarrow</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbarrow.core.adapters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbarrow.core.adapters">Module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.adapters.arrow_array_adapter"><code class="docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array"><code class="docutils literal notranslate"><span class="pre">cast_64bit_date_arrow_to_numpy_array()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.is_null.html">numbarrow.core.is_null</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.mapinarrow_factory.html">numbarrow.core.mapinarrow_factory</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.configurations.html">numbarrow.core.configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.utils.html">numbarrow.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbarrow</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.adapters</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbarrow.core.adapters.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbarrow-core-adapters">
+<h1>numbarrow.core.adapters<a class="headerlink" href="#numbarrow-core-adapters" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Type-dispatched adapters that convert PyArrow arrays into NumPy arrays
+for use in Numba <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> compiled functions.</p>
+<p>Uses <code class="docutils literal notranslate"><span class="pre">functools.singledispatch</span></code> to route each PyArrow array type to a
+handler that extracts the underlying data buffer as a NumPy view (where
+possible) and the validity bitmap as a uint8 array.</p>
+<p>Supported types:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BooleanArray</span></code> (requires copy due to bit-packed layout)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Int32Array</span></code>, <code class="docutils literal notranslate"><span class="pre">Int64Array</span></code>, <code class="docutils literal notranslate"><span class="pre">DoubleArray</span></code> (zero-copy view)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Date32Array</span></code> (copy: int32 days → datetime64[D])</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Date64Array</span></code> (zero-copy view as datetime64[ms])</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TimestampArray</span></code> (zero-copy view as datetime64[unit])</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">StringArray</span></code> (copy into fixed-width NumPy Unicode array; bitmap is not returned)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">StructArray</span></code> (returns tuple of two dicts: bitmaps and data, keyed by field name)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ListArray</span></code> (delegates to StructArray adapter for list-of-struct)</p></li>
+</ul>
+</section>
+<section id="module-numbarrow.core.adapters">
+<span id="module"></span><h2>Module<a class="headerlink" href="#module-numbarrow.core.adapters" title="Link to this heading"></a></h2>
+<p>Type-dispatched adapters that convert PyArrow arrays into NumPy arrays for use
+in Numba <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> compiled functions.</p>
+<p>Uses <code class="xref py py-func docutils literal notranslate"><span class="pre">functools.singledispatch()</span></code> to route each PyArrow array type
+(BooleanArray, Int32Array, Date32Array, etc.) to a handler that extracts the
+underlying data buffer as a NumPy array and the validity bitmap as a uint8 array.
+Where possible, data is viewed without copying; types that require layout changes
+(e.g. Date32 → datetime64[D]) produce a copy.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.core.adapters.arrow_array_adapter">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Array</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/core/adapters.html#arrow_array_adapter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.adapters.arrow_array_adapter" title="Link to this definition"></a></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">BooleanArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Date32Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Date64Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DoubleArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int32Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int64Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DoubleArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int32Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int64Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DoubleArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int32Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int64Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ListArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StructArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StringArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TimestampArray</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>Dispatcher for PyArrow array adapters of various types.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">cast_64bit_date_arrow_to_numpy_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Array</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">np_dtype</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dtype</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/core/adapters.html#cast_64bit_date_arrow_to_numpy_array"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array" title="Link to this definition"></a></dt>
+<dd><p>Can be used to cast PyArrow arrays of date types that are represented by
+64-bit integers to numpy arrays of various date types (np.datetime64[…],
+which are always represented  by 64-bit integers whose meaning is determined
+by the precision, such as, ‘s’, ‘ms’, ‘us’).</p>
+<p>Since underlying data layout of both arrays in int64, a copy is avoided,</p>
+<p>The associated bitmap (if any) is also returned.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modules.html" class="btn btn-neutral float-left" title="numbarrow" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbarrow.core.is_null.html" class="btn btn-neutral float-right" title="numbarrow.core.is_null" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,164 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.utils.utils &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/utils/utils.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbarrow</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.utils.utils</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.utils.utils</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Low-level pointer utilities for zero-copy access to Arrow memory buffers.</span>
+
+<span class="sd">Provides Numba-compatible functions that reinterpret a raw memory address</span>
+<span class="sd">(obtained from :attr:`pyarrow.Buffer.address`) as a typed NumPy array, enabling</span>
+<span class="sd">``@njit`` code to read Arrow buffer data directly without copying.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">carray</span><span class="p">,</span> <span class="n">from_dtype</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">intp</span><span class="p">,</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">Array</span><span class="p">,</span> <span class="n">voidptr</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">default_jit_options</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_ptr_as_int_to_voidptr</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">arg_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert an integer memory address to a Numba ``voidptr``.</span>
+
+<span class="sd">    This is a Numba intrinsic (compiler-level function) that emits an</span>
+<span class="sd">    LLVM ``inttoptr`` instruction, converting a Python int holding a</span>
+<span class="sd">    memory address into a void pointer that :func:`numba.carray` can</span>
+<span class="sd">    dereference.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">context</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">(</span><span class="n">voidptr</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">voidptr</span><span class="p">(</span><span class="n">arg_type</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="numpy_array_from_ptr_factory">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.utils.numpy_array_from_ptr_factory">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">numpy_array_from_ptr_factory</span><span class="p">(</span><span class="n">dtype_</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a JIT-compiled function that views memory at a given address as a NumPy array.</span>
+
+<span class="sd">    Returns an ``@njit`` function with signature ``(ptr_as_int, sz) -&gt; ndarray``</span>
+<span class="sd">    that uses :func:`numba.carray` to reinterpret *sz* elements starting at</span>
+<span class="sd">    address *ptr_as_int* as a contiguous C-order NumPy array of *dtype_*.</span>
+<span class="sd">    No data is copied — the returned array is a view over the original memory.</span>
+
+<span class="sd">    :param dtype_: NumPy dtype for the resulting array (e.g. ``np.int32``)</span>
+<span class="sd">    :returns: JIT-compiled function ``(int, int) -&gt; np.ndarray``</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="n">Array</span><span class="p">(</span><span class="n">from_dtype</span><span class="p">(</span><span class="n">dtype_</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;C&quot;</span><span class="p">)(</span><span class="n">intp</span><span class="p">,</span> <span class="n">int64</span><span class="p">),</span> <span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">ptr_as_int</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">sz</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="c1"># carray interprets raw memory at ptr as a typed NumPy array (zero-copy view)</span>
+        <span class="k">return</span> <span class="n">carray</span><span class="p">(</span><span class="n">_ptr_as_int_to_voidptr</span><span class="p">(</span><span class="n">ptr_as_int</span><span class="p">),</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">sz</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype_</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<span class="c1"># Pre-built viewers for common NumPy types. Each entry maps a dtype to a</span>
+<span class="c1"># JIT-compiled function that views a memory address as an array of that type.</span>
+<span class="n">arrays_viewers</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">np_type</span><span class="p">:</span> <span class="n">numpy_array_from_ptr_factory</span><span class="p">(</span><span class="n">np_type</span><span class="p">)</span> <span class="k">for</span> <span class="n">np_type</span> <span class="ow">in</span> <span class="p">[</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">,</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">uint8</span>
+    <span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

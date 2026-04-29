@@ -1,0 +1,185 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.is_null &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/core/is_null.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbarrow</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.is_null</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.core.is_null</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Null detection for Apache Arrow validity bitmaps.</span>
+
+<span class="sd">Arrow uses a packed bitmap to track which elements in an array are valid (non-null).</span>
+<span class="sd">Each bit corresponds to one element: bit=1 means valid, bit=0 means null.</span>
+<span class="sd">Bits are packed LSB-first into uint8 bytes — element *i* lives at byte ``i // 8``,</span>
+<span class="sd">bit position ``i % 8`` within that byte.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">boolean</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">Array</span><span class="p">,</span> <span class="n">uint8</span><span class="p">,</span> <span class="n">bool_</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">default_jit_options</span>
+
+
+<div class="viewcode-block" id="is_null">
+<a class="viewcode-back" href="../../../numbarrow.core.is_null.html#numbarrow.core.is_null.is_null">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="n">boolean</span><span class="p">(</span><span class="n">int64</span><span class="p">,</span> <span class="n">Array</span><span class="p">(</span><span class="n">uint8</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;C&quot;</span><span class="p">)),</span> <span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">is_null</span><span class="p">(</span><span class="n">index_</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bitmap</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Check whether element *index_* is null according to *bitmap*.</span>
+
+<span class="sd">    Arrow validity bitmaps store one bit per element, packed LSB-first into</span>
+<span class="sd">    uint8 bytes. A set bit (1) means valid; a cleared bit (0) means null.</span>
+
+<span class="sd">    :param index_: zero-based element index</span>
+<span class="sd">    :param bitmap: uint8 array containing the packed validity bitmap</span>
+<span class="sd">    :returns: True if the element is null (bit is 0), False if valid (bit is 1)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Locate the byte containing the bit for this element</span>
+    <span class="n">byte_for_index</span> <span class="o">=</span> <span class="n">bitmap</span><span class="p">[</span><span class="n">index_</span> <span class="o">//</span> <span class="mi">8</span><span class="p">]</span>
+    <span class="c1"># Isolate the specific bit within that byte (LSB-first order)</span>
+    <span class="n">bit_position_in_byte</span> <span class="o">=</span> <span class="n">index_</span> <span class="o">%</span> <span class="mi">8</span>
+    <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="n">byte_for_index</span> <span class="o">&gt;&gt;</span> <span class="n">bit_position_in_byte</span><span class="p">)</span> <span class="o">%</span> <span class="mi">2</span></div>
+
+
+
+<div class="viewcode-block" id="unpack_booleans">
+<a class="viewcode-back" href="../../../numbarrow.core.is_null.html#numbarrow.core.is_null.unpack_booleans">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="n">Array</span><span class="p">(</span><span class="n">bool_</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;C&quot;</span><span class="p">)(</span><span class="n">int64</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">Array</span><span class="p">(</span><span class="n">uint8</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;C&quot;</span><span class="p">)),</span> <span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">unpack_booleans</span><span class="p">(</span><span class="n">offset</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">length</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">packed_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Unpack bit-packed boolean data into a boolean array.</span>
+
+<span class="sd">    :param offset: bit offset into packed_data to start reading</span>
+<span class="sd">    :param length: number of boolean values to extract</span>
+<span class="sd">    :param packed_data: uint8 array containing LSB-first packed bits</span>
+<span class="sd">    :returns: boolean array of *length* elements</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">length</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">length</span><span class="p">):</span>
+        <span class="n">byte_idx</span> <span class="o">=</span> <span class="p">(</span><span class="n">offset</span> <span class="o">+</span> <span class="n">i</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+        <span class="n">bit_idx</span> <span class="o">=</span> <span class="p">(</span><span class="n">offset</span> <span class="o">+</span> <span class="n">i</span><span class="p">)</span> <span class="o">%</span> <span class="mi">8</span>
+        <span class="n">result</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">packed_data</span><span class="p">[</span><span class="n">byte_idx</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="n">bit_idx</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">result</span></div>
+
+
+
+<span class="c1"># Two-layer struct nullability inspired by Awkward Array&#39;s BitMaskedArray(RecordArray)</span>
+<span class="c1"># design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html</span>
+
+
+<div class="viewcode-block" id="is_null_struct">
+<a class="viewcode-back" href="../../../numbarrow.core.is_null.html#numbarrow.core.is_null.is_null_struct">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">is_null_struct</span><span class="p">(</span><span class="n">index_</span><span class="p">,</span> <span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">field_bitmap</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Check whether a struct field value is null at either the struct or field layer.</span>
+
+<span class="sd">    Arrow StructArrays carry a validity bitmap for the struct itself (is this</span>
+<span class="sd">    entire row null?) independent of each child field&#39;s bitmap (is this</span>
+<span class="sd">    particular field null within a non-null row?).  A value is null if either</span>
+<span class="sd">    layer marks it as null.</span>
+
+<span class="sd">    :param index_: zero-based element index</span>
+<span class="sd">    :param struct_bitmap: uint8 packed bitmap for struct-level validity, or None</span>
+<span class="sd">    :param field_bitmap: uint8 packed bitmap for field-level validity, or None</span>
+<span class="sd">    :returns: True if null at either layer</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">struct_bitmap</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">is_null</span><span class="p">(</span><span class="n">index_</span><span class="p">,</span> <span class="n">struct_bitmap</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">field_bitmap</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">is_null</span><span class="p">(</span><span class="n">index_</span><span class="p">,</span> <span class="n">field_bitmap</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="kc">False</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

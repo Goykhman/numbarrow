@@ -1,0 +1,264 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.utils.arrow_array_utils &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/utils/arrow_array_utils.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbarrow</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.utils.arrow_array_utils</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.utils.arrow_array_utils</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Utilities for extracting data from PyArrow array buffers as NumPy arrays.</span>
+
+<span class="sd">Handles uniform arrays (fixed-width elements), string arrays (variable-length</span>
+<span class="sd">with offset buffers), struct arrays, and list-of-struct arrays. Validity</span>
+<span class="sd">bitmaps are extracted as uint8 arrays for use with :func:`~numbarrow.core.is_null.is_null`.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pa</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.utils.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">arrays_viewers</span>
+
+
+<div class="viewcode-block" id="create_bitmap">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.create_bitmap">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">pa</span><span class="o">.</span><span class="n">Buffer</span><span class="p">],</span> <span class="n">offset</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">length</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot; Create numpy array of uint8 type containing</span>
+<span class="sd">    bit-map of valid array entries, adjusted for array offset. &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">bitmap_buf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">bitmap_p</span> <span class="o">=</span> <span class="n">bitmap_buf</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">bitmap_len</span> <span class="o">=</span> <span class="n">bitmap_buf</span><span class="o">.</span><span class="n">size</span>
+    <span class="n">bitmap_viewer</span> <span class="o">=</span> <span class="n">arrays_viewers</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">]</span>
+    <span class="n">raw_bitmap</span> <span class="o">=</span> <span class="n">bitmap_viewer</span><span class="p">(</span><span class="n">bitmap_p</span><span class="p">,</span> <span class="n">bitmap_len</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">length</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">raw_bitmap</span><span class="p">[:</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">num_bytes</span> <span class="o">=</span> <span class="p">(</span><span class="n">length</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+    <span class="k">if</span> <span class="n">offset</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">raw_bitmap</span><span class="p">[:</span><span class="n">num_bytes</span><span class="p">]</span>
+    <span class="c1"># Re-pack bitmap bits starting from the offset bit position,</span>
+    <span class="c1"># only reading the byte range that covers [offset, offset+length)</span>
+    <span class="n">first_byte</span> <span class="o">=</span> <span class="n">offset</span> <span class="o">//</span> <span class="mi">8</span>
+    <span class="n">last_byte</span> <span class="o">=</span> <span class="p">(</span><span class="n">offset</span> <span class="o">+</span> <span class="n">length</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+    <span class="n">relevant</span> <span class="o">=</span> <span class="n">raw_bitmap</span><span class="p">[</span><span class="n">first_byte</span><span class="p">:</span><span class="n">last_byte</span><span class="p">]</span>
+    <span class="n">bit_offset</span> <span class="o">=</span> <span class="n">offset</span> <span class="o">%</span> <span class="mi">8</span>
+    <span class="n">bits</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unpackbits</span><span class="p">(</span><span class="n">relevant</span><span class="p">,</span> <span class="n">bitorder</span><span class="o">=</span><span class="s2">&quot;little&quot;</span><span class="p">)</span>
+    <span class="n">sliced_bits</span> <span class="o">=</span> <span class="n">bits</span><span class="p">[</span><span class="n">bit_offset</span><span class="p">:</span><span class="n">bit_offset</span> <span class="o">+</span> <span class="n">length</span><span class="p">]</span>
+    <span class="n">pad</span> <span class="o">=</span> <span class="p">(</span><span class="o">-</span><span class="n">length</span><span class="p">)</span> <span class="o">%</span> <span class="mi">8</span>
+    <span class="k">if</span> <span class="n">pad</span><span class="p">:</span>
+        <span class="n">sliced_bits</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">pad</span><span class="p">(</span><span class="n">sliced_bits</span><span class="p">,</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">pad</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;constant&quot;</span><span class="p">)</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">packbits</span><span class="p">(</span><span class="n">sliced_bits</span><span class="p">,</span> <span class="n">bitorder</span><span class="o">=</span><span class="s2">&quot;little&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">result</span><span class="p">[:</span><span class="n">num_bytes</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="create_str_array">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.create_str_array">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_str_array</span><span class="p">(</span><span class="n">pa_str_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StringArray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot; Copy data from densely packed `pa.StringArray` into</span>
+<span class="sd">     padded numpy array of the character sequence type determined</span>
+<span class="sd">     by the length of the longest string. &quot;&quot;&quot;</span>
+    <span class="c1"># Arrow StringArray layout: [validity_bitmap, offsets (int32), char_data (uint8)]</span>
+    <span class="c1"># offsets[i] and offsets[i+1] delimit the byte range of string i in char_data</span>
+    <span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">offsets_buf</span><span class="p">,</span> <span class="n">data_buf</span> <span class="o">=</span> <span class="n">pa_str_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()</span>
+    <span class="n">data_p</span> <span class="o">=</span> <span class="n">data_buf</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">offsets_p</span> <span class="o">=</span> <span class="n">offsets_buf</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">offsets_len</span> <span class="o">=</span> <span class="n">offsets_buf</span><span class="o">.</span><span class="n">size</span> <span class="o">//</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span><span class="o">.</span><span class="n">itemsize</span>
+    <span class="n">offsets_array</span> <span class="o">=</span> <span class="n">arrays_viewers</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">](</span><span class="n">offsets_p</span><span class="p">,</span> <span class="n">offsets_len</span><span class="p">)</span>
+    <span class="n">offset</span> <span class="o">=</span> <span class="n">pa_str_array</span><span class="o">.</span><span class="n">offset</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_str_array</span><span class="p">)</span>
+    <span class="n">logical_offsets</span> <span class="o">=</span> <span class="n">offsets_array</span><span class="p">[</span><span class="n">offset</span><span class="p">:</span><span class="n">offset</span> <span class="o">+</span> <span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+    <span class="n">diffs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">logical_offsets</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">diffs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="mi">0</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;|U1&quot;</span><span class="p">)</span>
+    <span class="n">item_sz</span> <span class="o">=</span> <span class="n">diffs</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+    <span class="n">str_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="n">n</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;|U</span><span class="si">{</span><span class="n">item_sz</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">logical_offsets</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">logical_offsets</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+        <span class="n">length</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">end</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">string_at</span><span class="p">(</span><span class="n">data_p</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">start</span><span class="p">),</span> <span class="n">length</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+        <span class="n">str_array</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">s</span>
+    <span class="k">return</span> <span class="n">str_array</span></div>
+
+
+
+<span class="c1"># Two-layer struct nullability inspired by Awkward Array&#39;s BitMaskedArray(RecordArray)</span>
+<span class="c1"># design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html</span>
+
+
+<div class="viewcode-block" id="structured_array_adapter">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.structured_array_adapter">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">structured_array_adapter</span><span class="p">(</span><span class="n">struct_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span>
+    <span class="n">Optional</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">],</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Optional</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]],</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span>
+<span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    NumPy adapter of PyArrow `StructArray`.</span>
+
+<span class="sd">    Returns a 3-tuple:</span>
+<span class="sd">    - struct-level validity bitmap (None if all rows valid)</span>
+<span class="sd">    - dict mapping field names to per-field validity bitmaps</span>
+<span class="sd">    - dict mapping field names to per-field value arrays</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">struct_array</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span><span class="p">)</span>
+    <span class="n">data_type</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructType</span> <span class="o">=</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">type</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data_type</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructType</span><span class="p">)</span>
+    <span class="n">struct_bitmap_buf</span> <span class="o">=</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">struct_bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span>
+        <span class="n">struct_bitmap_buf</span><span class="p">,</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">struct_array</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">bitmaps</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">datas</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">field_ind</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">data_type</span><span class="p">)):</span>
+        <span class="n">field</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Field</span> <span class="o">=</span> <span class="n">data_type</span><span class="p">[</span><span class="n">field_ind</span><span class="p">]</span>
+        <span class="n">field_name</span> <span class="o">=</span> <span class="n">field</span><span class="o">.</span><span class="n">name</span>
+        <span class="n">pa_array</span> <span class="o">=</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">field_name</span><span class="p">)</span>
+        <span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">uniform_arrow_array_adapter</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+        <span class="n">bitmaps</span><span class="p">[</span><span class="n">field_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">bitmap</span>
+        <span class="n">datas</span><span class="p">[</span><span class="n">field_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">data</span>
+    <span class="k">return</span> <span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">bitmaps</span><span class="p">,</span> <span class="n">datas</span></div>
+
+
+
+<div class="viewcode-block" id="structured_list_array_adapter">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.structured_list_array_adapter">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">structured_list_array_adapter</span><span class="p">(</span><span class="n">list_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">ListArray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span>
+    <span class="n">Optional</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">],</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Optional</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]],</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span>
+<span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    NumPy adapter of PyArrow array of same-length lists of structures.</span>
+
+<span class="sd">    :param list_array: PyArrow array with elements being of `pa.ListType`.</span>
+<span class="sd">    Each list is in turn of the same length, and each element of the list</span>
+<span class="sd">    is of `pa.StructType`.</span>
+
+<span class="sd">    Returns a 3-tuple of: the struct-level validity bitmap (or ``None`` if</span>
+<span class="sd">    all values are valid), a dictionary mapping field names to per-field</span>
+<span class="sd">    validity bitmaps (each ``None`` if all values are valid), and a</span>
+<span class="sd">    dictionary mapping field names to the contiguous field data arrays.</span>
+
+<span class="sd">    Data is not copied as it is uniformly stored in a columnar format,</span>
+<span class="sd">    that is, the underlying values are stored contiguously in a</span>
+<span class="sd">    `pa.StructArray`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">list_array</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">ListArray</span><span class="p">)</span>
+    <span class="n">data_values</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span> <span class="o">=</span> <span class="n">list_array</span><span class="o">.</span><span class="n">values</span>
+    <span class="k">return</span> <span class="n">structured_array_adapter</span><span class="p">(</span><span class="n">data_values</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="uniform_arrow_array_adapter">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.uniform_arrow_array_adapter">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">uniform_arrow_array_adapter</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">],</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot; NumPy adapter for PyArrow arrays with uniformly sized elements.</span>
+<span class="sd">     Returns views over bitmap and data contiguous memory regions as numpy arrays. &quot;&quot;&quot;</span>
+    <span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">data_buf</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()</span>
+    <span class="n">data_arrow_ty</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">type</span>
+    <span class="n">data_np_ty</span> <span class="o">=</span> <span class="n">data_arrow_ty</span><span class="o">.</span><span class="n">to_pandas_dtype</span><span class="p">()</span>
+    <span class="n">data_viewer</span> <span class="o">=</span> <span class="n">arrays_viewers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">data_np_ty</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">data_viewer</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;There is no </span><span class="si">{</span><span class="n">data_np_ty</span><span class="si">}</span><span class="s2"> in `utils.arrays_viewers`. Add it?&quot;</span><span class="p">)</span>
+    <span class="n">data_item_byte_size</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">data_np_ty</span><span class="p">)</span><span class="o">.</span><span class="n">itemsize</span>
+    <span class="n">data_p</span> <span class="o">=</span> <span class="n">data_buf</span><span class="o">.</span><span class="n">address</span> <span class="o">+</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span> <span class="o">*</span> <span class="n">data_item_byte_size</span>
+    <span class="n">data_len</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">data_viewer</span><span class="p">(</span><span class="n">data_p</span><span class="p">,</span> <span class="n">data_len</span><span class="p">)</span>
+    <span class="n">bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
