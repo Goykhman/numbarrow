@@ -17,7 +17,7 @@ requires-python = ">=3.10"
 license = {file = "LICENSE"}
 keywords = ["pyarrow", "pyspark", "numba", "numpy"]
 authors = [
-  {name = "Mikhail Goykhman"}
+  {name = "NumbArrow GitHub Repository Contributors"}
 ]
 readme = "README.md"
 
