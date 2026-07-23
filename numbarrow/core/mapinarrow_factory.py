@@ -42,7 +42,8 @@ def make_mapinarrow_func(
             input_columns_ = input_columns if input_columns is not None else batch.schema.names
             for col in input_columns_:
                 col_pa: pa.Array = batch.column(col)
-                col_bitmap, col_data = arrow_array_adapter(col_pa)
+                vals = arrow_array_adapter(col_pa)
+                *_, col_bitmap, col_data = vals
                 col_bitmap = col_bitmap if isinstance(col_bitmap, dict) else {} if col_bitmap is None else {col: col_bitmap}  # noqa: E501
                 col_data = col_data if isinstance(col_data, dict) else {col: col_data}
                 bitmap_dict = {**bitmap_dict, **col_bitmap}
