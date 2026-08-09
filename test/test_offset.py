@@ -102,7 +102,8 @@ class TestStringOffset:
     def test_string_sliced(self):
         a = pa.array(["alpha", "beta", "gamma", "delta"], type=pa.string())
         s = a[1:]
-        result = create_str_array(s)
+        bitmap, result = create_str_array(s)
+        assert bitmap is None
         assert len(result) == 3
         assert result[0] == "beta"
         assert result[1] == "gamma"
@@ -111,7 +112,8 @@ class TestStringOffset:
     def test_string_sliced_with_nulls(self):
         a = pa.array(["alpha", None, "gamma", None, "epsilon"], type=pa.string())
         s = a[1:]  # [None, "gamma", None, "epsilon"]
-        result = create_str_array(s)
+        bitmap, result = create_str_array(s)
+        assert is_null(0, bitmap) and is_null(2, bitmap)
         assert len(result) == 4
         # Null strings become empty strings in the NumPy array
         assert result[1] == "gamma"
@@ -119,7 +121,8 @@ class TestStringOffset:
 
     def test_string_with_embedded_nul(self):
         a = pa.array(["ab\x00cd", "ef\x00\x00gh", "plain"], type=pa.string())
-        result = create_str_array(a)
+        bitmap, result = create_str_array(a)
+        assert bitmap is None
         assert result[0] == "ab\x00cd"
         assert result[1] == "ef\x00\x00gh"
         assert result[2] == "plain"

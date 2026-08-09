@@ -9,8 +9,9 @@ from numbarrow.core.is_null import is_null
 
 def test_create_str_array():
     pa_a = pa.array(["first", "second", None, "third", "fourth element", "f"], type=pa.string())
-    np_a = create_str_array(pa_a)
+    bitmap, np_a = create_str_array(pa_a)
     ref = ["first", "second", "", "third", "fourth element", "f"]
+    assert is_null(2, bitmap)
     assert all([np_a_e == ref_e for np_a_e, ref_e in zip(np_a, ref)])
 
 

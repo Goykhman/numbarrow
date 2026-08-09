@@ -2,8 +2,22 @@
 Default configuration options for Numba JIT compilation used throughout numbarrow.
 """
 
-# Passed as **kwargs to @njit decorators. "cache=True" persists compiled
-# functions to disk so subsequent imports skip recompilation.
-default_jit_options = {
-    "cache": True
-}
+import os
+import json
+
+
+def get_jit_options():
+    """
+    E.g., export NUMBARROW_JIT_OPTIONS='{"cache": false}'
+    """
+    as_str = os.environ.get("NUMBARROW_JIT_OPTIONS")
+    if as_str is None:
+        return {"cache": True}
+    try:
+        as_json = json.loads(as_str)
+        return as_json
+    except json.JSONDecodeError:
+        raise ValueError("NUMBARROW_JIT_OPTIONS must be valid JSON")
+
+
+jit_options = get_jit_options()

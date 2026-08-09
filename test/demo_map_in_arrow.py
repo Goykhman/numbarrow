@@ -9,7 +9,7 @@ from pyspark.sql.types import (
 )
 
 from numbarrow.core.is_null import is_null
-from numbarrow.core.configurations import default_jit_options
+from numbarrow.core.configurations import jit_options
 from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
 
 
@@ -93,7 +93,7 @@ calculate_sig = calculate_ret_ty(
 )
 
 
-@njit(calculate_sig, **default_jit_options)
+@njit(calculate_sig, **jit_options)
 def calculate(
     size_a: np.ndarray,
     coordinate_a: np.ndarray,

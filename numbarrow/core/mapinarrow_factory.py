@@ -10,24 +10,22 @@ to a user-supplied computation function.
 import numpy as np
 import pyarrow as pa
 
-from typing import Callable, Dict, List, Optional
-
 from numbarrow.core.adapters import arrow_array_adapter
 
 
 def make_mapinarrow_func(
-    main_func: Callable,
-    input_columns: Optional[List[str]] = None,
-    broadcasts: Optional[Dict] = None
+    main_func: callable,
+    input_columns: list[str] | None = None,
+    broadcasts: dict | None = None
 ):
     """
     Creates a function that can be given as an argument to `mapInArrow`
 
     :param main_func: should have the following signature:
-        - `data_dict: Dict[str, np.ndarray]`, values are arrays of data of various supported types
-        - `bitmap_dict: Dict[str, np.ndarray]`, values are uint8 aligned arrays of bitmap data
-        - `broadcasts` Optional[Dict[str, Any]]
-        returns: Dict[str, np.ndarray] that will be used to create PyArrow `RecordBatch`
+        - `data_dict: dict[str, np.ndarray]`, values are arrays of data of various supported types
+        - `bitmap_dict: dict[str, np.ndarray]`, values are uint8 aligned arrays of bitmap data
+        - `broadcasts` Optional[dict[str, Any]]
+        returns: dict[str, np.ndarray] that will be used to create PyArrow `RecordBatch`
     :param input_columns: optional list of column names that will be expected to be needed for in
     `data_dict` for the calculation done by `main_func`. When not given, all columns in the iterated
      over PySpark DataFrame will be used.
@@ -37,8 +35,8 @@ def make_mapinarrow_func(
 
     def _(iterator):
         for batch in iterator:
-            data_dict: Dict[str, np.ndarray] = {}
-            bitmap_dict: Dict[str, np.ndarray] = {}
+            data_dict: dict[str, np.ndarray] = {}
+            bitmap_dict: dict[str, np.ndarray] = {}
             input_columns_ = input_columns if input_columns is not None else batch.schema.names
             for col in input_columns_:
                 col_pa: pa.Array = batch.column(col)

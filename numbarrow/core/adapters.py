@@ -13,9 +13,8 @@ import numpy as np
 import pyarrow as pa
 
 from functools import singledispatch
-from typing import Union
 
-from numbarrow.core.is_null import is_null, unpack_booleans
+from numbarrow.core.is_null import unpack_booleans
 from numbarrow.utils.arrow_array_utils import (
     create_bitmap, create_str_array, structured_array_adapter,
     structured_list_array_adapter, uniform_arrow_array_adapter
@@ -89,9 +88,7 @@ def _(pa_array: pa.Date64Array):
 @arrow_array_adapter.register(pa.lib.DoubleArray)
 @arrow_array_adapter.register(pa.Int32Array)
 @arrow_array_adapter.register(pa.Int64Array)
-def _(pa_array: Union[
-    pa.lib.DoubleArray, pa.Int32Array, pa.Int64Array
-]):
+def _(pa_array: pa.lib.DoubleArray | pa.Int32Array | pa.Int64Array):
     return uniform_arrow_array_adapter(pa_array)
 
 
@@ -107,7 +104,7 @@ def _(pa_array: pa.StructArray):
 
 @arrow_array_adapter.register(pa.StringArray)
 def _(pa_array: pa.StringArray):
-    return None, create_str_array(pa_array)
+    return create_str_array(pa_array)
 
 
 @arrow_array_adapter.register(pa.TimestampArray)

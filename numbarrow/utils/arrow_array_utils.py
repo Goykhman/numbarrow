@@ -10,12 +10,10 @@ import ctypes
 import numpy as np
 import pyarrow as pa
 
-from typing import Dict, Optional, Tuple
-
 from numbarrow.utils.utils import arrays_viewers
 
 
-def create_bitmap(bitmap_buf: Optional[pa.Buffer], offset: int = 0, length: int = 0):
+def create_bitmap(bitmap_buf: pa.Buffer | None, offset: int = 0, length: int = 0):
     """ Create numpy array of uint8 type containing
     bit-map of valid array entries, adjusted for array offset. """
     if bitmap_buf is None:
@@ -44,7 +42,7 @@ def create_bitmap(bitmap_buf: Optional[pa.Buffer], offset: int = 0, length: int 
     return result[:num_bytes]
 
 
-def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
+def create_str_array(pa_str_array: pa.StringArray) -> tuple[np.ndarray | None, np.ndarray]:
     """ Copy data from densely packed `pa.StringArray` into
      padded numpy array of the character sequence type determined
      by the length of the longest string. """
@@ -69,15 +67,16 @@ def create_str_array(pa_str_array: pa.StringArray) -> np.ndarray:
         length = int(end - start)
         s = ctypes.string_at(data_p + int(start), length).decode("utf-8")
         str_array[i] = s
-    return str_array
+    bitmap = create_bitmap(bitmap_buf, pa_str_array.offset, len(pa_str_array))
+    return bitmap, str_array
 
 
 # Two-layer struct nullability inspired by Awkward Array's BitMaskedArray(RecordArray)
 # design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
 
 
-def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[
-    Optional[np.ndarray], Dict[str, Optional[np.ndarray]], Dict[str, np.ndarray]
+def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
+    np.ndarray | None, dict[str, np.ndarray | None], dict[str, np.ndarray]
 ]:
     """
     NumPy adapter of PyArrow `StructArray`.
@@ -106,8 +105,8 @@ def structured_array_adapter(struct_array: pa.StructArray) -> Tuple[
     return struct_bitmap, bitmaps, datas
 
 
-def structured_list_array_adapter(list_array: pa.ListArray) -> Tuple[
-    Optional[np.ndarray], Dict[str, Optional[np.ndarray]], Dict[str, np.ndarray]
+def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
+    np.ndarray | None, dict[str, np.ndarray | None], dict[str, np.ndarray]
 ]:
     """
     NumPy adapter of PyArrow array of same-length lists of structures.
@@ -130,7 +129,7 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> Tuple[
     return structured_array_adapter(data_values)
 
 
-def uniform_arrow_array_adapter(pa_array: pa.Array) -> Tuple[Optional[np.ndarray], np.ndarray]:
+def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, np.ndarray]:
     """ NumPy adapter for PyArrow arrays with uniformly sized elements.
      Returns views over bitmap and data contiguous memory regions as numpy arrays. """
     bitmap_buf, data_buf = pa_array.buffers()

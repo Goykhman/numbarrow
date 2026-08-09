@@ -11,7 +11,7 @@ from numba import carray, from_dtype, int64, intp, njit
 from numba.core.types import Array, voidptr
 from numba.extending import intrinsic
 
-from numbarrow.core.configurations import default_jit_options
+from numbarrow.core.configurations import jit_options
 
 
 @intrinsic
@@ -39,7 +39,7 @@ def numpy_array_from_ptr_factory(dtype_):
     :param dtype_: NumPy dtype for the resulting array (e.g. ``np.int32``)
     :returns: JIT-compiled function ``(int, int) -> np.ndarray``
     """
-    @njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **default_jit_options)
+    @njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)
     def _(ptr_as_int: int, sz: int):
         # carray interprets raw memory at ptr as a typed NumPy array (zero-copy view)
         return carray(_ptr_as_int_to_voidptr(ptr_as_int), shape=(sz,), dtype=dtype_)
