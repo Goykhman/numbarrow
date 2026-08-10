@@ -15,6 +15,27 @@ def test_create_str_array():
     assert all([np_a_e == ref_e for np_a_e, ref_e in zip(np_a, ref)])
 
 
+def test_create_str_array_long_with_null():
+    # Bitmap spans two bytes once the array has 9+ elements, so this pins
+    # that the copy guard never calls bool() on a multi-byte bitmap.
+    vals = ["s%d" % i for i in range(9)] + [None]
+    bitmap, np_a = create_str_array(pa.array(vals, type=pa.string()))
+    assert is_null(9, bitmap) and all(not is_null(i, bitmap) for i in range(9))
+    assert np_a[0] == "s0" and np_a[8] == "s8" and np_a[9] == ""
+    sliced = pa.array(vals + ["tail"], type=pa.string())[1:]
+    bitmap_s, np_s = create_str_array(sliced)
+    assert is_null(8, bitmap_s) and not is_null(9, bitmap_s)
+
+
+def test_create_str_array_all_null_bitmap_is_a_copy():
+    # An all-null bitmap byte is zero (falsy); the copy must still happen
+    # so the returned bitmap owns its memory instead of viewing the Arrow
+    # buffer, which the caller may let die.
+    bitmap, np_a = create_str_array(pa.array([None] * 8, type=pa.string()))
+    assert all(is_null(i, bitmap) for i in range(8))
+    assert bitmap.base is None
+
+
 def test_structured_array_adapter():
     indices = pa.array([14, 89, None, 105], type=pa.int32())
     ratios = pa.array([1.41, None, 1.72, 9.99], type=pa.float64())
@@ -45,5 +66,7 @@ def test_uniform_arrow_array_adapter_1():
 
 if __name__ == "__main__":
     test_create_str_array()
+    test_create_str_array_long_with_null()
+    test_create_str_array_all_null_bitmap_is_a_copy()
     test_structured_array_adapter()
     test_uniform_arrow_array_adapter_1()
