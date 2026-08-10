@@ -68,7 +68,7 @@ def create_str_array(pa_str_array: pa.StringArray) -> tuple[np.ndarray | None, n
         s = ctypes.string_at(data_p + int(start), length).decode("utf-8")
         str_array[i] = s
     bitmap = create_bitmap(bitmap_buf, pa_str_array.offset, len(pa_str_array))
-    bitmap = bitmap.copy() if bitmap and offset == 0 else bitmap
+    bitmap = bitmap.copy() if bitmap is not None and offset == 0 else bitmap
     return bitmap, str_array
 
 
