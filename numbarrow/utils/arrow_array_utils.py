@@ -58,7 +58,7 @@ def create_str_array(pa_str_array: pa.StringArray) -> tuple[np.ndarray | None, n
     logical_offsets = offsets_array[offset:offset + n + 1]
     diffs = np.diff(logical_offsets)
     if len(diffs) == 0:
-        return np.empty((0,), dtype="|U1")
+        return create_bitmap(bitmap_buf, pa_str_array.offset, 0), np.empty((0,), dtype="|U1")
     item_sz = diffs.max()
     str_array = np.empty((n,), dtype=f"|U{item_sz}")
     for i in range(n):
@@ -68,6 +68,7 @@ def create_str_array(pa_str_array: pa.StringArray) -> tuple[np.ndarray | None, n
         s = ctypes.string_at(data_p + int(start), length).decode("utf-8")
         str_array[i] = s
     bitmap = create_bitmap(bitmap_buf, pa_str_array.offset, len(pa_str_array))
+    bitmap = bitmap.copy() if bitmap and offset == 0 else bitmap
     return bitmap, str_array
 
 

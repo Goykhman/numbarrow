@@ -113,7 +113,7 @@ class TestStringOffset:
         a = pa.array(["alpha", None, "gamma", None, "epsilon"], type=pa.string())
         s = a[1:]  # [None, "gamma", None, "epsilon"]
         bitmap, result = create_str_array(s)
-        assert is_null(0, bitmap) and is_null(2, bitmap)
+        assert is_null(0, bitmap) and is_null(2, bitmap) and not is_null(1, bitmap) and not is_null(3, bitmap)
         assert len(result) == 4
         # Null strings become empty strings in the NumPy array
         assert result[1] == "gamma"

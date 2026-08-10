@@ -62,6 +62,7 @@ def _(pa_array: pa.BooleanArray):
     packed_boolean_data = packed_boolean_data_viewer(data_buf_p, num_of_bytes)
     data = unpack_booleans(pa_array.offset, num_of_bool_elements, packed_boolean_data)
     bitmap = create_bitmap(bitmap_buf, pa_array.offset, len(pa_array))
+    bitmap = bitmap.copy() if bitmap is not None else None
     return bitmap, data
 
 
@@ -77,6 +78,7 @@ def _(pa_array: pa.Date32Array):
     bitmap, int32_data = uniform_arrow_array_adapter(int32_array)
     data = int32_data.astype(np.dtype("datetime64[D]"))
     assert int32_data.ctypes.data != data.ctypes.data
+    bitmap = bitmap.copy() if bitmap is not None else None
     return bitmap, data
 
 

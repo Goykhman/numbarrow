@@ -10,11 +10,13 @@ to a user-supplied computation function.
 import numpy as np
 import pyarrow as pa
 
+from typing import Callable
+
 from numbarrow.core.adapters import arrow_array_adapter
 
 
 def make_mapinarrow_func(
-    main_func: callable,
+    main_func: Callable,
     input_columns: list[str] | None = None,
     broadcasts: dict | None = None
 ):
