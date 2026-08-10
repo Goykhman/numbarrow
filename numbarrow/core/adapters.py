@@ -13,9 +13,8 @@ import numpy as np
 import pyarrow as pa
 
 from functools import singledispatch
-from typing import Union
 
-from numbarrow.core.is_null import is_null, unpack_booleans
+from numbarrow.core.is_null import unpack_booleans
 from numbarrow.utils.arrow_array_utils import (
     create_bitmap, create_str_array, structured_array_adapter,
     structured_list_array_adapter, uniform_arrow_array_adapter
@@ -63,6 +62,7 @@ def _(pa_array: pa.BooleanArray):
     packed_boolean_data = packed_boolean_data_viewer(data_buf_p, num_of_bytes)
     data = unpack_booleans(pa_array.offset, num_of_bool_elements, packed_boolean_data)
     bitmap = create_bitmap(bitmap_buf, pa_array.offset, len(pa_array))
+    bitmap = bitmap.copy() if bitmap is not None else None
     return bitmap, data
 
 
@@ -78,6 +78,7 @@ def _(pa_array: pa.Date32Array):
     bitmap, int32_data = uniform_arrow_array_adapter(int32_array)
     data = int32_data.astype(np.dtype("datetime64[D]"))
     assert int32_data.ctypes.data != data.ctypes.data
+    bitmap = bitmap.copy() if bitmap is not None else None
     return bitmap, data
 
 
@@ -89,9 +90,7 @@ def _(pa_array: pa.Date64Array):
 @arrow_array_adapter.register(pa.lib.DoubleArray)
 @arrow_array_adapter.register(pa.Int32Array)
 @arrow_array_adapter.register(pa.Int64Array)
-def _(pa_array: Union[
-    pa.lib.DoubleArray, pa.Int32Array, pa.Int64Array
-]):
+def _(pa_array: pa.lib.DoubleArray | pa.Int32Array | pa.Int64Array):
     return uniform_arrow_array_adapter(pa_array)
 
 
@@ -107,7 +106,7 @@ def _(pa_array: pa.StructArray):
 
 @arrow_array_adapter.register(pa.StringArray)
 def _(pa_array: pa.StringArray):
-    return None, create_str_array(pa_array)
+    return create_str_array(pa_array)
 
 
 @arrow_array_adapter.register(pa.TimestampArray)

@@ -58,8 +58,15 @@ def test_arrow_array_adapter_4():
     )
 
 
+def test_empty_str_array():
+    bitmap, data = arrow_array_adapter(pa.array([], type=pa.string()))
+    assert bitmap is None
+    assert data.dtype == np.dtype("|U1") and len(data) == 0
+
+
 if __name__ == "__main__":
     test_arrow_array_adapter_1()
     test_arrow_array_adapter_2()
     test_arrow_array_adapter_3()
     test_arrow_array_adapter_4()
+    test_empty_str_array()

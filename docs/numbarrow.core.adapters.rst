@@ -18,7 +18,7 @@ Supported types:
 - ``Date32Array`` (copy: int32 days → datetime64[D])
 - ``Date64Array`` (zero-copy view as datetime64[ms])
 - ``TimestampArray`` (zero-copy view as datetime64[unit])
-- ``StringArray`` (copy into fixed-width NumPy Unicode array; bitmap is not returned)
+- ``StringArray`` (tuple of bitmaps and a copy of data into fixed-width NumPy Unicode array)
 - ``StructArray`` (returns tuple of two dicts: bitmaps and data, keyed by field name)
 - ``ListArray`` (delegates to StructArray adapter for list-of-struct)
 
