@@ -1,0 +1,57 @@
+name: invariants
+
+# These two checks exist because a green test suite could not see the defects
+# they catch. The mutation check answers "is each guard term actually tested",
+# which the suite cannot answer about itself. The extras check installs each
+# extra alone, which the test job cannot do because it installs the `test`
+# extra and that one happens to carry the dependency the others were missing.
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mutation-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+
+      - name: Write version to __init__.py
+        run: echo "__version__ = '0.1.${{ github.run_number }}'" > numbarrow/__init__.py
+
+      - name: Every guard term must be covered by a test
+        # Deletes one term per run and requires the suite to fail. A stale
+        # catalogue entry is an error, not a skip, so rewriting a guard forces
+        # the catalogue to be updated with it.
+        run: python .github/scripts/mutation_guard_check.py
+
+  extras-sufficiency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          # The floor from requires-python on purpose: distutils exists below
+          # 3.12 and is gone at 3.12, so a newer interpreter would hide the
+          # very failure this job exists to catch.
+          python-version: "3.12"
+
+      - name: Write version to __init__.py
+        run: echo "__version__ = '0.1.${{ github.run_number }}'" > numbarrow/__init__.py
+
+      - name: Each extra must deliver what it promises, installed alone
+        run: python .github/scripts/extras_sufficiency_check.py
