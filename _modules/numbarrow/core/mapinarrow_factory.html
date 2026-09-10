@@ -1,0 +1,295 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.mapinarrow_factory &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/core/mapinarrow_factory.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbarrow</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.mapinarrow_factory</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.core.mapinarrow_factory</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""</span>
+<span class="sd">Factory for PySpark ``mapInArrow`` UDF functions.</span>
+
+<span class="sd">Bridges PySpark's Arrow-based batch processing with Numba JIT-compiled functions</span>
+<span class="sd">by converting each :class:`pyarrow.RecordBatch` column through</span>
+<span class="sd">:func:`~numbarrow.core.adapters.arrow_array_adapter` before passing the data</span>
+<span class="sd">to a user-supplied computation function.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pa</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.adapters</span><span class="w"> </span><span class="kn">import</span> <span class="n">arrow_array_adapter</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_to_arrow</span><span class="p">(</span><span class="n">output</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Convert one UDF output column to an Arrow array.</span>
+
+<span class="sd">    A numpy fixed-width unicode array handed straight to ``pa.array`` is read</span>
+<span class="sd">    with C string semantics, so a value is cut at its first NUL: ``"a\x00b"``</span>
+<span class="sd">    arrives as ``"a"`` and a leading NUL empties the value outright. Going via</span>
+<span class="sd">    ``tolist()`` hands Arrow real Python strings, which carry NULs, at about</span>
+<span class="sd">    18% more time on a 200k-row column and only for unicode columns. A</span>
+<span class="sd">    trailing NUL is already gone before this point, dropped by numpy when the</span>
+<span class="sd">    array was built, which matches the adapter refusing one on the way in.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="s2">"dtype"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">output</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">kind</span> <span class="o">==</span> <span class="s2">"U"</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">output</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span>
+    <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_fold_struct_validity</span><span class="p">(</span><span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">field_bitmap</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Combine a struct's own validity bits into one field's bits.</span>
+
+<span class="sd">    A row that is null as a whole leaves its fields' own bitmaps untouched, so</span>
+<span class="sd">    a field bitmap alone cannot see it. Arrow validity is 1 for valid, so the</span>
+<span class="sd">    two layers combine with a bitwise and.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">struct_bitmap</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">field_bitmap</span>
+    <span class="k">if</span> <span class="n">field_bitmap</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># Copied per field so that two fields do not share one array, where a</span>
+        <span class="c1"># caller writing through one would change the other.</span>
+        <span class="k">return</span> <span class="n">struct_bitmap</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">struct_bitmap</span> <span class="o">&amp;</span> <span class="n">field_bitmap</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_claim_keys</span><span class="p">(</span><span class="n">target</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">owners</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span> <span class="n">additions</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">col</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Merge one column's contribution into a batch-wide dict.</span>
+
+<span class="sd">    Struct fields are keyed by field name rather than by column, so two</span>
+<span class="sd">    columns can produce the same key. Overwriting one with the other loses a</span>
+<span class="sd">    column and its null information silently, and misaligns the row count when</span>
+<span class="sd">    the two columns have different lengths, so a collision raises instead.</span>
+<span class="sd">    """</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">additions</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">owner</span> <span class="o">=</span> <span class="n">owners</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">owner</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># owner is never col: a column contributes each key at most once,</span>
+            <span class="c1"># since its additions are a dict, and a struct with repeated field</span>
+            <span class="c1"># names is refused before it gets here.</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">kind</span><span class="si">}</span><span class="s2">_dict key </span><span class="si">{</span><span class="n">key</span><span class="si">!r}</span><span class="s2"> is claimed by column </span><span class="si">{</span><span class="n">owner</span><span class="si">!r}</span><span class="s2"> and again by column "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">col</span><span class="si">!r}</span><span class="s2">. Struct fields are keyed by field name, so a field sharing a name "</span>
+                <span class="sa">f</span><span class="s2">"with another column would replace it. Alias one of them in the projection "</span>
+                <span class="sa">f</span><span class="s2">"that feeds mapInArrow."</span>
+            <span class="p">)</span>
+        <span class="n">owners</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">col</span>
+        <span class="n">target</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+
+
+<div class="viewcode-block" id="make_mapinarrow_func">
+<a class="viewcode-back" href="../../../numbarrow.core.mapinarrow_factory.html#numbarrow.core.mapinarrow_factory.make_mapinarrow_func">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_mapinarrow_func</span><span class="p">(</span>
+    <span class="n">main_func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span>
+    <span class="n">input_columns</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">broadcasts</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_schema</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Schema</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Creates a function that can be given as an argument to `mapInArrow`</span>
+
+<span class="sd">    :param main_func: called once per :class:`pyarrow.RecordBatch` as</span>
+<span class="sd">        ``main_func(data_dict, bitmap_dict, broadcasts)``, returning a</span>
+<span class="sd">        ``dict[str, np.ndarray]`` that is used to create a PyArrow</span>
+<span class="sd">        ``RecordBatch``.</span>
+
+<span class="sd">        Spark binds the columns of that batch to the declared output schema by</span>
+<span class="sd">        POSITION, not by name, and compares only their types.  The dict's</span>
+<span class="sd">        insertion order is therefore what decides, and returning two same-typed</span>
+<span class="sd">        columns in the other order swaps their values with no error.  Build the</span>
+<span class="sd">        returned dict in the order the output schema declares, or pass</span>
+<span class="sd">        ``output_schema`` and let Arrow bind it by name instead.</span>
+
+<span class="sd">        ``data_dict`` maps a name to an array of data of a supported type.  A</span>
+<span class="sd">        column of a uniform type contributes one entry under the column name;</span>
+<span class="sd">        a structured column contributes one entry per field, under the field</span>
+<span class="sd">        name.</span>
+
+<span class="sd">        ``bitmap_dict`` maps the same names to uint8 aligned arrays of bitmap</span>
+<span class="sd">        data, or to ``None`` where every value is valid.  Every name in</span>
+<span class="sd">        ``data_dict`` is present, so a null-free batch is indexable exactly</span>
+<span class="sd">        like a batch containing nulls.</span>
+
+<span class="sd">        For a ``StructArray`` column the struct-level validity is folded into</span>
+<span class="sd">        each field's bitmap, so one</span>
+<span class="sd">        :func:`~numbarrow.core.is_null.is_null` call per field sees both a null</span>
+<span class="sd">        field and a row that is null as a whole.</span>
+
+<span class="sd">        For a ``ListArray`` of structs the fold covers the flattened struct</span>
+<span class="sd">        elements, NOT the outer list rows.  A null outer row can be reported</span>
+<span class="sd">        nowhere, and because the adapter returns the flattened elements with</span>
+<span class="sd">        no offsets, such a row also shifts the element-to-row mapping, so a</span>
+<span class="sd">        list column whose ``null_count`` is non-zero raises</span>
+<span class="sd">        ``NotImplementedError``.</span>
+
+<span class="sd">        A name may be claimed only once.  A struct field sharing a name with</span>
+<span class="sd">        another selected column raises :class:`ValueError` rather than</span>
+<span class="sd">        replacing it.</span>
+
+<span class="sd">    :param input_columns: optional list of column names that will be expected</span>
+<span class="sd">        to be needed for in `data_dict` for the calculation done by</span>
+<span class="sd">        `main_func`. When not given, all columns in the iterated over PySpark</span>
+<span class="sd">        DataFrame will be used.</span>
+<span class="sd">    :param broadcasts: optional dictionary of broadcast values</span>
+<span class="sd">    :param output_schema: optional :class:`pyarrow.Schema` for the batch that is</span>
+<span class="sd">        yielded.  When given, the dict returned by ``main_func`` is bound to it</span>
+<span class="sd">        BY NAME, so insertion order stops deciding: a column supplied under the</span>
+<span class="sd">        wrong key is no longer able to land in another column's position.  A</span>
+<span class="sd">        name the schema declares but the dict omits raises :class:`KeyError`,</span>
+<span class="sd">        and a value that cannot be converted to the declared type without loss</span>
+<span class="sd">        raises :class:`pyarrow.ArrowInvalid`.  A key the schema does not name is</span>
+<span class="sd">        dropped silently, which is the one mismatch this does not catch.  Left</span>
+<span class="sd">        as ``None`` the batch is built from the dict alone and insertion order</span>
+<span class="sd">        decides, which is the behaviour described above.</span>
+<span class="sd">    """</span>
+    <span class="n">broadcasts</span> <span class="o">=</span> <span class="n">broadcasts</span> <span class="k">if</span> <span class="n">broadcasts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">{}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">iterator</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">iterator</span><span class="p">:</span>
+            <span class="n">data_dict</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">bitmap_dict</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">data_owners</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">bitmap_owners</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">requested</span> <span class="o">=</span> <span class="n">input_columns</span> <span class="k">if</span> <span class="n">input_columns</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">batch</span><span class="o">.</span><span class="n">schema</span><span class="o">.</span><span class="n">names</span>
+            <span class="c1"># dict.fromkeys keeps first-seen order. Naming a column twice was</span>
+            <span class="c1"># harmless before the duplicate-key check existed, because the</span>
+            <span class="c1"># second pass produced the same arrays, so it stays harmless.</span>
+            <span class="n">input_columns_</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">requested</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">input_columns_</span><span class="p">:</span>
+                <span class="n">col_pa</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">batch</span><span class="o">.</span><span class="n">column</span><span class="p">(</span><span class="n">col</span><span class="p">)</span>
+                <span class="n">adapted</span> <span class="o">=</span> <span class="n">arrow_array_adapter</span><span class="p">(</span><span class="n">col_pa</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">adapted</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+                    <span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">col_bitmaps</span><span class="p">,</span> <span class="n">col_datas</span> <span class="o">=</span> <span class="n">adapted</span>
+                    <span class="c1"># The struct-level bitmap is folded into each field rather</span>
+                    <span class="c1"># than published under the column's own name. Publishing it</span>
+                    <span class="c1"># would claim a key that another column's field may already</span>
+                    <span class="c1"># be called, turning schemas that worked into a hard error,</span>
+                    <span class="c1"># and for a list-of-struct column the name would suggest it</span>
+                    <span class="c1"># covers the outer list rows, which it does not.</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">col_datas</span><span class="p">:</span>
+                        <span class="c1"># A struct with no fields contributes no key at all, so</span>
+                        <span class="c1"># a requested column would vanish from both dicts</span>
+                        <span class="c1"># without a word.</span>
+                        <span class="c1"># The remedy is phrased for both paths: `requested`</span>
+                        <span class="c1"># falls back to every column in the batch, so a caller</span>
+                        <span class="c1"># who passed no `input_columns` has no list to drop it</span>
+                        <span class="c1"># from and needs the opposite advice.</span>
+                        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">"column </span><span class="si">{</span><span class="n">col</span><span class="si">!r}</span><span class="s2"> of type </span><span class="si">{</span><span class="n">col_pa</span><span class="o">.</span><span class="n">type</span><span class="si">}</span><span class="s2"> has no fields, so it "</span>
+                            <span class="sa">f</span><span class="s2">"contributes nothing to data_dict; drop it from the projection "</span>
+                            <span class="sa">f</span><span class="s2">"that feeds mapInArrow, or name the columns you need in "</span>
+                            <span class="sa">f</span><span class="s2">"input_columns"</span>
+                        <span class="p">)</span>
+                    <span class="n">col_bitmaps</span> <span class="o">=</span> <span class="p">{</span>
+                        <span class="n">name</span><span class="p">:</span> <span class="n">_fold_struct_validity</span><span class="p">(</span><span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">field_bitmap</span><span class="p">)</span>
+                        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">field_bitmap</span> <span class="ow">in</span> <span class="n">col_bitmaps</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                    <span class="p">}</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">col_bitmap</span><span class="p">,</span> <span class="n">col_data</span> <span class="o">=</span> <span class="n">adapted</span>
+                    <span class="n">col_bitmaps</span> <span class="o">=</span> <span class="p">{</span><span class="n">col</span><span class="p">:</span> <span class="n">col_bitmap</span><span class="p">}</span>
+                    <span class="n">col_datas</span> <span class="o">=</span> <span class="p">{</span><span class="n">col</span><span class="p">:</span> <span class="n">col_data</span><span class="p">}</span>
+                <span class="n">_claim_keys</span><span class="p">(</span><span class="n">data_dict</span><span class="p">,</span> <span class="n">data_owners</span><span class="p">,</span> <span class="n">col_datas</span><span class="p">,</span> <span class="n">col</span><span class="p">,</span> <span class="s2">"data"</span><span class="p">)</span>
+                <span class="n">_claim_keys</span><span class="p">(</span><span class="n">bitmap_dict</span><span class="p">,</span> <span class="n">bitmap_owners</span><span class="p">,</span> <span class="n">col_bitmaps</span><span class="p">,</span> <span class="n">col</span><span class="p">,</span> <span class="s2">"bitmap"</span><span class="p">)</span>
+            <span class="n">outputs</span> <span class="o">=</span> <span class="n">main_func</span><span class="p">(</span><span class="n">data_dict</span><span class="p">,</span> <span class="n">bitmap_dict</span><span class="p">,</span> <span class="n">broadcasts</span><span class="p">)</span>
+            <span class="k">yield</span> <span class="n">pa</span><span class="o">.</span><span class="n">RecordBatch</span><span class="o">.</span><span class="n">from_pydict</span><span class="p">(</span>
+                <span class="p">{</span><span class="n">col</span><span class="p">:</span> <span class="n">_to_arrow</span><span class="p">(</span><span class="n">output</span><span class="p">)</span> <span class="k">for</span> <span class="n">col</span><span class="p">,</span> <span class="n">output</span> <span class="ow">in</span> <span class="n">outputs</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+                <span class="n">schema</span><span class="o">=</span><span class="n">output_schema</span>
+            <span class="p">)</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
