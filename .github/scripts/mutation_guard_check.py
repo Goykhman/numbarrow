@@ -143,7 +143,13 @@ MUTATIONS = [
     (
         "a missing input column stops naming the batch's columns",
         "numbarrow/core/mapinarrow_factory.py",
-        "                if col not in batch.schema.names:",
+        "                if col not in names:",
+        "                if False:",
+    ),
+    (
+        "a column the batch carries twice stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "                if names.count(col) > 1:",
         "                if False:",
     ),
     (
