@@ -39,11 +39,22 @@ def numpy_array_from_ptr_factory(dtype_):
     :param dtype_: NumPy dtype for the resulting array (e.g. ``np.int32``)
     :returns: JIT-compiled function ``(int, int) -> np.ndarray``
     """
-    @njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)
-    def _(ptr_as_int: int, sz: int):
+    def viewer(ptr_as_int: int, sz: int):
         # carray interprets raw memory at ptr as a typed NumPy array (zero-copy view)
         return carray(_ptr_as_int_to_voidptr(ptr_as_int), shape=(sz,), dtype=dtype_)
-    return _
+    # numba names a function's cache files after its qualname and source line,
+    # so every viewer this factory makes shared one index file and one set of
+    # data files, and numba writes those without a lock. Processes importing
+    # together on a cold cache read one index and picked the same data-file
+    # name for different viewers, and every process afterwards loaded the wrong
+    # machine code: an int32 column read as float64, or a crash in
+    # NRT_adapt_ndarray_to_python. A qualname per dtype gives each viewer its
+    # own index and data files, and one entry per index leaves nothing for two
+    # writers to disagree about.
+    name = f"view_{np.dtype(dtype_).name}"
+    viewer.__name__ = name
+    viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"
+    return njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)(viewer)
 
 
 # Pre-built viewers for common NumPy types. Each entry maps a dtype to a
