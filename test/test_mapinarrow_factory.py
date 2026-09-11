@@ -245,6 +245,25 @@ def test_output_schema_refuses_a_value_that_cannot_convert():
         run_outputs(outputs, OUT_SCHEMA)
 
 
+def test_an_empty_string_column_keeps_its_type():
+    # pa.array([]) infers null where the same column with rows infers string,
+    # so a UDF that filtered a whole batch away yielded a schema its other
+    # batches did not share, and Spark's writer refused the second one.
+    outputs = {"s": np.empty(0, dtype="<U5"), "n": np.empty(0, dtype=np.int64)}
+    got = run_outputs(outputs)
+    assert got.schema.types == [pa.string(), pa.int64()]
+    assert got.num_rows == 0
+
+
+def test_a_bytes_column_keeps_its_nuls():
+    # A |S array handed straight to pa.array is read with C string semantics,
+    # the same cut a |U array used to get.
+    values = [b"a\x00b", b"\x00lead", b"plain", b"x\x00\x00y"]
+    got = run_outputs({"b": np.array(values, dtype="S5")})
+    assert got.column("b").type == pa.binary()
+    assert got.column("b").to_pylist() == values
+
+
 def test_output_schema_drops_a_key_it_does_not_name():
     # The one mismatch a schema does not catch, pinned so the docstring's claim
     # stays true if pyarrow ever starts raising here.

@@ -18,16 +18,24 @@ from numbarrow.core.adapters import arrow_array_adapter
 def _to_arrow(output):
     """Convert one UDF output column to an Arrow array.
 
-    A numpy fixed-width unicode array handed straight to ``pa.array`` is read
-    with C string semantics, so a value is cut at its first NUL: ``"a\x00b"``
-    arrives as ``"a"`` and a leading NUL empties the value outright. Going via
-    ``tolist()`` hands Arrow real Python strings, which carry NULs, at about
-    18% more time on a 200k-row column and only for unicode columns. A
+    A numpy fixed-width unicode or bytes array handed straight to ``pa.array``
+    is read with C string semantics, so a value is cut at its first NUL:
+    ``"a\x00b"`` arrives as ``"a"`` and a leading NUL empties the value
+    outright. Going via ``tolist()`` hands Arrow real Python strings and
+    bytes, which carry NULs, at about 18% more time on a 200k-row column. A
     trailing NUL is already gone before this point, dropped by numpy when the
     array was built, which matches the adapter refusing one on the way in.
+
+    The type is named rather than inferred because ``pa.array([])`` infers
+    ``null`` where the same column with rows infers ``string``: a UDF that
+    filters a whole batch away would yield a schema its other batches do not
+    share, and Spark's writer refuses the second schema it sees.
     """
-    if getattr(output, "dtype", None) is not None and output.dtype.kind == "U":
-        return pa.array(output.tolist())
+    kind = getattr(getattr(output, "dtype", None), "kind", None)
+    if kind == "U":
+        return pa.array(output.tolist(), type=pa.string())
+    if kind == "S":
+        return pa.array(output.tolist(), type=pa.binary())
     return pa.array(output)
 
 

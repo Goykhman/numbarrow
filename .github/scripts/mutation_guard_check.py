@@ -63,8 +63,20 @@ MUTATIONS = [
     (
         "output path stops routing unicode via tolist()",
         "numbarrow/core/mapinarrow_factory.py",
-        'if getattr(output, "dtype", None) is not None and output.dtype.kind == "U":',
-        "if False:",
+        '    if kind == "U":',
+        "    if False:",
+    ),
+    (
+        "output path stops routing bytes via tolist()",
+        "numbarrow/core/mapinarrow_factory.py",
+        '    if kind == "S":',
+        "    if False:",
+    ),
+    (
+        "unicode output stops naming its type",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        return pa.array(output.tolist(), type=pa.string())",
+        "        return pa.array(output.tolist())",
     ),
     (
         "empty string result stops being read-only",
