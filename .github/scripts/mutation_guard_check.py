@@ -87,8 +87,10 @@ MUTATIONS = [
     (
         "a struct dict key no field has stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
-        "    if unexpected_keys:\n        raise ValueError(\n            f\"declared {type_repr(struct_type)} but the dicts",
-        "    if False:\n        raise ValueError(\n            f\"declared {type_repr(struct_type)} but the dicts",
+        "    if unexpected_keys:\n        raise ValueError(\n"
+        "            f\"declared {type_repr(struct_type)} but the dicts",
+        "    if False:\n        raise ValueError(\n"
+        "            f\"declared {type_repr(struct_type)} but the dicts",
     ),
     (
         "a ChunkedArray stops being named as such",
@@ -200,10 +202,13 @@ def build_tree(repo: Path, dest: Path):
             shutil.copy2(src, dest / name)
 
 
-def run_suite(tree: Path, neutral_cwd: Path, cache_dir: Path) -> bool:
-    """True when the suite passes. Run from a cwd outside the tree, or the
-    real installed package lands on sys.path[0] and shadows this copy, which
-    is how a mutation can appear to survive when it was never even loaded."""
+def run_suite(tree: Path, neutral_cwd: Path, cache_dir: Path) -> tuple[bool, str]:
+    """Whether the suite passes, and the tail of what it printed.
+
+    Run from a cwd outside the tree, or the real installed package lands on
+    sys.path[0] and shadows this copy, which is how a mutation can appear to
+    survive when it was never even loaded. The tail is what a red job has to
+    show: without it a failing baseline named nothing."""
     env = dict(os.environ)
     env["PYTHONPATH"] = str(tree)
     # Own cache dir, so this never disturbs a numba cache shared with other work.
@@ -212,7 +217,8 @@ def run_suite(tree: Path, neutral_cwd: Path, cache_dir: Path) -> bool:
         [sys.executable, "-m", "pytest", str(tree / "test"), "-x", "-q",
          "-p", "no:cacheprovider"],
         cwd=str(neutral_cwd), env=env, capture_output=True, text=True)
-    return proc.returncode == 0
+    tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-25:])
+    return proc.returncode == 0, tail
 
 
 def main(argv=None):
@@ -232,10 +238,12 @@ def main(argv=None):
         baseline.mkdir()
         build_tree(repo, baseline)
         print("baseline: ", end="", flush=True)
-        if not run_suite(baseline, neutral, cache):
+        passes, tail = run_suite(baseline, neutral, cache)
+        if not passes:
             print("FAILS")
             print("The unmutated suite does not pass, so mutation results would be "
-                  "meaningless. Fix the suite first.")
+                  "meaningless. Fix the suite first. The suite's last lines:")
+            print(tail)
             return 1
         print("passes")
 
@@ -253,7 +261,7 @@ def main(argv=None):
                 print(f"  [{i + 1}/{len(MUTATIONS)}] STALE   {label}")
                 continue
             target.write_text(text.replace(old, new))
-            survived = run_suite(tree, neutral, cache)
+            survived, _tail = run_suite(tree, neutral, cache)
             if survived:
                 failures.append(
                     f"SURVIVED  {label}\n"

@@ -7,9 +7,15 @@ from numba.core.types import Array, float64, int32, int64, Optional, uint8
 from numbarrow.core.is_null import is_null
 from numbarrow.core.configurations import jit_options
 from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
+from test.conftest import spark_leg_required
 
-pytest.importorskip("pyspark")
-pytest.importorskip("pandas")
+if spark_leg_required():
+    # A missing pyspark is then a collection error, not a silent skip.
+    import pandas  # noqa: F401
+    import pyspark  # noqa: F401
+else:
+    pytest.importorskip("pyspark")
+    pytest.importorskip("pandas")
 
 from pyspark.sql import functions as sf  # noqa: E402
 from pyspark.sql.types import (  # noqa: E402

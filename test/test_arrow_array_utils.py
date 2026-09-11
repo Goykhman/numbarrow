@@ -1,8 +1,10 @@
 import gc
+import os
 import random
 import subprocess
 import sys
 from decimal import Decimal
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -14,6 +16,11 @@ from numbarrow.utils.arrow_array_utils import (
     uniform_arrow_array_adapter
 )
 from numbarrow.core.is_null import is_null
+
+# The tree under test, named to every child interpreter: from any cwd but the
+# checkout root the child would otherwise import whichever numbarrow it finds
+# installed, and these tests would validate a different copy.
+CHILD_ENV = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent))
 
 
 def owner_of(array):
@@ -235,7 +242,7 @@ def test_plain_list_raises_the_same_typed_error_under_dash_O():
         "except NotImplementedError as exc:\n"
         "    print('typed', 'int64' in str(exc))\n"
     )
-    out = subprocess.run([sys.executable, "-O", "-c", src], capture_output=True, text=True)
+    out = subprocess.run([sys.executable, "-O", "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.stdout.strip() == "typed True", out
 
 
@@ -300,7 +307,7 @@ def test_adapter_result_survives_an_unbound_source():
         "    assert data.tolist() == list(range(n)), n\n"
         "print('ok')\n"
     )
-    out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True)
+    out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.returncode == 0 and out.stdout.strip() == "ok", (out.returncode, out.stderr[-400:])
 
 
@@ -320,7 +327,7 @@ def test_zero_length_list_array_with_null_buffers():
         "assert datas['v'].tolist() == []\n"
         "print('ok')\n"
     )
-    out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True)
+    out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.returncode == 0 and out.stdout.strip() == "ok", (out.returncode, out.stderr[-300:])
 
 

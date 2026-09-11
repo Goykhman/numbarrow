@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -50,7 +51,9 @@ def test_importing_with_an_empty_value_uses_the_default():
     # jit_options is computed when the module is imported, so the value has to
     # be in the environment before the interpreter starts.
     src = "import json; from numbarrow.core.configurations import jit_options; print(json.dumps(jit_options))"
-    env = dict(os.environ, NUMBARROW_JIT_OPTIONS="")
+    # PYTHONPATH names the tree under test: from any cwd but the checkout root
+    # the child would otherwise import whichever numbarrow it finds installed.
+    env = dict(os.environ, NUMBARROW_JIT_OPTIONS="", PYTHONPATH=str(Path(__file__).resolve().parent.parent))
     out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == {"cache": True}
