@@ -78,7 +78,7 @@ jobs:
         include:
           - pyarrow-version: "14.0.0"
             numpy-pin: "numpy<2"
-          - pyarrow-version: "24.0.0"
+          - pyarrow-version: "25.0.1"
             numpy-pin: ""
     runs-on: ubuntu-latest
 
