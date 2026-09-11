@@ -10,7 +10,7 @@ include = ["numbarrow*"]
 name = "numbarrow"
 dependencies = [
     "numba>=0.60.0,<0.68.0",
-    "pyarrow<=24.0.0"
+    "pyarrow<=25.0.1"
 ]
 dynamic = ["version"]
 requires-python = ">=3.12"

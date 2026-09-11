@@ -156,7 +156,7 @@ See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complet
 |---|---|
 | Python | 3.12+ |
 | numba | 0.60.0 – 0.67.0 |
-| pyarrow | 14.0 – 24.0 |
+| pyarrow | 14.0 – 25.0 |
 | pyspark | 3.4 – 3.x (optional) |
 | pandas | 2.2.2+ (optional, required by pyspark's `mapInArrow`) |
 
@@ -175,7 +175,7 @@ on Python 3.10 and 3.11 when installed with `--ignore-requires-python`; treat
 that as regression signal rather than a supported configuration, since pip
 refuses the install below the declared floor. The pyarrow range is measured
 rather than declared, and the
-real constraint is numpy rather than pyarrow: 14.0.0 through 24.0.0 all pass,
+real constraint is numpy rather than pyarrow: 14.0.0 through 25.0.1 all pass,
 but pyarrow below 16 is built against numpy 1 and dies with
 `numpy.core.multiarray failed to import` if numpy 2 is installed alongside it.
 pyarrow 15 caps numpy itself, so it resolves correctly on its own; pyarrow 14
