@@ -157,19 +157,24 @@ See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complet
 | Python | 3.12+ |
 | numba | 0.60.0 – 0.67.0 |
 | pyarrow | 14.0 – 24.0 |
-| pyspark | 3.3 – 3.x (optional) |
-| pandas | 2.1.1+ (optional, required by pyspark's `mapInArrow`) |
+| pyspark | 3.4 – 3.x (optional) |
+| pandas | 2.2.2+ (optional, required by pyspark's `mapInArrow`) |
 
-`pyproject.toml` is authoritative. CI spans both ends of the numba and pyarrow
-rows (0.60.0, 0.63.0 and 0.67.0; 14.0.0 and 24.0.0). The pandas and pyspark rows
-are not swept: CI installs one version of each, pandas 2.3.2 and pyspark 3.5.7.
-The pandas floor is 2.1.1 rather than the 1.5.0 declared in the `mapinarrow`
-extra, because no pandas below 2.1.1 publishes a Python 3.12 wheel and the
-source build fails. CI
-additionally exercises Python 3.10 and 3.11 with `--ignore-requires-python`,
-because the package still builds and passes there. Treat those as regression
-signal rather than as a supported configuration: pip refuses the install below
-the declared floor. The pyarrow range is measured rather than declared, and the
+`pyproject.toml` is authoritative. CI runs the newest numba the cap admits,
+with pandas 2.3.2 and pyspark 3.5.7, on Linux, Linux ARM and Windows, and both
+ends of the pyarrow row in a job of their own; the numba floor and the pandas
+and pyspark rows are not swept. The pyspark floor is 3.4.0 because pyspark 3.3
+bundles cloudpickle 2.0.0, which predates the `co_qualname` argument Python
+3.11 added to `code()`, so on the declared Python every UDF dies in the worker
+with `TypeError: code() argument 13 must be str, not int`. The pandas row is
+2.2.2 rather than the 1.5.0 declared in the `mapinarrow` extra: no pandas
+below 2.1.1 publishes a Python 3.12 wheel, and 2.1.1 installs next to numpy 2
+but fails to import with `numpy.dtype size changed`; 2.2.2 is the first
+release built against numpy 2. The package also builds and passes its suite
+on Python 3.10 and 3.11 when installed with `--ignore-requires-python`; treat
+that as regression signal rather than a supported configuration, since pip
+refuses the install below the declared floor. The pyarrow range is measured
+rather than declared, and the
 real constraint is numpy rather than pyarrow: 14.0.0 through 24.0.0 all pass,
 but pyarrow below 16 is built against numpy 1 and dies with
 `numpy.core.multiarray failed to import` if numpy 2 is installed alongside it.
