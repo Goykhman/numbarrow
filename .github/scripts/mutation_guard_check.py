@@ -87,12 +87,6 @@ MUTATIONS = [
         "    str_array.flags.writeable = False",
         "    pass",
     ),
-    (
-        "key collision stops raising",
-        "numbarrow/core/mapinarrow_factory.py",
-        "        if owner is not None:",
-        "        if False:",
-    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "docs"]

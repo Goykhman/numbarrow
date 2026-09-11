@@ -14,11 +14,12 @@ Usage::
     from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
 
     def my_func(data_dict, bitmap_dict, broadcasts):
-        # data_dict:   {name: np.ndarray}, keyed by column, or by field name
-        #              for a struct column
-        # bitmap_dict: the same names, each a uint8 bitmap or None where every
-        #              value is valid; for a struct column the struct-level
-        #              validity is folded into each field's bitmap
+        # data_dict:   {name: np.ndarray} for a uniform column, or
+        #              {name: {field: np.ndarray}} for a struct column
+        # bitmap_dict: the same shape, each leaf a uint8 bitmap or None where
+        #              the column carries no validity buffer; for a struct
+        #              column the struct-level validity is folded into each
+        #              field's bitmap
         # broadcasts:  {key: value}
         result = ...
         return {"output_col": result}
@@ -36,8 +37,9 @@ struct elements, NOT the outer list rows: a null outer row can be reported
 nowhere and also shifts the element-to-row mapping, so a list column whose
 ``null_count`` is non-zero raises ``NotImplementedError``.
 
-A name may be claimed only once: a struct field sharing a name with another
-selected column raises ``ValueError`` rather than replacing it.
+A struct or list-of-struct column's fields sit under the column's own name,
+``data_dict[column][field]``, so a field never shares a namespace with another
+column or with another struct's fields.
 
 See ``test_mapinarrow_spark.py`` in the `test suite
 <https://github.com/Goykhman/numbarrow/tree/main/test>`_ for a complete runnable example.

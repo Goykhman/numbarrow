@@ -107,12 +107,13 @@ def calculate(
 
 
 def main(data_dict: dict, bitmap_dict: dict, broadcasts: dict):
+    # `data` is a list-of-struct column, so its fields sit under its own name.
     res = calculate(
         data_dict["size"],
         data_dict["coordinate"],
-        data_dict["index"],
-        data_dict["magnitude"],
-        bitmap_dict["magnitude"],
+        data_dict["data"]["index"],
+        data_dict["data"]["magnitude"],
+        bitmap_dict["data"]["magnitude"],
         broadcasts["rescale"]
     )
     return {"id": data_dict["id"], "intensity": res}
@@ -182,8 +183,8 @@ def test_struct_null_row_survives_the_arrow_transport(spark):
     df = spark.createDataFrame([("a", {"v": 10}), ("b", None), ("c", {"v": 30})], schema)
 
     def main(data_dict, bitmap_dict, broadcasts):
-        bitmap = bitmap_dict["v"]
-        n = len(data_dict["v"])
+        bitmap = bitmap_dict["point"]["v"]
+        n = len(data_dict["point"]["v"])
         flags = np.array(
             [False] * n if bitmap is None else [is_null(i, bitmap) for i in range(n)],
             dtype=np.bool_
@@ -216,10 +217,10 @@ def test_null_free_batch_still_carries_its_bitmap_key(spark):
     assert [row["key_present"] for row in rows] == [True, True, True]
 
 
-def test_colliding_struct_field_name_raises_through_spark(spark):
+def test_a_struct_field_sharing_a_column_name_reaches_the_udf_through_spark(spark):
     # Four ordinary Spark StructTypes convert to this shape: a top-level column
-    # and a struct field sharing a name. Silently dropping one of them also
-    # misaligns the row count, since the flattened field is longer.
+    # and a struct field sharing a name. The field sits under its column, so
+    # both arrive, each under its own key.
     schema = StructType([
         StructField("id", LongType()),
         StructField("order", StructType([
@@ -229,8 +230,8 @@ def test_colliding_struct_field_name_raises_through_spark(spark):
     df = spark.createDataFrame([(1, {"id": 10, "total": 1.5}), (2, {"id": 20, "total": 2.5})], schema)
 
     def main(data_dict, bitmap_dict, broadcasts):
-        return {"id": data_dict["id"]}
+        return {"id": data_dict["id"], "order_id": data_dict["order"]["id"]}
 
-    out_schema = StructType([StructField("id", LongType())])
-    with pytest.raises(Exception, match="'id'"):
-        df.repartition(1).mapInArrow(make_mapinarrow_func(main), out_schema).collect()
+    out_schema = StructType([StructField("id", LongType()), StructField("order_id", LongType())])
+    rows = df.repartition(1).mapInArrow(make_mapinarrow_func(main), out_schema).collect()
+    assert sorted((row["id"], row["order_id"]) for row in rows) == [(1, 10), (2, 20)]
