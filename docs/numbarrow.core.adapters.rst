@@ -37,13 +37,14 @@ fixed-width ``|U`` dtype pads with NUL, so a trailing NUL cannot be told from
 padding and would come back silently truncated. Leading and interior NULs are
 preserved.
 
-Returned data arrays are read-only and cannot be made writable. The views are
-over Arrow buffers the caller does not own, which is also why pyarrow's own
-``to_numpy(zero_copy_only=True)`` refuses to hand out a writable one; the
-copies, booleans, ``date32`` and strings, are marked read-only as well, so the
-contract does not depend on the type. Declare numba signatures that receive
-them with ``readonly=True``, which accepts writable arrays too. Returned
-bitmaps own their memory and are writable.
+Returned data arrays are read-only. The views are over Arrow buffers the
+caller does not own and cannot be made writable, which is also why pyarrow's
+own ``to_numpy(zero_copy_only=True)`` refuses to hand out a writable one; the
+copies, booleans, ``date32`` and strings, start read-only as well, so the
+contract does not depend on the type, though a caller who flips the flag on a
+copy writes into memory that is their own. Declare numba signatures that
+receive them with ``readonly=True``, which accepts writable arrays too.
+Returned bitmaps own their memory and are writable.
 
 A bitmap is ``None`` when the array carries no validity buffer and a uint8
 array otherwise, which is not the same as having no nulls: ``slice``, ``take``,
