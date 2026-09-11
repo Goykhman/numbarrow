@@ -85,11 +85,12 @@ A string value whose last character is NUL raises `ValueError`: numpy's
 fixed-width `|U` dtype pads with NUL, so a trailing NUL is indistinguishable
 from padding and cannot be represented. Leading and interior NULs are preserved.
 
-Returned data arrays are read-only and cannot be made writable. The views are
-over Arrow buffers the caller does not own, which is also why pyarrow's own
-`to_numpy(zero_copy_only=True)` refuses to hand out a writable one; the copies,
-booleans, `date32` and strings, are marked read-only as well, so the contract
-does not depend on the type. Declare numba signatures that receive them with
+Returned data arrays are read-only. The views are over Arrow buffers the
+caller does not own and cannot be made writable, which is also why pyarrow's
+own `to_numpy(zero_copy_only=True)` refuses to hand out a writable one; the
+copies, booleans, `date32` and strings, start read-only as well, so the
+contract does not depend on the type, though a caller who flips the flag on a
+copy writes into memory that is their own. Declare numba signatures that receive them with
 `readonly=True`, which accepts writable arrays as well, or leave the function
 lazily typed and numba will infer it. Returned bitmaps own their memory and are
 writable.
@@ -162,8 +163,8 @@ See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complet
 
 `pyproject.toml` is authoritative. CI runs the newest numba the cap admits,
 with pandas 2.3.2 and pyspark 3.5.7, on Linux, Linux ARM and Windows, and both
-ends of the pyarrow row in a job of their own; the numba floor and the pandas
-and pyspark rows are not swept. The pyspark floor is 3.4.0 because pyspark 3.3
+ends of the pyarrow row in a job of their own; the pandas and pyspark rows are
+not swept. The pyspark floor is 3.4.0 because pyspark 3.3
 bundles cloudpickle 2.0.0, which predates the `co_qualname` argument Python
 3.11 added to `code()`, so on the declared Python every UDF dies in the worker
 with `TypeError: code() argument 13 must be str, not int`. The pandas row is
@@ -183,9 +184,10 @@ does not, so it needs an explicit `numpy<2`. `pyproject.toml` declares no
 pyarrow floor, so the broken combination is reachable.
 
 `NUMBA_DISABLE_JIT=1` is not supported: the viewers are built on a numba
-intrinsic that has no pure-Python form, so every adapter raises
-`NotImplementedError` under it, while `is_null` and `unpack_booleans` still run
-as plain Python.
+intrinsic that has no pure-Python form, so under it a boolean or string column
+and any column that carries a validity buffer raise `NotImplementedError`,
+while a null-free numeric column happens to adapt and `is_null` and
+`unpack_booleans` run as plain Python.
 
 ## Documentation
 

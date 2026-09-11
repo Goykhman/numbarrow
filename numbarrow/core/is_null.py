@@ -23,9 +23,10 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
 
     ``index_`` must satisfy ``0 <= index_ < 8 * len(bitmap)``. Compiled without
     bounds checking, which is numba's default, an index past the bitmap reads
-    memory that is not the bitmap's and a negative one wraps to its end;
-    ``NUMBARROW_JIT_OPTIONS='{"boundscheck": true}'`` turns both into
-    ``IndexError``.
+    memory that is not the bitmap's; ``NUMBARROW_JIT_OPTIONS='{"boundscheck":
+    true}'`` turns that into ``IndexError``. A negative index reads from the
+    bitmap's end like any numpy index, which is the wrong bit and in bounds,
+    so bounds checking does not catch it.
 
     :param index_: zero-based element index
     :param bitmap: uint8 array containing the packed validity bitmap
