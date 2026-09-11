@@ -109,6 +109,18 @@ MUTATIONS = [
         "            if False:",
     ),
     (
+        "a non-boolean cache option stops being refused",
+        "numbarrow/core/configurations.py",
+        '    if "cache" in as_json and not isinstance(as_json["cache"], bool):',
+        "    if False:",
+    ),
+    (
+        "viewers stop getting a cache name of their own",
+        "numbarrow/utils/utils.py",
+        '    viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"',
+        "    pass",
+    ),
+    (
         "empty string result stops being read-only",
         "numbarrow/utils/arrow_array_utils.py",
         '        empty = np.empty((0,), dtype="|U1")\n        empty.flags.writeable = False',
