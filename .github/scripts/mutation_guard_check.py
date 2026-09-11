@@ -121,6 +121,12 @@ MUTATIONS = [
         "    pass",
     ),
     (
+        "uniform view stops being read-only at the buffer",
+        "numbarrow/utils/arrow_array_utils.py",
+        "        memoryview(data_buf).toreadonly(),",
+        "        memoryview(data_buf),",
+    ),
+    (
         "empty string result stops being read-only",
         "numbarrow/utils/arrow_array_utils.py",
         '        empty = np.empty((0,), dtype="|U1")\n        empty.flags.writeable = False',

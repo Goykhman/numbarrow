@@ -345,10 +345,11 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, 
     """ NumPy adapter for PyArrow arrays with uniformly sized elements.
 
     Returns the validity bitmap, which owns its memory, and a zero-copy numpy
-    view over the array's data buffer. The view is read-only: Arrow buffers are
-    immutable by contract, and this is what pyarrow's own
-    ``Array.to_numpy(zero_copy_only=True)`` returns. Declare numba signatures
-    that receive it with ``readonly=True``, which accepts writable arrays too.
+    view over the array's data buffer. The view is read-only and cannot be made
+    writable: Arrow buffers are immutable by contract, and this is what
+    pyarrow's own ``Array.to_numpy(zero_copy_only=True)`` returns. Declare numba
+    signatures that receive it with ``readonly=True``, which accepts writable
+    arrays too.
     """
     data_arrow_ty = pa_array.type
     data_np_ty = arrow_to_numpy_dtypes.get(data_arrow_ty, None)
@@ -389,18 +390,20 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, 
     # result reads freed memory: correct at tiny sizes, wrong from a few
     # hundred elements, and a segfault once the allocation is large enough to
     # be returned to the system.
+    # The buffer is viewed read-only. np.frombuffer only reports read-only for
+    # buffers pyarrow marks immutable, which depends on where the buffer came
+    # from: a locally built array is mutable, while the same data after an
+    # Arrow IPC round trip, which is the transport mapInArrow uses, is not.
+    # Clearing the flag afterwards made the result the same either way, but a
+    # flag is the caller's to flip back, and a store through the flipped view
+    # changed the source Arrow array. numpy refuses to set WRITEABLE on an
+    # array whose base is read-only, which is also what makes pyarrow's own
+    # to_numpy(zero_copy_only=True) refuse the flip.
     data = np.frombuffer(
-        memoryview(data_buf),
+        memoryview(data_buf).toreadonly(),
         dtype=data_np_ty,
         count=data_len,
         offset=pa_array.offset * data_item_byte_size
     )
-    # np.frombuffer only reports read-only for buffers pyarrow marks immutable,
-    # which depends on where the buffer came from: a locally built array is
-    # mutable, while the same data after an Arrow IPC round trip, which is the
-    # transport mapInArrow uses, is not. Clearing the flag makes the result the
-    # same either way, instead of a UDF compiling in a unit test and failing on
-    # a real Spark batch.
-    data.flags.writeable = False
     bitmap = create_bitmap(bitmap_buf, pa_array.offset, len(pa_array))
     return bitmap, data
