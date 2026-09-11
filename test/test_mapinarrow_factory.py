@@ -313,6 +313,55 @@ def test_output_schema_refuses_a_struct_key_no_field_has():
         run_outputs({"s": [{"Amount": 1, "Label": "x"}]}, schema)
 
 
+def test_output_schema_refuses_a_struct_array_whose_fields_differ():
+    # A ready-built StructArray was cast to the declared type, and a cast
+    # matches struct fields by name too: x/y against p/q came back all null.
+    declared = pa.schema([("s", pa.struct([("p", pa.int64()), ("q", pa.int64())]))])
+    built = pa.array([{"x": 1, "y": 2}], type=pa.struct([("x", pa.int64()), ("y", pa.int64())]))
+    with pytest.raises(ValueError, match="'x'"):
+        run_outputs({"s": built}, declared)
+    same_names = pa.array([{"p": 1, "q": 2}], type=pa.struct([("p", pa.int32()), ("q", pa.int32())]))
+    got = run_outputs({"s": same_names}, declared)
+    assert got.column("s").type == declared.field("s").type
+    assert got.column("s").to_pylist() == [{"p": 1, "q": 2}]
+    nested = pa.array([[{"x": 1}]], type=pa.list_(pa.struct([("x", pa.int64())])))
+    with pytest.raises(ValueError, match="'x'"):
+        run_outputs({"s": nested}, pa.schema([("s", pa.list_(pa.struct([("p", pa.int64())])))]))
+
+
+def test_a_struct_key_no_field_has_is_refused_at_any_depth():
+    # The check used to cover a plain list of dicts against a struct field and
+    # nothing else: a list-of-struct column, a struct inside a struct, an
+    # object array and a generator all came back null on the same typo.
+    inner = pa.struct([("amount", pa.int64())])
+    cases = {
+        "list of structs": (pa.list_(inner), [[{"Amount": 1}], [{"amount": 2}]]),
+        "struct in struct": (pa.struct([("id", pa.int64()), ("inner", inner)]),
+                             [{"id": 1, "inner": {"Amount": 9}}]),
+        "object array of dicts": (inner, np.array([{"Amount": 1}, {"amount": 2}], dtype=object)),
+        "generator of dicts": (inner, ({"Amount": i} for i in range(2))),
+        "map of structs": (pa.map_(pa.string(), inner), [{"k": {"Amount": 1}}]),
+    }
+    for label, (declared_type, value) in cases.items():
+        with pytest.raises(ValueError, match="Amount"):
+            run_outputs({"s": value}, pa.schema([("s", declared_type)]))
+    good = run_outputs({"s": [[{"amount": 1}], [{"amount": 2}]]}, pa.schema([("s", pa.list_(inner))]))
+    assert good.column("s").to_pylist() == [[{"amount": 1}], [{"amount": 2}]]
+
+
+def test_output_columns_of_different_lengths_are_named():
+    # pyarrow's own refusal says "2 vs 3" and names neither column.
+    with pytest.raises(ValueError, match=r"'a': 3.*'b': 2"):
+        run_outputs({"a": [1, 2, 3], "b": [1, 2]})
+    with pytest.raises(ValueError, match=r"'a': 3.*'b': 2"):
+        run_outputs({"a": [1, 2, 3], "b": [1, 2]}, OUT_SCHEMA)
+
+
+def test_an_overflowing_output_value_names_its_column():
+    with pytest.raises(OverflowError, match="'i'"):
+        run_outputs({"i": [10 ** 400, 2]}, pa.schema([("i", pa.int64())]))
+
+
 def test_output_schema_builds_a_map_column():
     # A map has no inferred type to be cast from: a list of dicts infers a
     # struct, which does not cast to map, and a list of pairs fails inference.
@@ -349,7 +398,9 @@ def test_an_output_side_failure_names_its_column():
 
 
 def test_main_func_must_return_a_dict():
-    with pytest.raises(TypeError, match="NoneType"):
+    # Matched on the refusal's own words: "'NoneType' object is not iterable"
+    # from the code after the guard also names NoneType.
+    with pytest.raises(TypeError, match="main_func must return a dict.*NoneType"):
         run_outputs(None)
 
 

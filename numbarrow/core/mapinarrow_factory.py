@@ -21,27 +21,81 @@ def _struct_fields(struct_type):
     return [struct_type[i] for i in range(struct_type.num_fields)]
 
 
-def _check_struct_keys(rows, struct_type):
-    """Refuse a dict key that no declared field has.
+def _is_list_like(arrow_type):
+    return pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type) or pa.types.is_fixed_size_list(arrow_type)
+
+
+def _carries_keys(arrow_type):
+    """Whether a value of this type is built from dicts somewhere inside it."""
+    if pa.types.is_struct(arrow_type):
+        return True
+    if _is_list_like(arrow_type):
+        return _carries_keys(arrow_type.value_type)
+    if pa.types.is_map(arrow_type):
+        return _carries_keys(arrow_type.item_type)
+    return False
+
+
+def _unexpected_fields(source_type, declared_type):
+    """Field names the source type carries, at any depth, that the declared type does not."""
+    if pa.types.is_struct(source_type) and pa.types.is_struct(declared_type):
+        declared = {field.name: field.type for field in _struct_fields(declared_type)}
+        found = []
+        for field in _struct_fields(source_type):
+            if field.name not in declared:
+                found.append(field.name)
+            else:
+                found.extend(_unexpected_fields(field.type, declared[field.name]))
+        return found
+    if _is_list_like(source_type) and _is_list_like(declared_type):
+        return _unexpected_fields(source_type.value_type, declared_type.value_type)
+    if pa.types.is_map(source_type) and pa.types.is_map(declared_type):
+        return (_unexpected_fields(source_type.key_type, declared_type.key_type)
+                + _unexpected_fields(source_type.item_type, declared_type.item_type))
+    return []
+
+
+def _check_keys(rows, arrow_type):
+    """Refuse, at any depth, a dict key that no declared struct field has.
 
     Arrow matches struct fields by exact name and fills a missing one with
     null, so a list of dicts keyed ``Amount`` against a field called
     ``amount`` builds a whole column of nulls under an identical schema,
     without a word. The same typo on a top-level key raises; this makes the
-    nested one raise too.
+    nested one raise too, however deep the struct sits inside a list, a map or
+    another struct.
     """
-    declared = {field.name for field in _struct_fields(struct_type)}
-    seen = set()
+    if pa.types.is_struct(arrow_type):
+        fields = {field.name: field.type for field in _struct_fields(arrow_type)}
+        dicts = [row for row in rows if isinstance(row, Mapping)]
+        seen = set()
+        for row in dicts:
+            seen.update(row)
+        unexpected_keys = sorted(str(key) for key in seen - set(fields))
+        if unexpected_keys:
+            raise ValueError(
+                f"declared {type_repr(arrow_type)} but the dicts carry keys {unexpected_keys} "
+                f"that no declared field has; Arrow matches struct fields by exact name and "
+                f"fills a missing one with null"
+            )
+        for name, child_type in fields.items():
+            if _carries_keys(child_type):
+                _check_keys([row[name] for row in dicts if name in row], child_type)
+    elif _is_list_like(arrow_type):
+        _check_keys([item for row in rows if row is not None for item in row], arrow_type.value_type)
+    elif pa.types.is_map(arrow_type):
+        _check_keys(_map_items(rows), arrow_type.item_type)
+
+
+def _map_items(rows):
+    """The item values of map rows given as dicts or as lists of pairs."""
+    items = []
     for row in rows:
         if isinstance(row, Mapping):
-            seen.update(row)
-    unexpected_keys = sorted(str(key) for key in seen - declared)
-    if unexpected_keys:
-        raise ValueError(
-            f"declared {type_repr(struct_type)} but the dicts carry keys {unexpected_keys} "
-            f"that no declared field has; Arrow matches struct fields by exact name and "
-            f"fills a missing one with null"
-        )
+            items.extend(row.values())
+        elif row is not None:
+            items.extend(pair[1] for pair in row)
+    return items
 
 
 def _record_to_struct(value, arrow_type):
@@ -73,7 +127,7 @@ def _record_to_struct(value, arrow_type):
             continue
         try:
             children.append(_convert(value[field.name], field.type))
-        except (pa.ArrowException, TypeError, ValueError) as exc:
+        except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
             raise renamed(exc, f"field {field.name!r}") from exc
     return pa.StructArray.from_arrays(children, fields=fields)
 
@@ -84,9 +138,11 @@ def _convert(value, arrow_type):
     With a declared type the array is built as that type from the start
     rather than inferred and cast afterwards: a string column declared
     ``large_string`` is built as one, a list of dicts declared ``struct`` is
-    built field by field and its keys are checked, and a list of dicts or of
-    pairs declared ``map`` becomes a map, which no inferred struct can be cast
-    to.
+    built field by field and its keys are checked at every depth, and a list
+    of dicts or of pairs declared ``map`` becomes a map, which no inferred
+    struct can be cast to. A ready-built Arrow array is cast to the declared
+    type only once its field names, at every depth, are found among the
+    declared ones, since a cast matches struct fields by name as well.
 
     A numpy fixed-width unicode or bytes array handed straight to ``pa.array``
     is read with C string semantics, so a value is cut at its first NUL:
@@ -107,18 +163,35 @@ def _convert(value, arrow_type):
     if isinstance(value, pa.Array):
         if arrow_type is None or value.type == arrow_type:
             return value
+        unexpected = _unexpected_fields(value.type, arrow_type)
+        if unexpected:
+            raise ValueError(
+                f"declared {type_repr(arrow_type)} but the array is {type_repr(value.type)}, whose "
+                f"fields {unexpected} no declared field has; a cast matches struct fields by exact "
+                f"name and fills a missing one with null"
+            )
         return value.cast(arrow_type)
-    if isinstance(value, np.ndarray):
-        if value.dtype.names is not None:
-            return _record_to_struct(value, arrow_type)
-        kind = value.dtype.kind
-        if kind == "U":
-            return pa.array(value.tolist(), type=arrow_type or pa.string())
-        if kind == "S":
-            return pa.array(value.tolist(), type=arrow_type or pa.binary())
-        return pa.array(value, type=arrow_type)
-    if arrow_type is not None and pa.types.is_struct(arrow_type) and isinstance(value, (list, tuple)):
-        _check_struct_keys(value, arrow_type)
+    if isinstance(value, np.ndarray) and value.dtype.kind != "O":
+        return _ndarray_to_arrow(value, arrow_type)
+    # An object array, a list, a tuple, a pandas Series or any other iterable
+    # of Python objects.
+    if arrow_type is not None and _carries_keys(arrow_type):
+        if not hasattr(value, "__len__"):
+            # A generator would be consumed by the check, so it is read once.
+            value = list(value)
+        _check_keys(value, arrow_type)
+    return pa.array(value, type=arrow_type)
+
+
+def _ndarray_to_arrow(value, arrow_type):
+    """An ndarray of a non-object dtype as an Arrow array; see ``_convert``."""
+    if value.dtype.names is not None:
+        return _record_to_struct(value, arrow_type)
+    kind = value.dtype.kind
+    if kind == "U":
+        return pa.array(value.tolist(), type=arrow_type or pa.string())
+    if kind == "S":
+        return pa.array(value.tolist(), type=arrow_type or pa.binary())
     return pa.array(value, type=arrow_type)
 
 
@@ -138,8 +211,43 @@ def _to_arrow(value, name, arrow_type=None):
         )
     try:
         return _convert(value, arrow_type)
-    except (pa.ArrowException, TypeError, ValueError) as exc:
+    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         raise renamed(exc, f"output column {name!r}") from exc
+
+
+def _build_batch(outputs, output_schema):
+    """The RecordBatch a UDF's result becomes, bound to ``output_schema`` when there is one."""
+    if not isinstance(outputs, Mapping):
+        raise TypeError(
+            f"main_func must return a dict of column name to array, not "
+            f"{type(outputs).__name__}"
+        )
+    if output_schema is None:
+        names = list(outputs)
+        arrays = [_to_arrow(outputs[name], name) for name in names]
+    else:
+        extra = [name for name in outputs if name not in output_schema.names]
+        if extra:
+            raise ValueError(
+                f"main_func returned columns {extra} that output_schema does not name; "
+                f"it names {output_schema.names}"
+            )
+        names = output_schema.names
+        arrays = []
+        for field in output_schema:
+            if field.name not in outputs:
+                raise KeyError(
+                    f"output_schema names column {field.name!r}, which main_func did not "
+                    f"return; it returned {list(outputs)}"
+                )
+            arrays.append(_to_arrow(outputs[field.name], field.name, field.type))
+    lengths = {name: len(array) for name, array in zip(names, arrays)}
+    if len(set(lengths.values())) > 1:
+        # pyarrow's own refusal says "2 vs 3" and names neither column.
+        raise ValueError(f"output columns differ in length: {lengths}")
+    if output_schema is None:
+        return pa.RecordBatch.from_arrays(arrays, names=names)
+    return pa.RecordBatch.from_arrays(arrays, schema=output_schema)
 
 
 def _fold_struct_validity(struct_bitmap, field_bitmap):
@@ -286,30 +394,5 @@ def make_mapinarrow_func(
                     }
                 else:
                     bitmap_dict[col], data_dict[col] = adapted
-            outputs = main_func(data_dict, bitmap_dict, broadcasts)
-            if not isinstance(outputs, Mapping):
-                raise TypeError(
-                    f"main_func must return a dict of column name to array, not "
-                    f"{type(outputs).__name__}"
-                )
-            if output_schema is None:
-                yield pa.RecordBatch.from_pydict(
-                    {name: _to_arrow(value, name) for name, value in outputs.items()}
-                )
-                continue
-            extra = [name for name in outputs if name not in output_schema.names]
-            if extra:
-                raise ValueError(
-                    f"main_func returned columns {extra} that output_schema does not name; "
-                    f"it names {output_schema.names}"
-                )
-            arrays = []
-            for field in output_schema:
-                if field.name not in outputs:
-                    raise KeyError(
-                        f"output_schema names column {field.name!r}, which main_func did not "
-                        f"return; it returned {list(outputs)}"
-                    )
-                arrays.append(_to_arrow(outputs[field.name], field.name, field.type))
-            yield pa.RecordBatch.from_arrays(arrays, schema=output_schema)
+            yield _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema)
     return _

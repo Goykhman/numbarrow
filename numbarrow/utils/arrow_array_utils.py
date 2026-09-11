@@ -53,14 +53,16 @@ def renamed(exc: Exception, prefix: str) -> Exception:
     """The same exception with *prefix* in front of its message.
 
     The class is kept when it can be rebuilt from one string, which every
-    pyarrow error and a plain TypeError, ValueError, KeyError or
-    NotImplementedError can; anything else, such as a UnicodeDecodeError with
-    its five constructor arguments, comes back as a ValueError so that the
-    prefix is never lost to a second error raised while building the message.
-    Raise the result ``from exc`` to keep the original traceback.
+    pyarrow error and a plain TypeError, ValueError, KeyError,
+    NotImplementedError or OverflowError can; anything else, such as a
+    UnicodeDecodeError with its five constructor arguments, comes back as a
+    ValueError so that the prefix is never lost to a second error raised while
+    building the message. Raise the result ``from exc`` to keep the original
+    traceback.
     """
     cls = type(exc)
-    if not (isinstance(exc, pa.ArrowException) or cls in (TypeError, ValueError, KeyError, NotImplementedError)):
+    kept = (TypeError, ValueError, KeyError, NotImplementedError, OverflowError)
+    if not (isinstance(exc, pa.ArrowException) or cls in kept):
         cls = ValueError
     return cls(f"{prefix}: {exc}")
 
