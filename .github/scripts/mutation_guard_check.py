@@ -75,8 +75,8 @@ MUTATIONS = [
     (
         "unicode output stops naming its type",
         "numbarrow/core/mapinarrow_factory.py",
-        "            return pa.array(value.tolist(), type=arrow_type or pa.string())",
-        "            return pa.array(value.tolist(), type=arrow_type)",
+        "        return pa.array(value.tolist(), type=arrow_type or pa.string())",
+        "        return pa.array(value.tolist(), type=arrow_type)",
     ),
     (
         "a dict under one output key stops being refused",
@@ -87,10 +87,34 @@ MUTATIONS = [
     (
         "a struct dict key no field has stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
-        "    if unexpected_keys:\n        raise ValueError(\n"
-        "            f\"declared {type_repr(struct_type)} but the dicts",
-        "    if False:\n        raise ValueError(\n"
-        "            f\"declared {type_repr(struct_type)} but the dicts",
+        "        if unexpected_keys:\n            raise ValueError(\n"
+        "                f\"declared {type_repr(arrow_type)} but the dicts",
+        "        if False:\n            raise ValueError(\n"
+        "                f\"declared {type_repr(arrow_type)} but the dicts",
+    ),
+    (
+        "a struct key inside a struct field stops being checked",
+        "numbarrow/core/mapinarrow_factory.py",
+        "            if _carries_keys(child_type):",
+        "            if False:",
+    ),
+    (
+        "a struct key inside a list stops being checked",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    elif _is_list_like(arrow_type):\n        _check_keys(",
+        "    elif False:\n        _check_keys(",
+    ),
+    (
+        "a ready-built array whose fields differ stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        if unexpected:",
+        "        if False:",
+    ),
+    (
+        "output columns of different lengths stop being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if len(set(lengths.values())) > 1:",
+        "    if False:",
     ),
     (
         "a ChunkedArray stops being named as such",
@@ -131,20 +155,20 @@ MUTATIONS = [
     (
         "a record array stops becoming a struct",
         "numbarrow/core/mapinarrow_factory.py",
-        "        if value.dtype.names is not None:",
-        "        if False:",
+        "    if value.dtype.names is not None:",
+        "    if False:",
     ),
     (
         "a non-dict UDF result stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
-        "            if not isinstance(outputs, Mapping):",
-        "            if False:",
+        "    if not isinstance(outputs, Mapping):",
+        "    if False:",
     ),
     (
         "an output key the schema does not name stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
-        "            if extra:",
-        "            if False:",
+        "        if extra:",
+        "        if False:",
     ),
     (
         "a non-boolean cache option stops being refused",
