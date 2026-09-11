@@ -228,7 +228,7 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
     NumPy adapter of PyArrow `StructArray`.
 
     Returns a 3-tuple:
-    - struct-level validity bitmap (None if all rows valid)
+    - struct-level validity bitmap (None when the array carries no validity buffer)
     - dict mapping field names to per-field validity bitmaps
     - dict mapping field names to per-field value arrays
     """
@@ -318,10 +318,11 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
         Each list is in turn of the same length, and each element of the list
         is of `pa.StructType`.
 
-    Returns a 3-tuple of: the struct-level validity bitmap (or ``None`` if
-    all values are valid), a dictionary mapping field names to per-field
-    validity bitmaps (each ``None`` if all values are valid), and a
-    dictionary mapping field names to the contiguous field data arrays.
+    Returns a 3-tuple of: the struct-level validity bitmap (or ``None`` when
+    the elements carry no validity buffer), a dictionary mapping field names to
+    per-field validity bitmaps (each ``None`` when that field carries no
+    validity buffer), and a dictionary mapping field names to the contiguous
+    field data arrays.
 
     Whether a field's data is copied depends on the field's type. A
     fixed-width child is a zero-copy view over the contiguous

@@ -176,11 +176,14 @@ def make_mapinarrow_func(
         :class:`pyarrow.Array`, and a numpy masked array.
 
         Spark binds the columns of that batch to the declared output schema by
-        POSITION, not by name, and compares only their types.  The dict's
-        insertion order is therefore what decides, and returning two same-typed
-        columns in the other order swaps their values with no error.  Build the
-        returned dict in the order the output schema declares, or pass
-        ``output_schema`` and let Arrow bind it by name instead.
+        POSITION, not by name, and checks nothing about their types: it reads
+        each Arrow vector through the accessor its declared type expects, so
+        an int64 column declared as a timestamp reads as a timestamp, and two
+        columns of any types that share an accessor family swap silently when
+        the dict is built in the other order; only a width mismatch, such as
+        int32 under LongType, fails.  Build the returned dict in the order the
+        output schema declares, or pass ``output_schema`` and let Arrow bind
+        it by name instead.
 
         ``data_dict`` maps each selected column's name to its data.  A column
         of a uniform type maps to one array.  A struct or list-of-struct

@@ -21,6 +21,12 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
     Arrow validity bitmaps store one bit per element, packed LSB-first into
     uint8 bytes. A set bit (1) means valid; a cleared bit (0) means null.
 
+    ``index_`` must satisfy ``0 <= index_ < 8 * len(bitmap)``. Compiled without
+    bounds checking, which is numba's default, an index past the bitmap reads
+    memory that is not the bitmap's and a negative one wraps to its end;
+    ``NUMBARROW_JIT_OPTIONS='{"boundscheck": true}'`` turns both into
+    ``IndexError``.
+
     :param index_: zero-based element index
     :param bitmap: uint8 array containing the packed validity bitmap
     :returns: True if the element is null (bit is 0), False if valid (bit is 1)
@@ -35,6 +41,10 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
 @njit(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)), **jit_options)
 def unpack_booleans(offset: int, length: int, packed_data: np.ndarray) -> np.ndarray:
     """Unpack bit-packed boolean data into a boolean array.
+
+    ``offset + length`` must not exceed ``8 * len(packed_data)``; past it the
+    read is out of bounds, and only ``NUMBARROW_JIT_OPTIONS='{"boundscheck":
+    true}'`` makes that an ``IndexError``.
 
     :param offset: bit offset into packed_data to start reading
     :param length: number of boolean values to extract

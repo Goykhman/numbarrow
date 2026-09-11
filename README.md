@@ -59,11 +59,22 @@ result = sum_non_null(data, bitmap)  # 80
 Every other array type raises `NotImplementedError` naming the type, including a
 `ListArray` whose elements are not structs and a struct with repeated field
 names. A `MapArray` is a `ListArray` whose values are a key/value struct, so it
-adapts to those two fields rather than raising, but only when every row holds
-the same number of entries. A map whose rows differ in length, which is the
-usual shape, raises for the same reason a ragged list does: the result is the
-flattened entries with no offsets, so nothing can say which row an entry
-belongs to.
+adapts to those two fields, `key` and `value`, rather than raising, but only
+when every row holds the same number of entries and both fields are of types
+the table names; a map whose values are structs, lists, or any other type the
+table does not name raises like any other unsupported struct field. A map
+whose rows differ in length, which is the usual shape, raises for the same
+reason a ragged list does: the result is the flattened entries with no
+offsets, so nothing can say which row an entry belongs to.
+
+A `TimestampArray` adapts by its unit alone: a zoned `timestamp[us, tz=...]`
+and a naive `timestamp[us]` holding the same int64 adapt to the same
+`datetime64[us]`, exactly as pyarrow's `to_numpy` does, so a UDF's calendar
+arithmetic runs on UTC instants and can disagree with Spark's own `to_date` by
+the session offset. On the way back out of `make_mapinarrow_func` a
+`datetime64` output becomes a naive timestamp of its unit, and a `date64` input
+passed through comes back `timestamp[ms]`; pass `output_schema` to restore a
+zone or a date type.
 
 A `ListArray` of structs flattens its elements and returns no offsets, so a null
 outer row can be neither reported nor accounted for in the element-to-row
@@ -74,20 +85,36 @@ A string value whose last character is NUL raises `ValueError`: numpy's
 fixed-width `|U` dtype pads with NUL, so a trailing NUL is indistinguishable
 from padding and cannot be represented. Leading and interior NULs are preserved.
 
-Returned data arrays are read-only, matching
-`pyarrow.Array.to_numpy(zero_copy_only=True)`, because they view Arrow buffers
-the caller does not own. Declare numba signatures that receive them with
+Returned data arrays are read-only and cannot be made writable. The views are
+over Arrow buffers the caller does not own, which is also why pyarrow's own
+`to_numpy(zero_copy_only=True)` refuses to hand out a writable one; the copies,
+booleans, `date32` and strings, are marked read-only as well, so the contract
+does not depend on the type. Declare numba signatures that receive them with
 `readonly=True`, which accepts writable arrays as well, or leave the function
 lazily typed and numba will infer it. Returned bitmaps own their memory and are
 writable.
 
-One exception to declaring a signature: a string column adapts to a fixed-width
-`|U` dtype whose width is the longest live value **in that batch**, so the numba
-type of a string argument varies from batch to batch. Spark splits a partition
-at `spark.sql.execution.arrow.maxRecordsPerBatch`, so a signature that names one
-width compiles on the first batch and raises `TypeError: No matching definition`
-on the next one that is wider. Leave string arguments lazily typed, at the cost
-of a fresh compilation whenever a new width appears.
+Two exceptions to declaring a signature. A string column adapts to a
+fixed-width `|U` dtype whose width is the longest live value **in that batch**,
+so the numba type of a string argument varies from batch to batch. Spark splits
+a partition at `spark.sql.execution.arrow.maxRecordsPerBatch`, so a signature
+that names one width compiles on the first batch and raises `TypeError: No
+matching definition` on the next one whose width differs, wider or narrower.
+Leave string arguments lazily typed, at the cost of a fresh compilation
+whenever a new width appears. The `|U` result is the widest live value times
+the row count times four bytes, whatever the other values are: one
+100,000-character value in a 4,000-row batch allocates 1.6 GB from 120 KB of
+Arrow data, so keep such a column out of the projection that feeds
+`mapInArrow`.
+
+A column's bitmap is `None` when the batch carries no validity buffer and a
+uint8 array otherwise, which is not the same as having no nulls: Spark's Arrow
+transport drops the buffer when a batch has no nulls, while `slice`, `take`,
+`filter` and `fill_null` keep an all-valid one. A signature that names a bitmap
+array type compiles on the batch that has a null and raises `TypeError: No
+matching definition for argument type(s) ..., none` on the next one. Declare
+bitmap parameters `Optional(Array(uint8, 1, "C", readonly=True))`, as
+[test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) does.
 
 A uniform array adapts to a 2-tuple, `(bitmap, data)`, where `bitmap` is `None`
 when the array has no validity buffer. A struct or list-of-struct array adapts
@@ -149,6 +176,11 @@ but pyarrow below 16 is built against numpy 1 and dies with
 pyarrow 15 caps numpy itself, so it resolves correctly on its own; pyarrow 14
 does not, so it needs an explicit `numpy<2`. `pyproject.toml` declares no
 pyarrow floor, so the broken combination is reachable.
+
+`NUMBA_DISABLE_JIT=1` is not supported: the viewers are built on a numba
+intrinsic that has no pure-Python form, so every adapter raises
+`NotImplementedError` under it, while `is_null` and `unpack_booleans` still run
+as plain Python.
 
 ## Documentation
 

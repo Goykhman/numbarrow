@@ -37,11 +37,24 @@ fixed-width ``|U`` dtype pads with NUL, so a trailing NUL cannot be told from
 padding and would come back silently truncated. Leading and interior NULs are
 preserved.
 
-Returned data arrays are read-only, since they view Arrow buffers the caller
-does not own, which is what ``pyarrow.Array.to_numpy(zero_copy_only=True)``
-returns as well. Declare numba signatures that receive them with
-``readonly=True``, which accepts writable arrays too. Returned bitmaps own
-their memory and are writable.
+Returned data arrays are read-only and cannot be made writable. The views are
+over Arrow buffers the caller does not own, which is also why pyarrow's own
+``to_numpy(zero_copy_only=True)`` refuses to hand out a writable one; the
+copies, booleans, ``date32`` and strings, are marked read-only as well, so the
+contract does not depend on the type. Declare numba signatures that receive
+them with ``readonly=True``, which accepts writable arrays too. Returned
+bitmaps own their memory and are writable.
+
+A bitmap is ``None`` when the array carries no validity buffer and a uint8
+array otherwise, which is not the same as having no nulls: ``slice``, ``take``,
+``filter`` and ``fill_null`` keep an all-valid buffer, and Arrow IPC, which is
+what Spark's transport uses, drops one when a batch has no nulls. Declare a
+bitmap parameter ``Optional`` in an eager numba signature, or it compiles on
+one batch and raises ``No matching definition`` on the next.
+
+A ``TimestampArray`` adapts by its unit alone, so a zoned and a naive timestamp
+holding the same int64 adapt to the same ``datetime64``, as pyarrow's
+``to_numpy`` does; the zone is not reported.
 
 Module
 ++++++
