@@ -14,21 +14,7 @@ from collections.abc import Mapping
 from typing import Callable
 
 from numbarrow.core.adapters import arrow_array_adapter
-
-
-def _renamed(exc, prefix):
-    """The same exception with *prefix* in front of its message.
-
-    The class is kept when it can be rebuilt from one string, which every
-    pyarrow error and a plain TypeError or ValueError can; anything else, such
-    as a UnicodeDecodeError with its five constructor arguments, comes back as
-    a ValueError so that the prefix is never lost to a second error raised
-    while building the message.
-    """
-    cls = type(exc)
-    if not (isinstance(exc, pa.ArrowException) or cls in (TypeError, ValueError, KeyError)):
-        cls = ValueError
-    return cls(f"{prefix}: {exc}")
+from numbarrow.utils.arrow_array_utils import renamed, type_repr
 
 
 def _struct_fields(struct_type):
@@ -52,9 +38,9 @@ def _check_struct_keys(rows, struct_type):
     unexpected_keys = sorted(str(key) for key in seen - declared)
     if unexpected_keys:
         raise ValueError(
-            f"declared {struct_type} but the dicts carry keys {unexpected_keys} that no "
-            f"declared field has; Arrow matches struct fields by exact name and fills a "
-            f"missing one with null"
+            f"declared {type_repr(struct_type)} but the dicts carry keys {unexpected_keys} "
+            f"that no declared field has; Arrow matches struct fields by exact name and "
+            f"fills a missing one with null"
         )
 
 
@@ -72,13 +58,13 @@ def _record_to_struct(value, arrow_type):
         children = [_convert(value[name], None) for name in names]
         return pa.StructArray.from_arrays(children, names=names)
     if not pa.types.is_struct(arrow_type):
-        raise TypeError(f"a record array with fields {names} cannot become {arrow_type}")
+        raise TypeError(f"a record array with fields {names} cannot become {type_repr(arrow_type)}")
     fields = _struct_fields(arrow_type)
     unexpected_keys = sorted(set(names) - {field.name for field in fields})
     if unexpected_keys:
         raise ValueError(
-            f"declared {arrow_type} but the record array carries fields {unexpected_keys} "
-            f"that no declared field has"
+            f"declared {type_repr(arrow_type)} but the record array carries fields "
+            f"{unexpected_keys} that no declared field has"
         )
     children = []
     for field in fields:
@@ -88,7 +74,7 @@ def _record_to_struct(value, arrow_type):
         try:
             children.append(_convert(value[field.name], field.type))
         except (pa.ArrowException, TypeError, ValueError) as exc:
-            raise _renamed(exc, f"field {field.name!r}") from exc
+            raise renamed(exc, f"field {field.name!r}") from exc
     return pa.StructArray.from_arrays(children, fields=fields)
 
 
@@ -153,7 +139,7 @@ def _to_arrow(value, name, arrow_type=None):
     try:
         return _convert(value, arrow_type)
     except (pa.ArrowException, TypeError, ValueError) as exc:
-        raise _renamed(exc, f"output column {name!r}") from exc
+        raise renamed(exc, f"output column {name!r}") from exc
 
 
 def _fold_struct_validity(struct_bitmap, field_bitmap):
@@ -223,7 +209,10 @@ def make_mapinarrow_func(
     :param input_columns: optional list of column names that will be expected
         to be needed for in `data_dict` for the calculation done by
         `main_func`. When not given, all columns in the iterated over PySpark
-        DataFrame will be used.
+        DataFrame will be used.  Names are matched exactly; a name the batch
+        does not have raises :class:`KeyError` listing the batch's columns,
+        since Spark's case-insensitive projection may have spelled it
+        differently.
     :param broadcasts: optional dictionary of broadcast values
     :param output_schema: optional :class:`pyarrow.Schema` for the batch that is
         yielded.  When given, the dict returned by ``main_func`` is bound to it
@@ -252,6 +241,11 @@ def make_mapinarrow_func(
         unit, and an object array holding only ``None`` comes back ``null``.
     """
     broadcasts = broadcasts if broadcasts is not None else {}
+    if isinstance(input_columns, str):
+        # A str is iterable, so "value" was read as the columns v, a, l, u, e.
+        raise TypeError(
+            f"input_columns must be a list of column names, not the string {input_columns!r}"
+        )
 
     def _(iterator):
         for batch in iterator:
@@ -262,8 +256,18 @@ def make_mapinarrow_func(
             # produces the same arrays twice, so it stays harmless.
             input_columns_ = list(dict.fromkeys(requested))
             for col in input_columns_:
+                if col not in batch.schema.names:
+                    # Spark's projection is case-insensitive and may have
+                    # rewritten the name it was given; the batch's own names
+                    # make that visible.
+                    raise KeyError(
+                        f"column {col!r} is not in this batch, whose columns are {batch.schema.names}"
+                    )
                 col_pa: pa.Array = batch.column(col)
-                adapted = arrow_array_adapter(col_pa)
+                try:
+                    adapted = arrow_array_adapter(col_pa)
+                except (NotImplementedError, ValueError, TypeError, pa.ArrowException) as exc:
+                    raise renamed(exc, f"column {col!r}") from exc
                 if len(adapted) == 3:
                     struct_bitmap, field_bitmaps, field_datas = adapted
                     # The struct-level bitmap is folded into each field rather

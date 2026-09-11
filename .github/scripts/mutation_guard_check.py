@@ -87,8 +87,44 @@ MUTATIONS = [
     (
         "a struct dict key no field has stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
-        "    if unexpected_keys:\n        raise ValueError(\n            f\"declared {struct_type} but the dicts",
-        "    if False:\n        raise ValueError(\n            f\"declared {struct_type} but the dicts",
+        "    if unexpected_keys:\n        raise ValueError(\n            f\"declared {type_repr(struct_type)} but the dicts",
+        "    if False:\n        raise ValueError(\n            f\"declared {type_repr(struct_type)} but the dicts",
+    ),
+    (
+        "a ChunkedArray stops being named as such",
+        "numbarrow/core/adapters.py",
+        "    if isinstance(pa_array, pa.ChunkedArray):",
+        "    if False:",
+    ),
+    (
+        "a struct child's failure stops naming the field",
+        "numbarrow/utils/arrow_array_utils.py",
+        '            raise renamed(exc, f"struct field {field_name!r}") from exc',
+        "            raise",
+    ),
+    (
+        "invalid UTF-8 stops naming the element",
+        "numbarrow/utils/arrow_array_utils.py",
+        "        except UnicodeDecodeError as exc:",
+        "        except ():",
+    ),
+    (
+        "a string input_columns stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if isinstance(input_columns, str):",
+        "    if False:",
+    ),
+    (
+        "a missing input column stops naming the batch's columns",
+        "numbarrow/core/mapinarrow_factory.py",
+        "                if col not in batch.schema.names:",
+        "                if False:",
+    ),
+    (
+        "an adapter failure stops naming the column",
+        "numbarrow/core/mapinarrow_factory.py",
+        '                    raise renamed(exc, f"column {col!r}") from exc',
+        "                    raise",
     ),
     (
         "a record array stops becoming a struct",

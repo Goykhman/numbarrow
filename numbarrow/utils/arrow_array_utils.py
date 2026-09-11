@@ -28,6 +28,42 @@ arrow_to_numpy_dtypes = {
     pa.uint8(): np.uint8,
 }
 
+# The longest pyarrow type an error message carries in full.
+TYPE_REPR_WIDTH = 120
+
+
+def type_repr(arrow_type) -> str:
+    """``str(arrow_type)``, cut at a fixed width with a note of what was cut.
+
+    A message that interpolates a pyarrow type grows with the schema: a
+    thousand-field struct is 13,000 characters at the dispatcher, and a message
+    that size lands in every log line that catches the traceback. The bound
+    leaves the one-field case, which is the one people read, untouched.
+    """
+    text = str(arrow_type)
+    if len(text) <= TYPE_REPR_WIDTH:
+        return text
+    cut = text[:TYPE_REPR_WIDTH]
+    if pa.types.is_struct(arrow_type):
+        return f"{cut}... ({arrow_type.num_fields} fields, {len(text)} characters)"
+    return f"{cut}... ({len(text)} characters)"
+
+
+def renamed(exc: Exception, prefix: str) -> Exception:
+    """The same exception with *prefix* in front of its message.
+
+    The class is kept when it can be rebuilt from one string, which every
+    pyarrow error and a plain TypeError, ValueError, KeyError or
+    NotImplementedError can; anything else, such as a UnicodeDecodeError with
+    its five constructor arguments, comes back as a ValueError so that the
+    prefix is never lost to a second error raised while building the message.
+    Raise the result ``from exc`` to keep the original traceback.
+    """
+    cls = type(exc)
+    if not (isinstance(exc, pa.ArrowException) or cls in (TypeError, ValueError, KeyError, NotImplementedError)):
+        cls = ValueError
+    return cls(f"{prefix}: {exc}")
+
 
 def create_bitmap(bitmap_buf: pa.Buffer | None, offset: int = 0, length: int = 0):
     """ Create numpy array of uint8 type containing
@@ -166,7 +202,14 @@ def create_str_array(pa_str_array: pa.StringArray | pa.LargeStringArray) -> tupl
             continue
         start = int(bounds[i])
         length = int(bounds[i + 1]) - start
-        str_array[i] = bytes(buf_view[start:start + length]).decode("utf-8")
+        try:
+            str_array[i] = bytes(buf_view[start:start + length]).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            # The bare error's "position" is a byte offset inside the element,
+            # which says nothing about which element of the batch it is in.
+            raise ValueError(
+                f"element {i} of a {n}-element {pa_str_array.type} array is not valid UTF-8: {exc}"
+            ) from exc
     bitmap = create_bitmap(bitmap_buf, offset, n)
     # A fresh numpy allocation, but read-only all the same, so that the
     # contract does not depend on which Arrow type the caller happened to pass.
@@ -193,9 +236,13 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
     # handlers are defined in terms of the adapters in this module.
     from numbarrow.core.adapters import arrow_array_adapter
 
-    assert isinstance(struct_array, pa.StructArray)
+    if not isinstance(struct_array, pa.StructArray):
+        # A bare assert here vanished under -O and let any array reach the
+        # field loop, which then died on an error about something else.
+        raise TypeError(
+            f"structured_array_adapter takes a StructArray, not {type(struct_array).__name__}"
+        )
     data_type: pa.StructType = struct_array.type
-    assert isinstance(data_type, pa.StructType)
     struct_bitmap_buf = struct_array.buffers()[0]
     struct_bitmap = create_bitmap(
         struct_bitmap_buf, struct_array.offset, len(struct_array)
@@ -208,7 +255,7 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
         # neither the struct nor the cause.
         raise NotImplementedError(
             f"Not implemented for a struct with repeated field names "
-            f"{sorted(duplicates)} in {struct_array.type}"
+            f"{sorted(duplicates)} in {type_repr(struct_array.type)}"
         )
     bitmaps = {}
     datas = {}
@@ -237,10 +284,16 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
         # holding one bit per element; and a child with more than two buffers
         # has no uniform layout to view at all, so it needs its own handler or
         # the dispatcher's typed error.
-        adapted = arrow_array_adapter(pa_array)
+        try:
+            adapted = arrow_array_adapter(pa_array)
+        except (NotImplementedError, ValueError, TypeError, pa.ArrowException) as exc:
+            # The dispatcher's message names the child's type but not which
+            # field of the struct it is, and thirteen of the common Arrow types
+            # are unregistered, so the field name is what a caller needs.
+            raise renamed(exc, f"struct field {field_name!r}") from exc
         if len(adapted) != 2:
             raise NotImplementedError(
-                f"Not implemented for struct field {field_name!r} of type {pa_array.type}: "
+                f"Not implemented for struct field {field_name!r} of type {type_repr(pa_array.type)}: "
                 f"a structured child adapts to per-field dictionaries, which do not fit "
                 f"a single field's bitmap and data"
             )
@@ -287,15 +340,21 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
     it contributes no elements, so ``list_array.null_count`` must be zero and
     a non-zero one raises ``NotImplementedError``.
     """
-    assert isinstance(list_array, pa.ListArray)
+    if not isinstance(list_array, pa.ListArray):
+        # A bare assert here vanished under -O and let any array through to
+        # `.values`, which then died on an AttributeError.
+        raise TypeError(
+            f"structured_list_array_adapter takes a ListArray, not {type(list_array).__name__}"
+        )
     values: pa.Array = list_array.values
     if not pa.types.is_struct(values.type):
         # The array itself is deliberately not interpolated: its repr carries
         # every value it holds, which grows without bound and puts the
-        # caller's data into whatever log catches the traceback.
+        # caller's data into whatever log catches the traceback. The element
+        # type is already part of the list type, so it is not repeated.
         raise NotImplementedError(
             f"Not implemented for a list array of {len(list_array)} rows of "
-            f"type {list_array.type}: elements are {values.type}, not a struct"
+            f"type {type_repr(list_array.type)}: its elements are not structs"
         )
     # The result is the flattened elements with no offsets, so a caller can
     # only map element i back to a row by assuming every row holds the same
@@ -307,8 +366,8 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
     if list_array.null_count:
         raise NotImplementedError(
             f"Not implemented for a list array of {len(list_array)} rows of type "
-            f"{list_array.type} with {list_array.null_count} null row(s): a null "
-            f"row contributes no elements, so the flattened result would "
+            f"{type_repr(list_array.type)} with {list_array.null_count} null row(s): a "
+            f"null row contributes no elements, so the flattened result would "
             f"silently misalign with the rows"
         )
     if len(list_array):
@@ -318,10 +377,10 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
         if low != high:
             raise NotImplementedError(
                 f"Not implemented for a list array of {len(list_array)} rows of type "
-                f"{list_array.type} whose rows are not all the same length: they run "
-                f"from {low} to {high}. Element order alone cannot say which row an "
-                f"element belongs to unless every row is the same length, so the "
-                f"result would silently misalign with the rows"
+                f"{type_repr(list_array.type)} whose rows are not all the same length: "
+                f"they run from {low} to {high}. Element order alone cannot say which "
+                f"row an element belongs to unless every row is the same length, so "
+                f"the result would silently misalign with the rows"
             )
     # `values` is the whole child array and ignores this array's own offset,
     # so a sliced or offset list column would hand back the elements of rows

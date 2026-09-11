@@ -17,7 +17,7 @@ from functools import singledispatch
 from numbarrow.core.is_null import unpack_booleans
 from numbarrow.utils.arrow_array_utils import (
     create_bitmap, create_str_array, structured_array_adapter,
-    structured_list_array_adapter, uniform_arrow_array_adapter
+    structured_list_array_adapter, type_repr, uniform_arrow_array_adapter
 )
 from numbarrow.utils.utils import arrays_viewers
 
@@ -57,13 +57,21 @@ def arrow_array_adapter(pa_array: pa.Array):
     # directly turns the documented NotImplementedError into an AttributeError
     # or a TypeError raised while building the message, which escapes any
     # caller that wraps this in `except NotImplementedError`.
+    if isinstance(pa_array, pa.ChunkedArray):
+        # A Table column. Described as one, rather than as "an array of N
+        # elements of type int64", which blames a supported type and never
+        # says chunked.
+        raise NotImplementedError(
+            f"Not implemented for a ChunkedArray of {pa_array.num_chunks} chunks of type "
+            f"{type_repr(pa_array.type)}: pass one chunk, or combine_chunks() first"
+        )
     arrow_type = getattr(pa_array, "type", None)
     if arrow_type is None:
         described = f"{type(pa_array).__name__}, which is not a pyarrow Array"
     elif hasattr(pa_array, "__len__"):
-        described = f"an array of {len(pa_array)} elements of type {arrow_type}"
+        described = f"an array of {len(pa_array)} elements of type {type_repr(arrow_type)}"
     else:
-        described = f"{type(pa_array).__name__} of type {arrow_type}"
+        described = f"{type(pa_array).__name__} of type {type_repr(arrow_type)}"
     raise NotImplementedError(f"Not implemented for {described}")
 
 
