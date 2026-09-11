@@ -5,6 +5,23 @@ import sys
 import pytest
 
 
+def spark_leg_required():
+    """True when a Spark leg that cannot run must fail the run rather than skip it.
+
+    Every Spark or JVM failure below turns into a skip, which keeps a machine
+    without java useful but also means that losing every end-to-end test is a
+    green run. A CI cell that is expected to run Spark sets
+    NUMBARROW_REQUIRE_SPARK=1 and gets a failure that says why instead.
+    """
+    return os.environ.get("NUMBARROW_REQUIRE_SPARK") == "1"
+
+
+def skip_or_fail(reason):
+    if spark_leg_required():
+        pytest.fail("NUMBARROW_REQUIRE_SPARK=1 but " + reason, pytrace=False)
+    pytest.skip(reason)
+
+
 def spark_unavailable_reason():
     """Reason a SparkSession cannot start here, or None when one can."""
     if sys.platform not in ("linux", "darwin"):
@@ -65,7 +82,7 @@ def arrow_transport_unusable(session):
 def spark():
     reason = spark_unavailable_reason()
     if reason is not None:
-        pytest.skip(reason)
+        skip_or_fail(reason)
     # Imported here rather than at module scope so a missing pyspark skips
     # these tests instead of aborting collection for the whole suite.
     from pyspark.sql import SparkSession
@@ -90,6 +107,6 @@ def spark():
     unusable = arrow_transport_unusable(session)
     if unusable is not None:
         session.stop()
-        pytest.skip(unusable)
+        skip_or_fail(unusable)
     yield session
     session.stop()

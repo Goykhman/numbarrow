@@ -85,13 +85,20 @@ def _is_view(array):
 
 @pytest.mark.parametrize("names,copy_answer", _table_rows())
 def test_documented_copy_column_matches_reality(names, copy_answer):
-    # "Per-field" rows return dicts; their children are covered by the scalar
-    # rows above, so only the yes/no rows are checkable here.
-    if not copy_answer.lower().startswith(("yes", "no")):
-        pytest.skip(f"not a yes/no answer: {copy_answer!r}")
-    documented_copy = copy_answer.lower().startswith("yes")
     for name in names:
         result = arrow_array_adapter(SAMPLES[name])
+        if len(result) == 3:
+            # A struct or list row adapts per field; its children are covered
+            # by the scalar rows, so the only claim to hold it to is the label.
+            assert copy_answer.lower().startswith("per-field"), (
+                f"{name}: adapts per field, README says {copy_answer!r}"
+            )
+            continue
+        # Asserted rather than skipped: a reworded cell used to disarm its row.
+        assert copy_answer.lower().startswith(("yes", "no")), (
+            f"{name}: README says {copy_answer!r}, which is neither yes nor no"
+        )
+        documented_copy = copy_answer.lower().startswith("yes")
         data = result[1]
         assert isinstance(data, np.ndarray), name
         measured_copy = not _is_view(data)

@@ -79,6 +79,15 @@ def test_duplicate_input_columns_is_harmless():
     assert sorted(seen["bitmap"]) == ["a"]
 
 
+def test_input_columns_selects_only_the_named_columns():
+    # input_columns had no end-to-end test: every column reaching the UDF
+    # regardless kept the suite green.
+    batch = pa.RecordBatch.from_pydict({"a": [1, 2], "b": [3, 4], "c": [5, 6]})
+    seen = run_batch(batch, input_columns=["c", "a"])
+    assert list(seen["data"]) == ["c", "a"] and list(seen["bitmap"]) == ["c", "a"]
+    assert seen["data"]["c"].tolist() == [5, 6]
+
+
 def test_a_struct_field_sharing_a_column_name_reaches_the_udf():
     # Four ordinary Spark StructTypes convert to this shape: a top-level column
     # and a struct field sharing a name. Nested under its column, the field

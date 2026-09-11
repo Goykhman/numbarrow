@@ -39,16 +39,43 @@ COLUMNS = {
     "interior nul": pa.array(["a\x00b", "plain"], type=pa.string()),
     "leading nul": pa.array(["\x00ab", "plain"], type=pa.string()),
     "large_string": pa.array(["a", "bb"], type=pa.large_string()),
+    "date32": pa.array([1, -2], type=pa.int32()).cast(pa.date32()),
+    "date64": pa.array([86400000, 172800000], type=pa.int64()).cast(pa.date64()),
+    "timestamp": pa.array([1, 2], type=pa.int64()).cast(pa.timestamp("us")),
+    "timestamp tz": pa.array([1, 2], type=pa.int64()).cast(pa.timestamp("us", "UTC")),
+}
+
+# Where the type that comes back differs from the type that went in, and why:
+# the numpy dtype is all the output side has, so a large_string is a string,
+# a date64 is the timestamp[ms] its int64 milliseconds imply, and a zoned
+# timestamp is naive. output_schema restores each, which is tested below.
+DRIFT = {
+    "large_string": pa.string(),
+    "date64": pa.timestamp("ms"),
+    "timestamp tz": pa.timestamp("us"),
 }
 
 
 @pytest.mark.parametrize("label", sorted(COLUMNS))
 def test_a_value_survives_the_round_trip(label):
+    # The type is asserted too: a value comparison alone could not see a
+    # column change type on the way through.
     column = COLUMNS[label]
     got = _round_trip(column).column("c")
-    assert got.to_pylist() == column.to_pylist(), (
+    assert got.type == DRIFT.get(label, column.type), f"{label}: {column.type} came back {got.type}"
+    expected = column.cast(got.type).to_pylist() if label in DRIFT else column.to_pylist()
+    assert got.to_pylist() == expected, (
         f"{label}: went in as {column.to_pylist()!r}, came out as {got.to_pylist()!r}"
     )
+
+
+@pytest.mark.parametrize("label", sorted(DRIFT))
+def test_output_schema_restores_a_drifted_type(label):
+    column = COLUMNS[label]
+    batch = pa.RecordBatch.from_arrays([column], names=["c"])
+    fn = make_mapinarrow_func(_identity, input_columns=["c"], output_schema=pa.schema([("c", column.type)]))
+    got = list(fn(iter([batch])))[0].column("c")
+    assert got.type == column.type and got.to_pylist() == column.to_pylist(), label
 
 
 def test_a_udf_names_its_output_columns():
