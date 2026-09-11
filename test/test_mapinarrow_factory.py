@@ -241,7 +241,7 @@ def test_output_schema_refuses_a_value_that_cannot_convert():
     # so it raises rather than truncating into the declared type.
     outputs = {"a": np.array([1.5, 2.5], dtype=np.float64),
                "b": np.array([3, 4], dtype=np.int64)}
-    with pytest.raises(pa.ArrowInvalid):
+    with pytest.raises(pa.ArrowInvalid, match="'a'"):
         run_outputs(outputs, OUT_SCHEMA)
 
 
@@ -264,11 +264,90 @@ def test_a_bytes_column_keeps_its_nuls():
     assert got.column("b").to_pylist() == values
 
 
-def test_output_schema_drops_a_key_it_does_not_name():
-    # The one mismatch a schema does not catch, pinned so the docstring's claim
-    # stays true if pyarrow ever starts raising here.
+def test_output_schema_refuses_a_key_it_does_not_name():
+    # An unnamed key used to be dropped silently, the one mismatch the schema
+    # did not catch.
     outputs = {"a": np.array([1, 2], dtype=np.int64),
                "b": np.array([3, 4], dtype=np.int64),
                "c": np.array([5, 6], dtype=np.int64)}
-    got = run_outputs(outputs, OUT_SCHEMA)
-    assert got.schema.names == ["a", "b"]
+    with pytest.raises(ValueError, match="'c'"):
+        run_outputs(outputs, OUT_SCHEMA)
+
+
+def test_a_dict_under_one_output_key_is_refused():
+    # pa.array iterates a mapping, so this used to come back as a string
+    # column of the keys, two rows long, with nothing raised.
+    arr = np.array([1, 2], dtype=np.int64)
+    with pytest.raises(TypeError, match="'s'"):
+        run_outputs({"s": {"a": arr, "b": arr}})
+    with pytest.raises(TypeError, match="'s'"):
+        run_outputs({"s": {"a": arr, "b": arr}}, pa.schema([("s", pa.string())]))
+
+
+def test_output_schema_builds_a_string_column_as_declared():
+    schema = pa.schema([("s", pa.large_string())])
+    got = run_outputs({"s": np.array(["x", "y\x00z"])}, schema)
+    assert got.column("s").type == pa.large_string()
+    assert got.column("s").to_pylist() == ["x", "y\x00z"]
+    empty = run_outputs({"s": np.empty(0, dtype="<U1")}, schema)
+    assert empty.column("s").type == pa.large_string()
+
+
+def test_output_schema_refuses_a_struct_key_no_field_has():
+    # Arrow matches struct fields by exact name and nulls a missing one, so a
+    # list of dicts keyed Amount/Label against amount/label used to come back
+    # as two columns of nulls under an identical schema.
+    schema = pa.schema([("s", pa.struct([("amount", pa.int64()), ("label", pa.string())]))])
+    got = run_outputs({"s": [{"amount": 1, "label": "x"}, {"amount": 2}]}, schema)
+    assert got.column("s").to_pylist() == [{"amount": 1, "label": "x"}, {"amount": 2, "label": None}]
+    with pytest.raises(ValueError, match="Amount"):
+        run_outputs({"s": [{"Amount": 1, "Label": "x"}]}, schema)
+
+
+def test_output_schema_builds_a_map_column():
+    # A map has no inferred type to be cast from: a list of dicts infers a
+    # struct, which does not cast to map, and a list of pairs fails inference.
+    schema = pa.schema([("m", pa.map_(pa.string(), pa.int64()))])
+    for value in ([{"k": 1, "j": 2}], [[("k", 1), ("j", 2)]]):
+        got = run_outputs({"m": value}, schema)
+        assert got.column("m").type == schema.field("m").type
+        assert got.column("m").to_pylist() == [[("k", 1), ("j", 2)]]
+
+
+def test_a_record_array_becomes_a_struct_column():
+    # The one ndarray shape that means struct, and what an @njit function
+    # returns for a numba record type; pa.array refuses it outright.
+    records = np.array([(1, 2.5, "ab"), (3, 4.5, "c\x00d")],
+                       dtype=[("i", "i8"), ("f", "f8"), ("s", "U3")])
+    got = run_outputs({"r": records})
+    assert got.column("r").type == pa.struct([("i", pa.int64()), ("f", pa.float64()), ("s", pa.string())])
+    assert got.column("r").to_pylist() == [{"i": 1, "f": 2.5, "s": "ab"}, {"i": 3, "f": 4.5, "s": "c\x00d"}]
+    declared = pa.schema([("r", pa.struct([("i", pa.int32()), ("s", pa.large_string()), ("extra", pa.int64())]))])
+    got = run_outputs({"r": records[["i", "s"]]}, declared)
+    assert got.column("r").type == declared.field("r").type
+    assert got.column("r").to_pylist() == [{"i": 1, "s": "ab", "extra": None}, {"i": 3, "s": "c\x00d", "extra": None}]
+    with pytest.raises(ValueError, match="'f'"):
+        run_outputs({"r": records}, declared)
+
+
+def test_an_output_side_failure_names_its_column():
+    with pytest.raises(pa.ArrowInvalid, match="'bad'"):
+        run_outputs({"bad": np.zeros((2, 2))})
+    with pytest.raises(pa.ArrowInvalid, match="'a'"):
+        run_outputs({"a": np.array([1.5, 2.5])}, pa.schema([("a", pa.int64())]))
+    with pytest.raises(TypeError, match="'a'"):
+        run_outputs({"a": 3})
+
+
+def test_main_func_must_return_a_dict():
+    with pytest.raises(TypeError, match="NoneType"):
+        run_outputs(None)
+
+
+def test_an_all_none_object_column_keeps_a_declared_type():
+    # Without a schema an object column of Nones infers null, the same trap an
+    # empty string column used to fall into.
+    schema = pa.schema([("s", pa.string())])
+    got = run_outputs({"s": np.array([None, None], dtype=object)}, schema)
+    assert got.column("s").type == pa.string() and got.column("s").null_count == 2
+    assert run_outputs({"s": np.array([None, None], dtype=object)}).column("s").type == pa.null()

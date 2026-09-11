@@ -75,8 +75,38 @@ MUTATIONS = [
     (
         "unicode output stops naming its type",
         "numbarrow/core/mapinarrow_factory.py",
-        "        return pa.array(output.tolist(), type=pa.string())",
-        "        return pa.array(output.tolist())",
+        "            return pa.array(value.tolist(), type=arrow_type or pa.string())",
+        "            return pa.array(value.tolist(), type=arrow_type)",
+    ),
+    (
+        "a dict under one output key stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if isinstance(value, Mapping):",
+        "    if False:",
+    ),
+    (
+        "a struct dict key no field has stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if unexpected_keys:\n        raise ValueError(\n            f\"declared {struct_type} but the dicts",
+        "    if False:\n        raise ValueError(\n            f\"declared {struct_type} but the dicts",
+    ),
+    (
+        "a record array stops becoming a struct",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        if value.dtype.names is not None:",
+        "        if False:",
+    ),
+    (
+        "a non-dict UDF result stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "            if not isinstance(outputs, Mapping):",
+        "            if False:",
+    ),
+    (
+        "an output key the schema does not name stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "            if extra:",
+        "            if False:",
     ),
     (
         "empty string result stops being read-only",
