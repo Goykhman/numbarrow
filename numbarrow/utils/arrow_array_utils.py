@@ -49,19 +49,36 @@ def type_repr(arrow_type) -> str:
     return f"{cut}... ({len(text)} characters)"
 
 
+class MissingKeyError(KeyError):
+    """A KeyError whose message reads as written.
+
+    ``KeyError.__str__`` reprs its single argument, so a sentence raised
+    through a plain KeyError arrives wrapped in a second pair of quotes, and
+    one that was already rendered arrives mangled. ``except KeyError`` still
+    catches this; only the rendering changes.
+    """
+
+    def __str__(self):
+        return str(self.args[0]) if len(self.args) == 1 else super().__str__()
+
+
 def renamed(exc: Exception, prefix: str) -> Exception:
     """The same exception with *prefix* in front of its message.
 
     The class is kept when it can be rebuilt from one string, which every
-    pyarrow error and a plain TypeError, ValueError, KeyError,
-    NotImplementedError or OverflowError can; anything else, such as a
-    UnicodeDecodeError with its five constructor arguments, comes back as a
-    ValueError so that the prefix is never lost to a second error raised while
-    building the message. Raise the result ``from exc`` to keep the original
-    traceback.
+    pyarrow error and a plain TypeError, ValueError, NotImplementedError or
+    OverflowError can; anything else, such as a UnicodeDecodeError with its
+    five constructor arguments, comes back as a ValueError so that the prefix
+    is never lost to a second error raised while building the message. A
+    plain KeyError comes back as a :class:`MissingKeyError`, since its str()
+    is the repr of its argument and a KeyError rebuilt from that would repr
+    it again. Raise the result ``from exc`` to keep the original traceback.
     """
+    if isinstance(exc, KeyError) and not isinstance(exc, pa.ArrowException):
+        text = str(exc.args[0]) if len(exc.args) == 1 else str(exc)
+        return MissingKeyError(f"{prefix}: {text}")
     cls = type(exc)
-    kept = (TypeError, ValueError, KeyError, NotImplementedError, OverflowError)
+    kept = (TypeError, ValueError, NotImplementedError, OverflowError)
     if not (isinstance(exc, pa.ArrowException) or cls in kept):
         cls = ValueError
     return cls(f"{prefix}: {exc}")

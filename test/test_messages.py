@@ -20,7 +20,7 @@ import pytest
 
 from numbarrow.core.adapters import arrow_array_adapter
 from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
-from numbarrow.utils.arrow_array_utils import TYPE_REPR_WIDTH, type_repr
+from numbarrow.utils.arrow_array_utils import TYPE_REPR_WIDTH, renamed, type_repr
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -111,6 +111,32 @@ def test_a_missing_input_column_names_the_batch_columns():
     fn = make_mapinarrow_func(lambda d, b, br: {}, input_columns=["value"])
     with pytest.raises(KeyError, match=r"'value'.*\['Value', 'id'\]"):
         list(fn(iter([_batch(Value=[1.0], id=[1])])))
+
+
+def test_a_key_error_message_reads_as_written():
+    # KeyError.__str__ reprs its argument, which wrapped both messages in a
+    # second pair of quotes, and mangles a message renamed through it.
+    fn = make_mapinarrow_func(lambda d, b, br: {}, input_columns=["value"])
+    with pytest.raises(KeyError) as excinfo:
+        list(fn(iter([_batch(Value=[1.0])])))
+    assert str(excinfo.value).startswith("column 'value' is not in this batch")
+    schema = pa.schema([("b", pa.int64())])
+    fn = make_mapinarrow_func(lambda d, b, br: {}, input_columns=["a"], output_schema=schema)
+    with pytest.raises(KeyError) as excinfo:
+        list(fn(iter([_batch(a=[1])])))
+    assert str(excinfo.value).startswith("output_schema names column 'b'")
+    wrapped = renamed(KeyError('Field "nope" does not exist in schema'), "prefix")
+    assert isinstance(wrapped, KeyError)
+    assert str(wrapped) == 'prefix: Field "nope" does not exist in schema'
+
+
+def test_a_column_the_batch_carries_twice_is_refused_with_a_remedy():
+    # An unaliased join produces this shape, and batch.column died on
+    # pyarrow's own KeyError outside the code that names the column.
+    batch = pa.RecordBatch.from_arrays([pa.array([1, 2]), pa.array([10, 20])], names=["id", "id"])
+    fn = make_mapinarrow_func(lambda d, b, br: {})
+    with pytest.raises(ValueError, match="'id' appears 2 times.*alias"):
+        list(fn(iter([batch])))
 
 
 def test_an_adapter_failure_names_the_column():

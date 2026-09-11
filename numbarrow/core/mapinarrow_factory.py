@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Callable
 
 from numbarrow.core.adapters import arrow_array_adapter
-from numbarrow.utils.arrow_array_utils import renamed, type_repr
+from numbarrow.utils.arrow_array_utils import MissingKeyError, renamed, type_repr
 
 
 def _struct_fields(struct_type):
@@ -236,7 +236,7 @@ def _build_batch(outputs, output_schema):
         arrays = []
         for field in output_schema:
             if field.name not in outputs:
-                raise KeyError(
+                raise MissingKeyError(
                     f"output_schema names column {field.name!r}, which main_func did not "
                     f"return; it returned {list(outputs)}"
                 )
@@ -323,7 +323,8 @@ def make_mapinarrow_func(
         DataFrame will be used.  Names are matched exactly; a name the batch
         does not have raises :class:`KeyError` listing the batch's columns,
         since Spark's case-insensitive projection may have spelled it
-        differently.
+        differently, and a name the batch carries more than once, as an
+        unaliased join produces, raises :class:`ValueError`.
     :param broadcasts: optional dictionary of broadcast values
     :param output_schema: optional :class:`pyarrow.Schema` for the batch that is
         yielded.  When given, the dict returned by ``main_func`` is bound to it
@@ -366,13 +367,19 @@ def make_mapinarrow_func(
             # dict.fromkeys keeps first-seen order. Naming a column twice
             # produces the same arrays twice, so it stays harmless.
             input_columns_ = list(dict.fromkeys(requested))
+            names = batch.schema.names
             for col in input_columns_:
-                if col not in batch.schema.names:
+                if col not in names:
                     # Spark's projection is case-insensitive and may have
                     # rewritten the name it was given; the batch's own names
                     # make that visible.
-                    raise KeyError(
-                        f"column {col!r} is not in this batch, whose columns are {batch.schema.names}"
+                    raise MissingKeyError(f"column {col!r} is not in this batch, whose columns are {names}")
+                if names.count(col) > 1:
+                    # An unaliased join produces this shape, and batch.column
+                    # dies on pyarrow's own KeyError, which names no remedy.
+                    raise ValueError(
+                        f"column {col!r} appears {names.count(col)} times in this batch; alias one of "
+                        f"them in the projection that feeds mapInArrow"
                     )
                 col_pa: pa.Array = batch.column(col)
                 try:
