@@ -104,13 +104,14 @@ Use `make_mapinarrow_func` to create functions compatible with PySpark's `mapInA
 from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
 
 def compute(data_dict, bitmap_dict, broadcasts):
-    # data_dict:   {name: np.ndarray}, one entry per column, or one per field
-    #              for a struct column
-    # bitmap_dict: the same names, each a uint8 bitmap or None where every
-    #              value is valid; for a struct column the struct-level
-    #              validity is folded into each field's bitmap. For a list of
-    #              structs the fold covers the flattened elements, not the
-    #              outer list rows, whose nulls are not reported at all
+    # data_dict:   {name: np.ndarray} for a uniform column, or
+    #              {name: {field: np.ndarray}} for a struct column
+    # bitmap_dict: the same shape, each leaf a uint8 bitmap or None where the
+    #              column carries no validity buffer; for a struct column the
+    #              struct-level validity is folded into each field's bitmap.
+    #              For a list of structs the fold covers the flattened
+    #              elements, not the outer list rows: a list column holding a
+    #              null row is refused
     result = data_dict["value"] * broadcasts["scale"]
     return {"output": result}
 

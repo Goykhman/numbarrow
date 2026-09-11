@@ -13,7 +13,7 @@ def run_batch(batch, input_columns=None):
     def main(data_dict, bitmap_dict, broadcasts):
         seen["data"] = data_dict
         seen["bitmap"] = bitmap_dict
-        return {"out": np.asarray(next(iter(data_dict.values())))}
+        return {"out": np.zeros(1, dtype=np.int64)}
 
     list(make_mapinarrow_func(main, input_columns=input_columns)(iter([batch])))
     return seen
@@ -30,15 +30,15 @@ def test_struct_null_row_reaches_the_udf():
     # per field does.
     col = pa.array([{"v": 10}, None, {"v": 30}], type=pa.struct([pa.field("v", pa.int64())]))
     seen = run_batch(pa.RecordBatch.from_arrays([col], names=["s"]))
-    assert sorted(seen["bitmap"]) == ["v"]
-    assert nulls(seen["bitmap"]["v"], 3) == [False, True, False]
+    assert sorted(seen["bitmap"]) == ["s"] and sorted(seen["bitmap"]["s"]) == ["v"]
+    assert nulls(seen["bitmap"]["s"]["v"], 3) == [False, True, False]
 
 
 def test_no_bitmap_when_nothing_is_null_at_either_layer():
     col = pa.array([{"v": 10}, {"v": 30}], type=pa.struct([pa.field("v", pa.int64())]))
     seen = run_batch(pa.RecordBatch.from_arrays([col], names=["s"]))
-    assert "v" in seen["bitmap"] and seen["bitmap"]["v"] is None
-    assert seen["data"]["v"].tolist() == [10, 30]
+    assert "v" in seen["bitmap"]["s"] and seen["bitmap"]["s"]["v"] is None
+    assert seen["data"]["s"]["v"].tolist() == [10, 30]
 
 
 def test_both_null_layers_are_folded_together():
@@ -46,55 +46,52 @@ def test_both_null_layers_are_folded_together():
     col = pa.StructArray.from_arrays([inner], ["v"], mask=pa.array([False, False, True]))
     seen = run_batch(pa.RecordBatch.from_arrays([col], names=["s"]))
     #                      valid, null field, null row
-    assert nulls(seen["bitmap"]["v"], 3) == [False, True, True]
+    assert nulls(seen["bitmap"]["s"]["v"], 3) == [False, True, True]
 
 
-def test_a_field_named_after_its_own_column_is_unambiguous():
-    # One column, one field, one key: nothing is lost, so nothing should raise.
+def test_a_field_named_after_its_own_column_is_reachable():
     col = pa.array([{"s": 1}], type=pa.struct([("s", pa.int64())]))
     seen = run_batch(pa.RecordBatch.from_arrays([col], names=["s"]))
-    assert seen["data"]["s"].tolist() == [1]
+    assert seen["data"]["s"]["s"].tolist() == [1]
 
 
 def test_struct_column_named_after_another_columns_field():
-    # A struct column called 'region' next to store: struct<region, sqft>. The
-    # data keys are code/region/sqft, all distinct, so this must keep working.
+    # A struct column called 'region' next to store: struct<region, sqft>. Each
+    # field sits under its own column, so the two names never meet.
     region = pa.array([{"code": 1}, {"code": 2}], type=pa.struct([("code", pa.int64())]))
     store = pa.array([{"region": 10, "sqft": 1.0}, {"region": 20, "sqft": 2.0}],
                      type=pa.struct([("region", pa.int64()), ("sqft", pa.float64())]))
     batch = pa.RecordBatch.from_arrays([region, store], names=["region", "store"])
     for order in (["region", "store"], ["store", "region"]):
         seen = run_batch(batch, input_columns=order)
-        assert sorted(seen["data"]) == ["code", "region", "sqft"]
-        assert seen["data"]["code"].tolist() == [1, 2]
-        assert seen["data"]["region"].tolist() == [10, 20]
+        assert list(seen["data"]) == order
+        assert seen["data"]["region"]["code"].tolist() == [1, 2]
+        assert seen["data"]["store"]["region"].tolist() == [10, 20]
+        assert sorted(seen["data"]["store"]) == ["region", "sqft"]
 
 
 def test_duplicate_input_columns_is_harmless():
-    # Naming a column twice produced the same arrays twice before the
-    # duplicate-key check existed, so it must not become an error.
+    # Naming a column twice produces the same arrays twice, so it must not
+    # become an error.
     batch = pa.RecordBatch.from_arrays([pa.array([1, 2], type=pa.int64())], names=["a"])
     seen = run_batch(batch, input_columns=["a", "a"])
     assert seen["data"]["a"].tolist() == [1, 2]
     assert sorted(seen["bitmap"]) == ["a"]
 
 
-def test_colliding_struct_field_name_raises():
+def test_a_struct_field_sharing_a_column_name_reaches_the_udf():
+    # Four ordinary Spark StructTypes convert to this shape: a top-level column
+    # and a struct field sharing a name. Nested under its column, the field
+    # neither replaces the column nor collides with it, whichever comes first.
     ids = pa.array([1, 2], type=pa.int64())
     orders = pa.array([{"id": 10, "total": 1.5}, {"id": 20, "total": 2.5}],
                       type=pa.struct([("id", pa.int64()), ("total", pa.float64())]))
     batch = pa.RecordBatch.from_arrays([ids, orders], names=["id", "order"])
-    with pytest.raises(ValueError, match="'id'"):
-        run_batch(batch)
-
-
-def test_colliding_names_raise_whichever_column_comes_first():
-    ids = pa.array([1, 2], type=pa.int64())
-    orders = pa.array([{"id": 10}, {"id": 20}], type=pa.struct([("id", pa.int64())]))
-    batch = pa.RecordBatch.from_arrays([ids, orders], names=["id", "order"])
     for order in (["id", "order"], ["order", "id"]):
-        with pytest.raises(ValueError, match="'id'"):
-            run_batch(batch, input_columns=order)
+        seen = run_batch(batch, input_columns=order)
+        assert seen["data"]["id"].tolist() == [1, 2]
+        assert seen["data"]["order"]["id"].tolist() == [10, 20]
+        assert seen["bitmap"]["id"] is None and seen["bitmap"]["order"]["id"] is None
 
 
 def test_null_free_column_arrives_as_none():
@@ -128,13 +125,13 @@ def test_null_free_column_of_every_supported_top_level_type():
     assert all(seen["bitmap"][name] is None for name in columns)
 
 
-def test_list_of_struct_column_keys_by_field_name():
+def test_list_of_struct_column_nests_its_fields():
     col = pa.array([[{"v": 1}, {"v": 2}], [{"v": 3}, {"v": 4}]],
                    type=pa.list_(pa.struct([("v", pa.int64())])))
     seen = run_batch(pa.RecordBatch.from_arrays([col], names=["rows"]))
-    assert sorted(seen["bitmap"]) == ["v"]
-    assert sorted(seen["data"]) == ["v"]
-    assert seen["data"]["v"].tolist() == [1, 2, 3, 4]
+    assert sorted(seen["bitmap"]["rows"]) == ["v"]
+    assert sorted(seen["data"]["rows"]) == ["v"]
+    assert seen["data"]["rows"]["v"].tolist() == [1, 2, 3, 4]
 
 
 def test_empty_batch():
@@ -144,14 +141,16 @@ def test_empty_batch():
     assert "a" in seen["bitmap"]
 
 
-def test_zero_field_struct_column_is_refused_rather_than_dropped():
-    # A struct with no fields contributes no key, so a requested column used to
-    # vanish from both dicts without a word.
+def test_zero_field_struct_column_arrives_as_an_empty_dict():
+    # A struct with no fields used to contribute no key at all, so a requested
+    # column vanished from both dicts without a word. Nested under its own
+    # name it is present and empty.
     z = pa.array([{}, {}], type=pa.struct([]))
     n = pa.array([1, 2], type=pa.int64())
     batch = pa.RecordBatch.from_arrays([z, n], names=["z", "n"])
-    with pytest.raises(ValueError, match="'z'"):
-        run_batch(batch)
+    seen = run_batch(batch)
+    assert seen["data"]["z"] == {} and seen["bitmap"]["z"] == {}
+    assert seen["data"]["n"].tolist() == [1, 2]
 
 
 def test_two_fields_of_one_struct_do_not_share_a_bitmap():
@@ -163,7 +162,7 @@ def test_two_fields_of_one_struct_do_not_share_a_bitmap():
     col = pa.StructArray.from_arrays([inner_a, inner_b], ["a", "b"],
                                      mask=pa.array([False, True]))
     seen = run_batch(pa.RecordBatch.from_arrays([col], names=["s"]))
-    bitmap_a, bitmap_b = seen["bitmap"]["a"], seen["bitmap"]["b"]
+    bitmap_a, bitmap_b = seen["bitmap"]["s"]["a"], seen["bitmap"]["s"]["b"]
     assert bitmap_a is not bitmap_b
     assert bitmap_a.tolist() == bitmap_b.tolist()
     bitmap_a[0] = 0
@@ -191,7 +190,7 @@ def test_null_struct_element_inside_a_list_row_is_visible():
     col = pa.ListArray.from_arrays(pa.array([0, 2, 4], type=pa.int32()), inner)
     assert col.null_count == 0
     seen = run_batch(pa.RecordBatch.from_arrays([col], names=["rows"]))
-    bitmap = seen["bitmap"]["v"]
+    bitmap = seen["bitmap"]["rows"]["v"]
     assert bitmap is not None
     assert [is_null(i, bitmap) for i in range(4)] == [False, True, False, False]
 

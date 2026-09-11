@@ -47,30 +47,6 @@ def _fold_struct_validity(struct_bitmap, field_bitmap):
     return struct_bitmap & field_bitmap
 
 
-def _claim_keys(target: dict, owners: dict[str, str], additions: dict, col: str, kind: str):
-    """Merge one column's contribution into a batch-wide dict.
-
-    Struct fields are keyed by field name rather than by column, so two
-    columns can produce the same key. Overwriting one with the other loses a
-    column and its null information silently, and misaligns the row count when
-    the two columns have different lengths, so a collision raises instead.
-    """
-    for key, value in additions.items():
-        owner = owners.get(key)
-        if owner is not None:
-            # owner is never col: a column contributes each key at most once,
-            # since its additions are a dict, and a struct with repeated field
-            # names is refused before it gets here.
-            raise ValueError(
-                f"{kind}_dict key {key!r} is claimed by column {owner!r} and again by column "
-                f"{col!r}. Struct fields are keyed by field name, so a field sharing a name "
-                f"with another column would replace it. Alias one of them in the projection "
-                f"that feeds mapInArrow."
-            )
-        owners[key] = col
-        target[key] = value
-
-
 def make_mapinarrow_func(
     main_func: Callable,
     input_columns: list[str] | None = None,
@@ -92,13 +68,15 @@ def make_mapinarrow_func(
         returned dict in the order the output schema declares, or pass
         ``output_schema`` and let Arrow bind it by name instead.
 
-        ``data_dict`` maps a name to an array of data of a supported type.  A
-        column of a uniform type contributes one entry under the column name;
-        a structured column contributes one entry per field, under the field
-        name.
+        ``data_dict`` maps each selected column's name to its data.  A column
+        of a uniform type maps to one array.  A struct or list-of-struct
+        column maps to a dict of its fields, ``data_dict[column][field]``, so
+        a field never shares a namespace with another column or with another
+        struct's fields.
 
-        ``bitmap_dict`` maps the same names to uint8 aligned arrays of bitmap
-        data, or to ``None`` where every value is valid.  Every name in
+        ``bitmap_dict`` has the same shape: a uint8 aligned array of bitmap
+        data, or ``None`` where the column carries no validity buffer, and for
+        a struct column a dict of those keyed by field.  Every key of
         ``data_dict`` is present, so a null-free batch is indexable exactly
         like a batch containing nulls.
 
@@ -113,10 +91,6 @@ def make_mapinarrow_func(
         no offsets, such a row also shifts the element-to-row mapping, so a
         list column whose ``null_count`` is non-zero raises
         ``NotImplementedError``.
-
-        A name may be claimed only once.  A struct field sharing a name with
-        another selected column raises :class:`ValueError` rather than
-        replacing it.
 
     :param input_columns: optional list of column names that will be expected
         to be needed for in `data_dict` for the calculation done by
@@ -138,50 +112,30 @@ def make_mapinarrow_func(
 
     def _(iterator):
         for batch in iterator:
-            data_dict: dict[str, np.ndarray] = {}
-            bitmap_dict: dict[str, np.ndarray | None] = {}
-            data_owners: dict[str, str] = {}
-            bitmap_owners: dict[str, str] = {}
+            data_dict: dict[str, np.ndarray | dict[str, np.ndarray]] = {}
+            bitmap_dict: dict[str, np.ndarray | None | dict[str, np.ndarray | None]] = {}
             requested = input_columns if input_columns is not None else batch.schema.names
-            # dict.fromkeys keeps first-seen order. Naming a column twice was
-            # harmless before the duplicate-key check existed, because the
-            # second pass produced the same arrays, so it stays harmless.
+            # dict.fromkeys keeps first-seen order. Naming a column twice
+            # produces the same arrays twice, so it stays harmless.
             input_columns_ = list(dict.fromkeys(requested))
             for col in input_columns_:
                 col_pa: pa.Array = batch.column(col)
                 adapted = arrow_array_adapter(col_pa)
                 if len(adapted) == 3:
-                    struct_bitmap, col_bitmaps, col_datas = adapted
+                    struct_bitmap, field_bitmaps, field_datas = adapted
                     # The struct-level bitmap is folded into each field rather
-                    # than published under the column's own name. Publishing it
-                    # would claim a key that another column's field may already
-                    # be called, turning schemas that worked into a hard error,
-                    # and for a list-of-struct column the name would suggest it
-                    # covers the outer list rows, which it does not.
-                    if not col_datas:
-                        # A struct with no fields contributes no key at all, so
-                        # a requested column would vanish from both dicts
-                        # without a word.
-                        # The remedy is phrased for both paths: `requested`
-                        # falls back to every column in the batch, so a caller
-                        # who passed no `input_columns` has no list to drop it
-                        # from and needs the opposite advice.
-                        raise ValueError(
-                            f"column {col!r} of type {col_pa.type} has no fields, so it "
-                            f"contributes nothing to data_dict; drop it from the projection "
-                            f"that feeds mapInArrow, or name the columns you need in "
-                            f"input_columns"
-                        )
-                    col_bitmaps = {
+                    # than published on its own: one is_null call per field
+                    # then sees both a null field and a row that is null as a
+                    # whole, and for a list-of-struct column a bitmap of its
+                    # own would suggest it covers the outer list rows, which
+                    # it does not.
+                    data_dict[col] = field_datas
+                    bitmap_dict[col] = {
                         name: _fold_struct_validity(struct_bitmap, field_bitmap)
-                        for name, field_bitmap in col_bitmaps.items()
+                        for name, field_bitmap in field_bitmaps.items()
                     }
                 else:
-                    col_bitmap, col_data = adapted
-                    col_bitmaps = {col: col_bitmap}
-                    col_datas = {col: col_data}
-                _claim_keys(data_dict, data_owners, col_datas, col, "data")
-                _claim_keys(bitmap_dict, bitmap_owners, col_bitmaps, col, "bitmap")
+                    bitmap_dict[col], data_dict[col] = adapted
             outputs = main_func(data_dict, bitmap_dict, broadcasts)
             yield pa.RecordBatch.from_pydict(
                 {col: _to_arrow(output) for col, output in outputs.items()},
