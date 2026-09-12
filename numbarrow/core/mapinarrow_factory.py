@@ -32,7 +32,7 @@ def _carries_keys(arrow_type):
     if _is_list_like(arrow_type):
         return _carries_keys(arrow_type.value_type)
     if pa.types.is_map(arrow_type):
-        return _carries_keys(arrow_type.item_type)
+        return _carries_keys(arrow_type.key_type) or _carries_keys(arrow_type.item_type)
     return False
 
 
@@ -84,18 +84,30 @@ def _check_keys(rows, arrow_type):
     elif _is_list_like(arrow_type):
         _check_keys([item for row in rows if row is not None for item in row], arrow_type.value_type)
     elif pa.types.is_map(arrow_type):
-        _check_keys(_map_items(rows), arrow_type.item_type)
+        keys, items = _map_entries(rows)
+        if _carries_keys(arrow_type.key_type):
+            _check_keys(keys, arrow_type.key_type)
+        if _carries_keys(arrow_type.item_type):
+            _check_keys(items, arrow_type.item_type)
 
 
-def _map_items(rows):
-    """The item values of map rows given as dicts or as lists of pairs."""
-    items = []
+def _map_entries(rows):
+    """The keys and the values of map rows given as dicts or as lists of pairs.
+
+    Anything that is not a pair is left for ``pa.array`` to refuse, which
+    names the column; indexing it here would not.
+    """
+    keys, items = [], []
     for row in rows:
         if isinstance(row, Mapping):
+            keys.extend(row)
             items.extend(row.values())
         elif row is not None:
-            items.extend(pair[1] for pair in row)
-    return items
+            for pair in row:
+                if isinstance(pair, (tuple, list)) and len(pair) == 2:
+                    keys.append(pair[0])
+                    items.append(pair[1])
+    return keys, items
 
 
 def _record_to_struct(value, arrow_type):
@@ -340,9 +352,11 @@ def make_mapinarrow_func(
         fill the column with nulls.
 
         What the declared type refuses is what ``pa.array`` refuses: an
-        integer out of range, a float with a fraction into an integer type
-        and a timestamp unit change that drops digits all raise
-        :class:`pyarrow.ArrowInvalid`.  Not every lossy conversion is refused:
+        integer out of the declared type's range, a float with a fraction
+        into an integer type and a timestamp unit change that drops digits
+        all raise :class:`pyarrow.ArrowInvalid`, and an integer beyond int64
+        altogether raises :class:`OverflowError`.  Not every lossy conversion
+        is refused:
         a timestamp into ``date32`` or ``date64`` floors to the day, and
         ``float64`` into ``float32`` overflows to ``inf``, both silently.
 
