@@ -105,6 +105,12 @@ MUTATIONS = [
         "    elif False:\n        _check_keys(",
     ),
     (
+        "a struct key inside a map's keys stops being checked",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        if _carries_keys(arrow_type.key_type):",
+        "        if False:",
+    ),
+    (
         "a ready-built array whose fields differ stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
         "        if unexpected:",

@@ -341,12 +341,24 @@ def test_a_struct_key_no_field_has_is_refused_at_any_depth():
         "object array of dicts": (inner, np.array([{"Amount": 1}, {"amount": 2}], dtype=object)),
         "generator of dicts": (inner, ({"Amount": i} for i in range(2))),
         "map of structs": (pa.map_(pa.string(), inner), [{"k": {"Amount": 1}}]),
+        "map of structs from pairs": (pa.map_(pa.string(), inner), [[("k", {"Amount": 1})]]),
+        "struct-keyed map": (pa.map_(inner, pa.int64()), [[({"Amount": 1}, 5)]]),
     }
     for label, (declared_type, value) in cases.items():
         with pytest.raises(ValueError, match="Amount"):
             run_outputs({"s": value}, pa.schema([("s", declared_type)]))
     good = run_outputs({"s": [[{"amount": 1}], [{"amount": 2}]]}, pa.schema([("s", pa.list_(inner))]))
     assert good.column("s").to_pylist() == [[{"amount": 1}], [{"amount": 2}]]
+    pairs = run_outputs({"s": [[("k", {"amount": 1})]]}, pa.schema([("s", pa.map_(pa.string(), inner))]))
+    assert pairs.column("s").to_pylist() == [[("k", {"amount": 1})]]
+
+
+def test_a_malformed_map_pair_is_refused_naming_the_column():
+    # A one-element "pair" reaches pa.array's own refusal rather than an
+    # IndexError from the key check, so the column is named.
+    schema = pa.schema([("m", pa.map_(pa.string(), pa.int64()))])
+    with pytest.raises((ValueError, TypeError), match="'m'"):
+        run_outputs({"m": [[("k",)]]}, schema)
 
 
 def test_output_columns_of_different_lengths_are_named():
