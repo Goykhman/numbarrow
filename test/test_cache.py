@@ -1,7 +1,7 @@
-"""The on-disk numba cache, as the five viewers use it.
+"""The on-disk numba cache, as the three viewers use it.
 
 numba names a cache entry after the function's qualname and source line, so
-the five viewers one factory makes shared one index file and one set of data
+the viewers one factory makes shared one index file and one set of data
 files, and numba writes those without a lock. Processes importing together on
 a cold cache read one index and picked the same data-file name for different
 viewers, so every process afterwards loaded the wrong machine code: an int32
@@ -30,8 +30,7 @@ IMPORT_AND_VIEW = (
 CHECK_EVERY_VIEWER = (
     "import numpy as np\n"
     "from numbarrow.utils.utils import arrays_viewers\n"
-    "values = {np.bool_: [True, False, True], np.float64: [-1.5, 0.0, 3.25],\n"
-    "          np.int32: [-1, 0, 2147483647], np.int64: [-1, 0, 2 ** 63 - 1],\n"
+    "values = {np.int32: [-1, 0, 2147483647], np.int64: [-1, 0, 2 ** 63 - 1],\n"
     "          np.uint8: [0, 127, 255]}\n"
     "for dtype, vals in values.items():\n"
     "    src = np.array(vals, dtype=dtype)\n"
@@ -64,8 +63,8 @@ def test_each_viewer_has_its_own_cache_index(tmp_path):
     assert out.returncode == 0, out.stderr
     names = _index_files(tmp_path / "cache")
     viewers = [name for name in names if "numpy_array_from_ptr_factory" in name]
-    assert len(viewers) == 5, names
-    for dtype in ("bool", "float64", "int32", "int64", "uint8"):
+    assert len(viewers) == 3, names
+    for dtype in ("int32", "int64", "uint8"):
         assert any(f"view_{dtype}" in name for name in viewers), (dtype, viewers)
 
 

@@ -12,15 +12,14 @@ import pyarrow as pa
 from numbarrow.utils.utils import arrays_viewers
 
 
-# The numpy view type for each Arrow type that has one, covering exactly the
-# keys of ``arrays_viewers``. Resolved directly rather than through
-# ``pa.DataType.to_pandas_dtype()``, which imports pandas, and so made a stock
-# install unable to adapt an int or a float column.
-# ``pa.bool_()`` is deliberately absent even though ``np.bool_`` is a key of
-# ``arrays_viewers``: Arrow packs booleans one bit per element, so there is no
-# uniform view of them, and the old ``to_pandas_dtype()`` lookup succeeded with
-# an itemsize-1 viewer and returned wrong values. Boolean arrays go through the
-# dispatcher's own handler, which unpacks the bits.
+# The numpy view type for each Arrow type that has one. Resolved directly
+# rather than through ``pa.DataType.to_pandas_dtype()``, which imports pandas,
+# and so made a stock install unable to adapt an int or a float column.
+# ``pa.bool_()`` is deliberately absent: Arrow packs booleans one bit per
+# element, so there is no uniform view of them, and the old
+# ``to_pandas_dtype()`` lookup succeeded with an itemsize-1 viewer and
+# returned wrong values. Boolean arrays go through the dispatcher's own
+# handler, which unpacks the bits.
 arrow_to_numpy_dtypes = {
     pa.float64(): np.float64,
     pa.int32(): np.int32,
