@@ -36,8 +36,11 @@ def test_a_wide_type_is_cut_in_the_message():
     text = type_repr(wide)
     assert len(text) < TYPE_REPR_WIDTH + 60
     assert text.startswith(str(wide)[:TYPE_REPR_WIDTH]) and "1000 fields" in text
-    listed = type_repr(pa.list_(wide))
-    assert len(listed) < TYPE_REPR_WIDTH + 60 and "characters" in listed
+    assert f"{len(str(wide)) - TYPE_REPR_WIDTH} more characters" in text
+    wide_list = pa.list_(wide)
+    listed = type_repr(wide_list)
+    assert len(listed) < TYPE_REPR_WIDTH + 60
+    assert f"{len(str(wide_list)) - TYPE_REPR_WIDTH} more characters" in listed
 
 
 def test_the_dispatcher_and_the_adapters_cut_a_wide_type():

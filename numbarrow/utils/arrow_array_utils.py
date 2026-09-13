@@ -44,9 +44,10 @@ def type_repr(arrow_type) -> str:
     if len(text) <= TYPE_REPR_WIDTH:
         return text
     cut = text[:TYPE_REPR_WIDTH]
+    more = len(text) - TYPE_REPR_WIDTH
     if pa.types.is_struct(arrow_type):
-        return f"{cut}... ({arrow_type.num_fields} fields, {len(text)} characters)"
-    return f"{cut}... ({len(text)} characters)"
+        return f"{cut}... ({arrow_type.num_fields} fields, {more} more characters)"
+    return f"{cut}... ({more} more characters)"
 
 
 class MissingKeyError(KeyError):
