@@ -9,6 +9,7 @@ to a user-supplied computation function.
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from collections.abc import Mapping
 from typing import Callable
@@ -207,14 +208,60 @@ def _ndarray_to_arrow(value, arrow_type):
     return pa.array(value, type=arrow_type)
 
 
+def _split_pair(value):
+    """The data and the bitmap of a ``(data, bitmap)`` pair; any other shape carries no bitmap.
+
+    A 2-tuple whose second element is an ndarray or ``None`` is the pair. A
+    tuple of any other shape goes to ``pa.array`` as the sequence it is.
+    """
+    if isinstance(value, tuple) and len(value) == 2 and (value[1] is None or isinstance(value[1], np.ndarray)):
+        return value
+    return value, None
+
+
+def _with_validity(array, bitmap):
+    """The same array with *bitmap*, a packed validity bitmap, folded in.
+
+    The bitmap has the layout ``bitmap_dict`` hands out and
+    :func:`~numbarrow.core.is_null.is_null` reads: one bit per row, LSB first,
+    set for a valid row, ``(rows + 7) // 8`` bytes of uint8. A fixed-width or
+    string column with no nulls of its own takes the bitmap as its validity
+    buffer and keeps its data buffer, so neither side is copied. Any other
+    column, one that already carries nulls, a sliced Arrow array or a nested
+    type, is masked through ``if_else``, which keeps the nulls it had.
+    """
+    if bitmap.dtype != np.uint8 or bitmap.ndim != 1:
+        raise TypeError(
+            f"the bitmap of a (data, bitmap) pair must be the packed uint8 array bitmap_dict "
+            f"hands out, or None, not a {bitmap.ndim}-dimensional {bitmap.dtype} array"
+        )
+    rows = len(array)
+    if len(bitmap) != (rows + 7) // 8:
+        raise ValueError(
+            f"the bitmap has {len(bitmap)} bytes, which covers {8 * len(bitmap)} rows, but the "
+            f"column has {rows} rows"
+        )
+    if rows == 0:
+        return array
+    flat = (array.null_count == 0 and array.offset == 0 and array.type.num_fields == 0
+            and not pa.types.is_dictionary(array.type) and not pa.types.is_null(array.type))
+    if flat:
+        buffers = [pa.py_buffer(np.ascontiguousarray(bitmap))] + list(array.buffers()[1:])
+        return pa.Array.from_buffers(array.type, rows, buffers)
+    valid = pa.array(np.unpackbits(bitmap, bitorder="little")[:rows].astype(bool))
+    return pc.if_else(valid, array, pa.scalar(None, type=array.type))
+
+
 def _to_arrow(value, name, arrow_type=None):
     """Convert one UDF output column to an Arrow array, naming the column on any failure.
 
-    ``pa.array`` iterates a Mapping, so a dict of arrays returned under one
-    key silently became a string column of the dict's keys, with a different
-    row count and nothing raised; it is refused outright. Every other failure
-    on the output side named no column at all.
+    A ``(data, bitmap)`` pair is built from its data and then given the
+    bitmap as its validity. ``pa.array`` iterates a Mapping, so a dict of
+    arrays returned under one key silently became a string column of the
+    dict's keys, with a different row count and nothing raised; it is refused
+    outright. Every other failure on the output side named no column at all.
     """
+    value, bitmap = _split_pair(value)
     if isinstance(value, Mapping):
         raise TypeError(
             f"output column {name!r} is a {type(value).__name__}, which pa.array would read as "
@@ -222,7 +269,8 @@ def _to_arrow(value, name, arrow_type=None):
             f"struct column a list of dicts or a record array"
         )
     try:
-        return _convert(value, arrow_type)
+        array = _convert(value, arrow_type)
+        return array if bitmap is None else _with_validity(array, bitmap)
     except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         raise renamed(exc, f"output column {name!r}") from exc
 
@@ -292,8 +340,17 @@ def make_mapinarrow_func(
         that maps each output column's name to an ndarray, a list or a
         :class:`pyarrow.Array`, from which a PyArrow ``RecordBatch`` is built.
         A numpy record array becomes a struct column, one child per field.
-        Three shapes carry a null out: a list holding ``None``, a
-        :class:`pyarrow.Array`, and a numpy masked array.
+        Four shapes carry a null out: a list holding ``None``, a
+        :class:`pyarrow.Array`, a numpy masked array, and a ``(data, bitmap)``
+        pair, whose ``bitmap`` is a packed uint8 validity bitmap in the layout
+        ``bitmap_dict`` hands out, ``(rows + 7) // 8`` bytes with a set bit
+        for a valid row, or ``None``.  A bare array carries no nulls out:
+        every null the UDF received comes back as whatever sat under it.
+        Passing the input's validity through is
+        ``{"out": (result, bitmap_dict["value"])}``, and a UDF that decides
+        its own nulls hands back a bitmap of that layout, which is the one
+        :func:`~numbarrow.core.is_null.is_null` reads.  A bitmap of any other
+        length or dtype raises naming the column.
 
         Spark binds the columns of that batch to the declared output schema by
         POSITION, not by name, and checks nothing about their types: it reads

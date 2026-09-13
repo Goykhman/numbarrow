@@ -241,3 +241,25 @@ def test_a_struct_field_sharing_a_column_name_reaches_the_udf_through_spark(spar
     out_schema = StructType([StructField("id", LongType()), StructField("order_id", LongType())])
     rows = df.repartition(1).mapInArrow(make_mapinarrow_func(main), out_schema).collect()
     assert sorted((row["id"], row["order_id"]) for row in rows) == [(1, 10), (2, 20)]
+
+
+def test_a_pair_carries_nulls_back_through_spark(spark):
+    # A bare array republishes a null as whatever sat under it, so a row of
+    # (1, None, None, None) came back (1, 0, 0.0, ''). The pair carries each
+    # column's validity out, and Spark's Arrow transport carries it back.
+    schema = StructType([
+        StructField("id", LongType()), StructField("n", LongType()),
+        StructField("x", DoubleType()), StructField("s", StringType()),
+    ])
+    df = spark.createDataFrame([(1, None, None, None), (2, 20, 2.5, "b")], schema)
+
+    def main(data_dict, bitmap_dict, broadcasts):
+        out = {"id": data_dict["id"]}
+        for name in ("n", "x", "s"):
+            out[name] = (data_dict[name], bitmap_dict[name])
+        return out
+
+    rows = df.repartition(1).mapInArrow(make_mapinarrow_func(main), schema).collect()
+    assert sorted((row["id"], row["n"], row["x"], row["s"]) for row in rows) == [
+        (1, None, None, None), (2, 20, 2.5, "b")
+    ]

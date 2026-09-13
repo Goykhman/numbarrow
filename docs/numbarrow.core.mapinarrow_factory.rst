@@ -22,13 +22,22 @@ Usage::
         #              field's bitmap
         # broadcasts:  {key: value}
         result = ...
-        return {"output_col": result}
+        # A bare array carries no nulls out; a (data, bitmap) pair keeps them,
+        # bitmap being the packed uint8 array bitmap_dict hands out, or None
+        return {"output_col": (result, bitmap_dict["input_col"])}
 
     udf = make_mapinarrow_func(my_func, broadcasts={"scale": 1.5})
     df_out = df_in.mapInArrow(udf, output_schema)
 
 Every name in ``data_dict`` is also a key of ``bitmap_dict``, so a batch that
 happens to contain no nulls is indexable exactly like one that does.
+
+On the way out a bare array carries no nulls: every null the UDF received
+comes back as whatever sat under it. A ``(data, bitmap)`` pair per output
+column keeps the column's validity, the bitmap being in the layout
+``bitmap_dict`` hands out, so a UDF passes the input's validity through with
+``(result, bitmap_dict[column])`` and one that decides its own nulls hands back
+a bitmap of that layout.
 
 For a ``StructArray`` column the struct-level validity is folded into each
 field's bitmap, so a row that is null as a whole is visible to one ``is_null``

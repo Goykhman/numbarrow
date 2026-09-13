@@ -1,5 +1,6 @@
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pytest
 
 from numbarrow.core.is_null import is_null
@@ -423,3 +424,99 @@ def test_an_all_none_object_column_keeps_a_declared_type():
     got = run_outputs({"s": np.array([None, None], dtype=object)}, schema)
     assert got.column("s").type == pa.string() and got.column("s").null_count == 2
     assert run_outputs({"s": np.array([None, None], dtype=object)}).column("s").type == pa.null()
+
+
+def test_a_pair_carries_the_input_nulls_out():
+    # A bare array republishes every null as the value under it, so [1, None, 3]
+    # came back [1, 0, 3] with nothing said. The pair folds the bitmap the UDF
+    # was handed back in, with or without a declared type.
+    column = pa.array([1, None, 3], type=pa.int64())
+    batch = pa.RecordBatch.from_arrays([column], names=["c"])
+
+    def double(data_dict, bitmap_dict, broadcasts):
+        return {"bare": data_dict["c"] * 2, "pair": (data_dict["c"] * 2, bitmap_dict["c"])}
+
+    got = list(make_mapinarrow_func(double, input_columns=["c"])(iter([batch])))[0]
+    assert got.column("bare").to_pylist() == [2, 0, 6]
+    assert got.column("pair").to_pylist() == [2, None, 6]
+
+    def through(data_dict, bitmap_dict, broadcasts):
+        return {"pair": (data_dict["c"], bitmap_dict["c"])}
+
+    schema = pa.schema([("pair", pa.float64())])
+    typed = list(make_mapinarrow_func(through, input_columns=["c"], output_schema=schema)(iter([batch])))[0]
+    assert typed.column("pair").type == pa.float64()
+    assert typed.column("pair").to_pylist() == [1.0, None, 3.0]
+
+
+def test_a_pair_masks_a_value_the_caller_masked_out():
+    # pc.if_else clears the validity bit and leaves the value's bytes in the
+    # buffer, so a bare pass-through hands the masked-out value straight back.
+    values = pa.array([1, 42, 3], type=pa.int64())
+    column = pc.if_else(pa.array([True, False, True]), values, pa.scalar(None, pa.int64()))
+    batch = pa.RecordBatch.from_arrays([column], names=["c"])
+
+    def both(data_dict, bitmap_dict, broadcasts):
+        return {"bare": data_dict["c"], "pair": (data_dict["c"], bitmap_dict["c"])}
+
+    got = list(make_mapinarrow_func(both, input_columns=["c"])(iter([batch])))[0]
+    assert got.column("bare").to_pylist() == [1, 42, 3]
+    assert got.column("pair").to_pylist() == [1, None, 3]
+
+
+def test_a_pair_takes_the_bitmap_and_the_data_zero_copy():
+    # A fixed-width column with no nulls of its own takes the bitmap as its
+    # validity buffer and keeps the ndarray as its data buffer.
+    data = np.array([1, 2, 3], dtype=np.int64)
+    bitmap = np.array([0b101], dtype=np.uint8)
+    got = run_outputs({"a": (data, bitmap)}).column("a")
+    assert got.to_pylist() == [1, None, 3]
+    assert got.buffers()[0].address == bitmap.ctypes.data
+    assert got.buffers()[1].address == data.ctypes.data
+
+
+def test_a_pair_keeps_the_nulls_the_data_already_has():
+    # A list holding None, a sliced Arrow array and a struct column cannot take
+    # the bitmap as a buffer; they are masked instead, and keep their own nulls.
+    bitmap = np.array([0b011], dtype=np.uint8)
+    assert run_outputs({"a": ([None, 2, 3], bitmap)}).column("a").to_pylist() == [None, 2, None]
+    sliced = pa.array([9, 1, 2, 3], type=pa.int64())[1:]
+    assert run_outputs({"a": (sliced, bitmap)}).column("a").to_pylist() == [1, 2, None]
+    records = np.array([(1, 2.5), (3, 4.5)], dtype=[("i", "i8"), ("f", "f8")])
+    got = run_outputs({"r": (records, np.array([0b10], dtype=np.uint8))}).column("r")
+    assert got.to_pylist() == [None, {"i": 3, "f": 4.5}]
+
+
+def test_a_pair_with_no_bitmap_is_the_bare_array():
+    # bitmap_dict hands out None where the batch carries no validity buffer,
+    # so passing it through must cost nothing and change nothing.
+    got = run_outputs({"a": (np.array([1, 2], dtype=np.int64), None)}).column("a")
+    assert got.to_pylist() == [1, 2] and got.null_count == 0
+    empty = run_outputs({"a": (np.empty(0, dtype=np.int64), np.empty(0, dtype=np.uint8))})
+    assert empty.num_rows == 0 and empty.column("a").type == pa.int64()
+
+
+def test_a_pair_bitmap_of_the_wrong_length_is_refused():
+    # The bitmap covers 8 rows per byte; one of any other size is a bitmap for
+    # some other column, and pyarrow would read it without a word.
+    data = np.array([1, 2, 3], dtype=np.int64)
+    with pytest.raises(ValueError, match=r"'a'.*3 bytes.*24 rows.*3 rows"):
+        run_outputs({"a": (data, np.zeros(3, dtype=np.uint8))})
+    with pytest.raises(ValueError, match=r"'a'.*0 bytes"):
+        run_outputs({"a": (data, np.zeros(0, dtype=np.uint8))})
+
+
+def test_a_pair_bitmap_that_is_not_packed_uint8_is_refused():
+    # A boolean mask is the natural mistake, and its bytes would read as bits.
+    data = np.array([1, 2, 3], dtype=np.int64)
+    with pytest.raises(TypeError, match=r"'a'.*bool"):
+        run_outputs({"a": (data, np.array([True, False, True]))})
+    with pytest.raises(TypeError, match=r"'a'.*2-dimensional"):
+        run_outputs({"a": (data, np.zeros((1, 1), dtype=np.uint8))})
+
+
+def test_a_tuple_of_any_other_shape_is_still_a_sequence():
+    # Only a 2-tuple whose second element is an ndarray or None is a pair; a
+    # tuple of values is the column it always was.
+    assert run_outputs({"a": (1, 2, 3)}).column("a").to_pylist() == [1, 2, 3]
+    assert run_outputs({"a": ("x", "y")}).column("a").to_pylist() == ["x", "y"]

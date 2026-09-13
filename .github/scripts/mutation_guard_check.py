@@ -221,6 +221,30 @@ MUTATIONS = [
         "    str_array.flags.writeable = False",
         "    pass",
     ),
+    (
+        "a (data, bitmap) pair stops being split",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if isinstance(value, tuple) and len(value) == 2 and (value[1] is None or isinstance(value[1], np.ndarray)):",
+        "    if False:",
+    ),
+    (
+        "a pair's bitmap stops being folded in",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        return array if bitmap is None else _with_validity(array, bitmap)",
+        "        return array",
+    ),
+    (
+        "a pair's bitmap of the wrong length stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if len(bitmap) != (rows + 7) // 8:",
+        "    if False:",
+    ),
+    (
+        "a pair's bitmap that is not packed uint8 stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if bitmap.dtype != np.uint8 or bitmap.ndim != 1:",
+        "    if False:",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "docs"]
