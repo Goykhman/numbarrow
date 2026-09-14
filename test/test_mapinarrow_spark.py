@@ -6,7 +6,7 @@ from numba.core.types import Array, float64, int32, int64, Optional, uint8
 
 from numbarrow.core.is_null import is_null
 from numbarrow.core.configurations import jit_options
-from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
+from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
 from test.conftest import spark_leg_required
 
 if spark_leg_required():
@@ -243,9 +243,9 @@ def test_a_struct_field_sharing_a_column_name_reaches_the_udf_through_spark(spar
     assert sorted((row["id"], row["order_id"]) for row in rows) == [(1, 10), (2, 20)]
 
 
-def test_a_pair_carries_nulls_back_through_spark(spark):
+def test_nullable_carries_nulls_back_through_spark(spark):
     # A bare array republishes a null as whatever sat under it, so a row of
-    # (1, None, None, None) came back (1, 0, 0.0, ''). The pair carries each
+    # (1, None, None, None) came back (1, 0, 0.0, ''). Nullable carries each
     # column's validity out, and Spark's Arrow transport carries it back.
     schema = StructType([
         StructField("id", LongType()), StructField("n", LongType()),
@@ -256,7 +256,7 @@ def test_a_pair_carries_nulls_back_through_spark(spark):
     def main(data_dict, bitmap_dict, broadcasts):
         out = {"id": data_dict["id"]}
         for name in ("n", "x", "s"):
-            out[name] = (data_dict[name], bitmap_dict[name])
+            out[name] = Nullable(data_dict[name], bitmap_dict[name])
         return out
 
     rows = df.repartition(1).mapInArrow(make_mapinarrow_func(main), schema).collect()

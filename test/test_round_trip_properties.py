@@ -11,7 +11,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
-from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
+from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
 
 
 def _identity(data_dict, bitmap_dict, broadcasts):
@@ -114,18 +114,18 @@ def test_a_string_column_keeps_its_width_across_the_round_trip():
     assert [v for v in got.to_pylist() if v] == ["ab", "cd"]
 
 
-def _pair_identity(data_dict, bitmap_dict, broadcasts):
-    return {name: (value, bitmap_dict[name]) for name, value in data_dict.items()}
+def _nullable_identity(data_dict, bitmap_dict, broadcasts):
+    return {name: Nullable(value, bitmap_dict[name]) for name, value in data_dict.items()}
 
 
 @pytest.mark.parametrize("label", sorted(COLUMNS))
-def test_a_null_survives_the_round_trip_through_a_pair(label):
+def test_a_null_survives_the_round_trip_through_nullable(label):
     # The second row is masked out with its bytes left in place, which is what
-    # a bare pass-through republishes; the pair carries the validity out.
+    # a bare pass-through republishes; Nullable carries the validity out.
     column = COLUMNS[label]
     keep = pa.array([i != 1 for i in range(len(column))])
     nulled = pc.if_else(keep, column, pa.scalar(None, column.type))
-    got = _round_trip(nulled, udf=_pair_identity).column("c")
+    got = _round_trip(nulled, udf=_nullable_identity).column("c")
     assert got.type == DRIFT.get(label, column.type), f"{label}: {column.type} came back {got.type}"
     assert got.null_count == 1 and got.to_pylist() == nulled.cast(got.type).to_pylist(), (
         f"{label}: went in as {nulled.to_pylist()!r}, came out as {got.to_pylist()!r}"

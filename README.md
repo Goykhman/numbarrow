@@ -129,7 +129,7 @@ to `is_null_struct`.
 Use `make_mapinarrow_func` to create functions compatible with PySpark's `mapInArrow`:
 
 ```python
-from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
+from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
 
 def compute(data_dict, bitmap_dict, broadcasts):
     # data_dict:   {name: np.ndarray} for a uniform column, or
@@ -141,8 +141,8 @@ def compute(data_dict, bitmap_dict, broadcasts):
     #              elements, not the outer list rows: a list column holding a
     #              null row is refused
     result = data_dict["value"] * broadcasts["scale"]
-    # A bare array carries no nulls out; the pair keeps the column's validity
-    return {"output": (result, bitmap_dict["value"])}
+    # A bare array carries no nulls out; Nullable keeps the column's validity
+    return {"output": Nullable(result, bitmap_dict["value"])}
 
 udf = make_mapinarrow_func(compute, broadcasts={"scale": 2.0})
 df_in = ...           # caller-provided PySpark DataFrame
@@ -151,11 +151,13 @@ df_out = df_in.mapInArrow(udf, output_schema)
 ```
 
 A bare array returned under a column name carries no nulls out: every null the
-UDF received comes back as whatever sat under it, `0`, `0.0` or `''`. A
-`(data, bitmap)` pair keeps the column's validity, the bitmap being a packed
+UDF received comes back as whatever sat under it, `0`, `0.0` or `''`.
+`Nullable(data, bitmap)` keeps the column's validity, the bitmap being a packed
 uint8 array in the layout `bitmap_dict` hands out, or `None`; a UDF that
-decides its own nulls hands back a bitmap of that layout. A list holding
-`None`, a `pyarrow.Array` and a numpy masked array carry nulls out as well.
+decides its own nulls hands back a bitmap of that layout, and one that resizes
+the column needs a bitmap of its own, since a packed bitmap carries no row
+count. A list holding `None`, a `pyarrow.Array` and a numpy masked array carry
+nulls out as well.
 
 See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complete runnable example.
 

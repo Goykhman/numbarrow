@@ -11,7 +11,7 @@ layer before passing data to a user-supplied computation function.
 
 Usage::
 
-    from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
+    from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
 
     def my_func(data_dict, bitmap_dict, broadcasts):
         # data_dict:   {name: np.ndarray} for a uniform column, or
@@ -22,9 +22,9 @@ Usage::
         #              field's bitmap
         # broadcasts:  {key: value}
         result = ...
-        # A bare array carries no nulls out; a (data, bitmap) pair keeps them,
+        # A bare array carries no nulls out; Nullable(data, bitmap) keeps them,
         # bitmap being the packed uint8 array bitmap_dict hands out, or None
-        return {"output_col": (result, bitmap_dict["input_col"])}
+        return {"output_col": Nullable(result, bitmap_dict["input_col"])}
 
     udf = make_mapinarrow_func(my_func, broadcasts={"scale": 1.5})
     df_out = df_in.mapInArrow(udf, output_schema)
@@ -33,11 +33,12 @@ Every name in ``data_dict`` is also a key of ``bitmap_dict``, so a batch that
 happens to contain no nulls is indexable exactly like one that does.
 
 On the way out a bare array carries no nulls: every null the UDF received
-comes back as whatever sat under it. A ``(data, bitmap)`` pair per output
-column keeps the column's validity, the bitmap being in the layout
-``bitmap_dict`` hands out, so a UDF passes the input's validity through with
-``(result, bitmap_dict[column])`` and one that decides its own nulls hands back
-a bitmap of that layout.
+comes back as whatever sat under it. ``Nullable(data, bitmap)`` keeps the
+column's validity, the bitmap being in the layout ``bitmap_dict`` hands out, so
+a UDF passes the input's validity through with
+``Nullable(result, bitmap_dict[column])`` and one that decides its own nulls
+hands back a bitmap of that layout; one that resizes the column needs a bitmap
+of its own, since a packed bitmap carries no row count.
 
 For a ``StructArray`` column the struct-level validity is folded into each
 field's bitmap, so a row that is null as a whole is visible to one ``is_null``

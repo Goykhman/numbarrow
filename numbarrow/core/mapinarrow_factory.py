@@ -12,10 +12,25 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from collections.abc import Mapping
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from numbarrow.core.adapters import arrow_array_adapter
 from numbarrow.utils.arrow_array_utils import MissingKeyError, renamed, type_repr
+
+
+class Nullable(NamedTuple):
+    """An output column with its validity, ``Nullable(data, bitmap)``.
+
+    ``data`` is anything a column may be: an ndarray, a list, a
+    :class:`pyarrow.Array` or a numpy record array. ``bitmap`` is a packed
+    uint8 validity bitmap in the layout ``bitmap_dict`` hands out,
+    ``(rows + 7) // 8`` bytes with a set bit for a valid row, or ``None``,
+    which is what ``bitmap_dict`` holds for a column with no validity buffer.
+    A bare array carries no nulls out of a UDF; this does.
+    """
+
+    data: object
+    bitmap: np.ndarray | None
 
 
 def _struct_fields(struct_type):
@@ -209,13 +224,14 @@ def _ndarray_to_arrow(value, arrow_type):
 
 
 def _split_pair(value):
-    """The data and the bitmap of a ``(data, bitmap)`` pair; any other shape carries no bitmap.
+    """The data and the bitmap of a :class:`Nullable`; any other shape carries no bitmap.
 
-    A 2-tuple whose second element is an ndarray or ``None`` is the pair. A
-    tuple of any other shape goes to ``pa.array`` as the sequence it is.
+    A bare tuple is not read as a pair: it goes to ``pa.array`` as the
+    sequence it is, since a 2-tuple was a two-row column before ``Nullable``
+    existed and any rule on a bare tuple would misread one shape or another.
     """
-    if isinstance(value, tuple) and len(value) == 2 and (value[1] is None or isinstance(value[1], np.ndarray)):
-        return value
+    if isinstance(value, Nullable):
+        return value.data, value.bitmap
     return value, None
 
 
@@ -226,9 +242,13 @@ def _with_validity(array, bitmap):
     :func:`~numbarrow.core.is_null.is_null` reads: one bit per row, LSB first,
     set for a valid row, ``(rows + 7) // 8`` bytes of uint8. A fixed-width or
     string column with no nulls of its own takes the bitmap as its validity
-    buffer and keeps its data buffer, so neither side is copied. Any other
-    column, one that already carries nulls, a sliced Arrow array or a nested
-    type, is masked through ``if_else``, which keeps the nulls it had.
+    buffer and keeps its data buffer, so neither side is copied when the
+    bitmap is contiguous, which every bitmap ``bitmap_dict`` hands out is.
+    Any other column, one that already carries nulls, a sliced Arrow array or
+    a nested type, is masked through ``if_else``, which keeps the nulls it
+    had. The bitmap carries no row count of its own: the length check here is
+    per byte, eight rows to a byte, and the caller checks a bitmap the batch
+    handed out against the batch's row count.
     """
     if bitmap.dtype != np.uint8 or bitmap.ndim != 1:
         raise TypeError(
@@ -252,14 +272,18 @@ def _with_validity(array, bitmap):
     return pc.if_else(valid, array, pa.scalar(None, type=array.type))
 
 
-def _to_arrow(value, name, arrow_type=None):
+def _to_arrow(value, name, arrow_type=None, handed=frozenset(), batch_rows=None):
     """Convert one UDF output column to an Arrow array, naming the column on any failure.
 
-    A ``(data, bitmap)`` pair is built from its data and then given the
-    bitmap as its validity. ``pa.array`` iterates a Mapping, so a dict of
-    arrays returned under one key silently became a string column of the
-    dict's keys, with a different row count and nothing raised; it is refused
-    outright. Every other failure on the output side named no column at all.
+    A :class:`Nullable` is built from its data and then given its bitmap as
+    validity. A bitmap the batch handed out is right only for a column of the
+    batch's row count, and a packed bitmap cannot tell one row count from
+    another inside the same byte, so that case is refused here by identity
+    rather than left to the byte check. ``pa.array`` iterates a Mapping, so a
+    dict of arrays returned under one key silently became a string column of
+    the dict's keys, with a different row count and nothing raised; it is
+    refused outright. Every other failure on the output side named no column
+    at all.
     """
     value, bitmap = _split_pair(value)
     if isinstance(value, Mapping):
@@ -270,13 +294,33 @@ def _to_arrow(value, name, arrow_type=None):
         )
     try:
         array = _convert(value, arrow_type)
-        return array if bitmap is None else _with_validity(array, bitmap)
+        if bitmap is None:
+            return array
+        if id(bitmap) in handed and len(array) != batch_rows:
+            raise ValueError(
+                f"the bitmap is one this batch handed out, which covers its {batch_rows} rows, but "
+                f"the column has {len(array)} rows; a resized column needs a bitmap of its own"
+            )
+        return _with_validity(array, bitmap)
     except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         raise renamed(exc, f"output column {name!r}") from exc
 
 
-def _build_batch(outputs, output_schema):
-    """The RecordBatch a UDF's result becomes, bound to ``output_schema`` when there is one."""
+def _bitmap_leaves(bitmap_dict):
+    """Every bitmap array in ``bitmap_dict``, at the column and the field level."""
+    for value in bitmap_dict.values():
+        leaves = value.values() if isinstance(value, dict) else (value,)
+        for leaf in leaves:
+            if leaf is not None:
+                yield leaf
+
+
+def _build_batch(outputs, output_schema, handed=frozenset(), batch_rows=None):
+    """The RecordBatch a UDF's result becomes, bound to ``output_schema`` when there is one.
+
+    ``handed`` holds the ids of the bitmaps the batch handed the UDF and
+    ``batch_rows`` the batch's row count; see ``_to_arrow``.
+    """
     if not isinstance(outputs, Mapping):
         raise TypeError(
             f"main_func must return a dict of column name to array, not "
@@ -284,7 +328,7 @@ def _build_batch(outputs, output_schema):
         )
     if output_schema is None:
         names = list(outputs)
-        arrays = [_to_arrow(outputs[name], name) for name in names]
+        arrays = [_to_arrow(outputs[name], name, None, handed, batch_rows) for name in names]
     else:
         extra = [name for name in outputs if name not in output_schema.names]
         if extra:
@@ -300,7 +344,7 @@ def _build_batch(outputs, output_schema):
                     f"output_schema names column {field.name!r}, which main_func did not "
                     f"return; it returned {list(outputs)}"
                 )
-            arrays.append(_to_arrow(outputs[field.name], field.name, field.type))
+            arrays.append(_to_arrow(outputs[field.name], field.name, field.type, handed, batch_rows))
     lengths = {name: len(array) for name, array in zip(names, arrays)}
     if len(set(lengths.values())) > 1:
         # pyarrow's own refusal says "2 vs 3" and names neither column.
@@ -341,16 +385,19 @@ def make_mapinarrow_func(
         :class:`pyarrow.Array`, from which a PyArrow ``RecordBatch`` is built.
         A numpy record array becomes a struct column, one child per field.
         Four shapes carry a null out: a list holding ``None``, a
-        :class:`pyarrow.Array`, a numpy masked array, and a ``(data, bitmap)``
-        pair, whose ``bitmap`` is a packed uint8 validity bitmap in the layout
-        ``bitmap_dict`` hands out, ``(rows + 7) // 8`` bytes with a set bit
-        for a valid row, or ``None``.  A bare array carries no nulls out:
-        every null the UDF received comes back as whatever sat under it.
-        Passing the input's validity through is
-        ``{"out": (result, bitmap_dict["value"])}``, and a UDF that decides
-        its own nulls hands back a bitmap of that layout, which is the one
-        :func:`~numbarrow.core.is_null.is_null` reads.  A bitmap of any other
-        length or dtype raises naming the column.
+        :class:`pyarrow.Array`, a numpy masked array, and a
+        :class:`Nullable`, ``Nullable(data, bitmap)``, whose ``bitmap`` is a
+        packed uint8 validity bitmap in the layout ``bitmap_dict`` hands out,
+        ``(rows + 7) // 8`` bytes with a set bit for a valid row, or ``None``.
+        A bare array carries no nulls out: every null the UDF received comes
+        back as whatever sat under it.  Passing the input's validity through
+        is ``{"out": Nullable(result, bitmap_dict["value"])}``, and a UDF
+        that decides its own nulls hands back a bitmap of that layout, which
+        is the one :func:`~numbarrow.core.is_null.is_null` reads.  A bitmap
+        of another length or dtype raises naming the column, and so does a
+        bitmap the batch handed out on a column whose row count is not the
+        batch's, since a packed bitmap cannot tell row counts apart inside
+        one byte.
 
         Spark binds the columns of that batch to the declared output schema by
         POSITION, not by name, and checks nothing about their types: it reads
@@ -472,5 +519,6 @@ def make_mapinarrow_func(
                     }
                 else:
                     bitmap_dict[col], data_dict[col] = adapted
-            yield _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema)
+            handed = frozenset(id(leaf) for leaf in _bitmap_leaves(bitmap_dict))
+            yield _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema, handed, batch.num_rows)
     return _
