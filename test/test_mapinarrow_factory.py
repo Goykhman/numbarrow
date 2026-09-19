@@ -540,6 +540,23 @@ def test_a_bitmap_that_is_not_packed_uint8_is_refused():
         run_outputs({"a": Nullable(data, np.zeros((1, 1), dtype=np.uint8))})
 
 
+def test_a_bitmap_that_is_not_an_ndarray_is_refused():
+    # bitmap.dtype was read before anything was validated, and AttributeError
+    # is not one of the classes the wrapper catches, so each of these escaped
+    # as "'list' object has no attribute 'dtype'", naming neither the column
+    # nor what a bitmap must be.
+    data = np.array([1, 2, 3], dtype=np.int64)
+    shapes = {
+        "list": [0b101],
+        "bytes": b"\x05",
+        "UInt8Array": pa.array([5], type=pa.uint8()),
+        "int": 5,
+    }
+    for name, bitmap in shapes.items():
+        with pytest.raises(TypeError, match=r"'a'.*packed uint8 array.*not a " + name):
+            run_outputs({"a": Nullable(data, bitmap)})
+
+
 def test_a_handed_out_bitmap_is_refused_on_a_resized_column():
     # A packed bitmap cannot tell 2 rows from 3: both are one byte. A UDF that
     # drops a row and passes the batch's bitmap through would get the dropped

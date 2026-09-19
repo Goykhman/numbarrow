@@ -261,8 +261,16 @@ def _with_validity(array, bitmap):
     a nested type, is masked through ``if_else``, which keeps the nulls it
     had. The bitmap carries no row count of its own: the length check here is
     per byte, eight rows to a byte, and the caller checks a bitmap the batch
-    handed out against the count it was handed out for.
+    handed out against the count it was handed out for. A bitmap that is not
+    an ndarray at all is refused before any attribute of it is read, since the
+    AttributeError that reading one raises is outside the classes the caller
+    catches and would escape naming neither the column nor the layout.
     """
+    if not isinstance(bitmap, np.ndarray):
+        raise TypeError(
+            f"the bitmap of a (data, bitmap) pair must be the packed uint8 array bitmap_dict "
+            f"hands out, or None, not a {type(bitmap).__name__}"
+        )
     if bitmap.dtype != np.uint8 or bitmap.ndim != 1:
         raise TypeError(
             f"the bitmap of a (data, bitmap) pair must be the packed uint8 array bitmap_dict "
@@ -419,11 +427,12 @@ def make_mapinarrow_func(
         ``bitmap_dict["column"]["field"]`` for a struct field, and a UDF
         that decides its own nulls hands back a bitmap of that layout, which
         is the one :func:`~numbarrow.core.is_null.is_null` reads.  A bitmap
-        of another length or dtype raises naming the column, and so does a
-        bitmap the batch handed out on a column whose row count is not the
-        count that bitmap covers, the batch's rows for a column's own bitmap
-        and the flattened elements for a struct field's, since a packed
-        bitmap cannot tell row counts apart inside one byte.
+        that is not an ndarray, or is one of another length or dtype, raises
+        naming the column, and so does a bitmap the batch handed out on a
+        column whose row count is not the count that bitmap covers, the
+        batch's rows for a column's own bitmap and the flattened elements for
+        a struct field's, since a packed bitmap cannot tell row counts apart
+        inside one byte.
 
         Spark binds the columns of that batch to the declared output schema by
         POSITION, not by name, and checks nothing about their types: it reads

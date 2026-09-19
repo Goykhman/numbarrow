@@ -263,6 +263,12 @@ MUTATIONS = [
         "    if bitmap.dtype != np.uint8 or bitmap.ndim != 1:",
         "    if False:",
     ),
+    (
+        "a Nullable's bitmap that is not an ndarray stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if not isinstance(bitmap, np.ndarray):",
+        "    if False:",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "docs"]
