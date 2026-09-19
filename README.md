@@ -154,10 +154,12 @@ A bare array returned under a column name carries no nulls out: every null the
 UDF received comes back as whatever sat under it, `0`, `0.0` or `''`.
 `Nullable(data, bitmap)` keeps the column's validity, the bitmap being a packed
 uint8 array in the layout `bitmap_dict` hands out, or `None`; a UDF that
-decides its own nulls hands back a bitmap of that layout, and one that resizes
-the column needs a bitmap of its own, since a packed bitmap carries no row
-count. A list holding `None`, a `pyarrow.Array` and a numpy masked array carry
-nulls out as well.
+decides its own nulls hands back a bitmap of that layout. A packed bitmap
+carries no row count, so a bitmap the batch handed out is accepted only on a
+column of the length it covers, the batch's rows for a column's own bitmap and
+the flattened elements for a struct field's, and a UDF that resizes the column
+needs a bitmap of its own. A list holding `None`, a `pyarrow.Array` and a numpy
+masked array carry nulls out as well.
 
 See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complete runnable example.
 

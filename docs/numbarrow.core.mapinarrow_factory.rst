@@ -36,9 +36,12 @@ On the way out a bare array carries no nulls: every null the UDF received
 comes back as whatever sat under it. ``Nullable(data, bitmap)`` keeps the
 column's validity, the bitmap being in the layout ``bitmap_dict`` hands out, so
 a UDF passes the input's validity through with
-``Nullable(result, bitmap_dict[column])`` and one that decides its own nulls
-hands back a bitmap of that layout; one that resizes the column needs a bitmap
-of its own, since a packed bitmap carries no row count.
+``Nullable(result, bitmap_dict[column])``, or ``bitmap_dict[column][field]``
+for a struct field, and one that decides its own nulls hands back a bitmap of
+that layout. A packed bitmap carries no row count, so a bitmap the batch handed
+out is accepted only on a column of the length it covers, the batch's rows for
+a column's own bitmap and the flattened elements for a struct field's; one that
+resizes the column needs a bitmap of its own.
 
 For a ``StructArray`` column the struct-level validity is folded into each
 field's bitmap, so a row that is null as a whole is visible to one ``is_null``

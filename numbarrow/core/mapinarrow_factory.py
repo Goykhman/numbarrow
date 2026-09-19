@@ -12,6 +12,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Callable, NamedTuple
 
 from numbarrow.core.adapters import arrow_array_adapter
@@ -248,7 +249,7 @@ def _with_validity(array, bitmap):
     a nested type, is masked through ``if_else``, which keeps the nulls it
     had. The bitmap carries no row count of its own: the length check here is
     per byte, eight rows to a byte, and the caller checks a bitmap the batch
-    handed out against the batch's row count.
+    handed out against the count it was handed out for.
     """
     if bitmap.dtype != np.uint8 or bitmap.ndim != 1:
         raise TypeError(
@@ -272,18 +273,19 @@ def _with_validity(array, bitmap):
     return pc.if_else(valid, array, pa.scalar(None, type=array.type))
 
 
-def _to_arrow(value, name, arrow_type=None, handed=frozenset(), batch_rows=None):
+def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
     """Convert one UDF output column to an Arrow array, naming the column on any failure.
 
     A :class:`Nullable` is built from its data and then given its bitmap as
     validity. A bitmap the batch handed out is right only for a column of the
-    batch's row count, and a packed bitmap cannot tell one row count from
-    another inside the same byte, so that case is refused here by identity
-    rather than left to the byte check. ``pa.array`` iterates a Mapping, so a
-    dict of arrays returned under one key silently became a string column of
-    the dict's keys, with a different row count and nothing raised; it is
-    refused outright. Every other failure on the output side named no column
-    at all.
+    count it was handed out for, which is the batch's rows for a column's own
+    bitmap and the flattened elements for a struct field's, and a packed
+    bitmap cannot tell one row count from another inside the same byte, so
+    that case is refused here by identity rather than left to the byte check.
+    ``pa.array`` iterates a Mapping, so a dict of arrays returned under one
+    key silently became a string column of the dict's keys, with a different
+    row count and nothing raised; it is refused outright. Every other failure
+    on the output side named no column at all.
     """
     value, bitmap = _split_pair(value)
     if isinstance(value, Mapping):
@@ -296,30 +298,40 @@ def _to_arrow(value, name, arrow_type=None, handed=frozenset(), batch_rows=None)
         array = _convert(value, arrow_type)
         if bitmap is None:
             return array
-        if id(bitmap) in handed and len(array) != batch_rows:
+        covers = handed.get(id(bitmap))
+        if covers is not None and len(array) != covers:
             raise ValueError(
-                f"the bitmap is one this batch handed out, which covers its {batch_rows} rows, but "
-                f"the column has {len(array)} rows; a resized column needs a bitmap of its own"
+                f"the bitmap is one this batch handed out for {covers} rows, but the column has "
+                f"{len(array)} rows; a resized column needs a bitmap of its own"
             )
         return _with_validity(array, bitmap)
     except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         raise renamed(exc, f"output column {name!r}") from exc
 
 
-def _bitmap_leaves(bitmap_dict):
-    """Every bitmap array in ``bitmap_dict``, at the column and the field level."""
-    for value in bitmap_dict.values():
-        leaves = value.values() if isinstance(value, dict) else (value,)
-        for leaf in leaves:
-            if leaf is not None:
-                yield leaf
+def _handed_bitmaps(data_dict, bitmap_dict):
+    """Each bitmap the batch hands out, by id, with the count of rows it covers.
+
+    A column's bitmap covers the batch's rows, a struct field's covers the
+    field's own elements, and for a list of structs those are the flattened
+    elements rather than the outer rows. The count therefore comes from the
+    data handed out beside the bitmap, never from the batch.
+    """
+    handed = {}
+    for name, bitmaps in bitmap_dict.items():
+        datas = data_dict[name]
+        leaves = bitmaps.items() if isinstance(bitmaps, dict) else [(None, bitmaps)]
+        for field, bitmap in leaves:
+            if bitmap is not None:
+                handed[id(bitmap)] = len(datas if field is None else datas[field])
+    return handed
 
 
-def _build_batch(outputs, output_schema, handed=frozenset(), batch_rows=None):
+def _build_batch(outputs, output_schema, handed=MappingProxyType({})):
     """The RecordBatch a UDF's result becomes, bound to ``output_schema`` when there is one.
 
-    ``handed`` holds the ids of the bitmaps the batch handed the UDF and
-    ``batch_rows`` the batch's row count; see ``_to_arrow``.
+    ``handed`` maps the id of each bitmap the batch handed the UDF to the row
+    count that bitmap covers; see ``_to_arrow``.
     """
     if not isinstance(outputs, Mapping):
         raise TypeError(
@@ -328,7 +340,7 @@ def _build_batch(outputs, output_schema, handed=frozenset(), batch_rows=None):
         )
     if output_schema is None:
         names = list(outputs)
-        arrays = [_to_arrow(outputs[name], name, None, handed, batch_rows) for name in names]
+        arrays = [_to_arrow(outputs[name], name, None, handed) for name in names]
     else:
         extra = [name for name in outputs if name not in output_schema.names]
         if extra:
@@ -344,7 +356,7 @@ def _build_batch(outputs, output_schema, handed=frozenset(), batch_rows=None):
                     f"output_schema names column {field.name!r}, which main_func did not "
                     f"return; it returned {list(outputs)}"
                 )
-            arrays.append(_to_arrow(outputs[field.name], field.name, field.type, handed, batch_rows))
+            arrays.append(_to_arrow(outputs[field.name], field.name, field.type, handed))
     lengths = {name: len(array) for name, array in zip(names, arrays)}
     if len(set(lengths.values())) > 1:
         # pyarrow's own refusal says "2 vs 3" and names neither column.
@@ -391,13 +403,15 @@ def make_mapinarrow_func(
         ``(rows + 7) // 8`` bytes with a set bit for a valid row, or ``None``.
         A bare array carries no nulls out: every null the UDF received comes
         back as whatever sat under it.  Passing the input's validity through
-        is ``{"out": Nullable(result, bitmap_dict["value"])}``, and a UDF
+        is ``{"out": Nullable(result, bitmap_dict["value"])}``, or
+        ``bitmap_dict["column"]["field"]`` for a struct field, and a UDF
         that decides its own nulls hands back a bitmap of that layout, which
         is the one :func:`~numbarrow.core.is_null.is_null` reads.  A bitmap
         of another length or dtype raises naming the column, and so does a
         bitmap the batch handed out on a column whose row count is not the
-        batch's, since a packed bitmap cannot tell row counts apart inside
-        one byte.
+        count that bitmap covers, the batch's rows for a column's own bitmap
+        and the flattened elements for a struct field's, since a packed
+        bitmap cannot tell row counts apart inside one byte.
 
         Spark binds the columns of that batch to the declared output schema by
         POSITION, not by name, and checks nothing about their types: it reads
@@ -519,6 +533,6 @@ def make_mapinarrow_func(
                     }
                 else:
                     bitmap_dict[col], data_dict[col] = adapted
-            handed = frozenset(id(leaf) for leaf in _bitmap_leaves(bitmap_dict))
-            yield _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema, handed, batch.num_rows)
+            handed = _handed_bitmaps(data_dict, bitmap_dict)
+            yield _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema, handed)
     return _

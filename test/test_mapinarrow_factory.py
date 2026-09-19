@@ -537,6 +537,37 @@ def test_a_handed_out_bitmap_is_refused_on_a_resized_column():
     assert got.column("c").to_pylist() == [2, None]
 
 
+def test_a_handed_out_field_bitmap_covers_the_flattened_elements():
+    # A list-of-struct column's bitmaps cover the flattened struct elements,
+    # six of them here for two outer rows, so the documented pass-through
+    # returns a column three times the batch's length and was refused as a
+    # resize, with a message claiming the bitmap covered the batch's 2 rows. A
+    # handed-out bitmap is checked against the count it was handed out for.
+    ty = pa.list_(pa.struct([("a", pa.int64())]))
+    column = pa.array([[{"a": 1}, {"a": None}, {"a": 3}], [{"a": 4}, {"a": 5}, {"a": 6}]], type=ty)
+    batch = pa.RecordBatch.from_arrays([column], names=["s"])
+
+    def passed_through(data_dict, bitmap_dict, broadcasts):
+        return {"out": Nullable(data_dict["s"]["a"] * 2, bitmap_dict["s"]["a"])}
+
+    got = list(make_mapinarrow_func(passed_through, input_columns=["s"])(iter([batch])))[0]
+    assert got.column("out").to_pylist() == [2, None, 6, 8, 10, 12]
+
+    def copied(data_dict, bitmap_dict, broadcasts):
+        return {"out": Nullable(data_dict["s"]["a"] * 2, bitmap_dict["s"]["a"].copy())}
+
+    # A copy is not the array the batch handed out, so it takes the byte check
+    # instead; it answered this already while the pass-through was refused.
+    same = list(make_mapinarrow_func(copied, input_columns=["s"])(iter([batch])))[0]
+    assert same.column("out").to_pylist() == [2, None, 6, 8, 10, 12]
+
+    def half(data_dict, bitmap_dict, broadcasts):
+        return {"out": Nullable(data_dict["s"]["a"][:3], bitmap_dict["s"]["a"])}
+
+    with pytest.raises(ValueError, match=r"'out'.*handed out.*6 rows.*3 rows"):
+        list(make_mapinarrow_func(half, input_columns=["s"])(iter([batch])))
+
+
 def test_a_bare_tuple_is_a_sequence_not_a_pair():
     # Only a Nullable is the pair. A tuple is the column it always was, a
     # 2-tuple ending in None or an array included, which a rule on bare tuples
