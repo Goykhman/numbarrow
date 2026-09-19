@@ -1,10 +1,13 @@
 """Invariants tying the documented behaviour to the code.
 
 These exist because the docs drifted from the code repeatedly: a type table
-that did not match the dispatcher, and a copy-versus-view claim that was wrong
-for one type. A prose fix closes one instance; these fail the build the next
-time any type drifts, which is the only thing that stops it recurring.
+that did not match the dispatcher, a copy-versus-view claim that was wrong for
+one type, and a conversion the docs promised would raise for every output
+shape while one of the shapes truncated it. A prose fix closes one instance;
+these fail the build the next time any of it drifts, which is the only thing
+that stops it recurring.
 """
+import datetime
 import re
 from pathlib import Path
 
@@ -12,8 +15,14 @@ import numpy as np
 import pyarrow as pa
 import pytest
 from numbarrow.core.adapters import arrow_array_adapter
+from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
 
 README = Path(__file__).resolve().parent.parent / "README.md"
+
+# The docstring as one line, so a claim that wraps is still one string.
+FACTORY_DOC = " ".join(make_mapinarrow_func.__doc__.split())
+
+SUB_SECOND = datetime.datetime(2020, 1, 1, 12, 34, 56, 789012)
 
 # One representative array per documented type. Kept beside the table it
 # checks, so adding a row to the table without adding a sample fails here.
@@ -106,3 +115,32 @@ def test_documented_copy_column_matches_reality(names, copy_answer):
             f"{name}: README says {'copy' if documented_copy else 'view'}, "
             f"measured {'copy' if measured_copy else 'view'}"
         )
+
+
+def _one_output_column(value, arrow_type):
+    """The column a UDF returning *value* under a declared *arrow_type* yields."""
+    batch = pa.RecordBatch.from_pydict({"v": [1.0]})
+    fn = make_mapinarrow_func(lambda d, b, br: {"out": value},
+                              output_schema=pa.schema([("out", arrow_type)]))
+    return list(fn(iter([batch])))[0].column("out")
+
+
+def test_the_refusals_hold_for_the_shapes_the_docstring_names_them_for():
+    # The docstring anchored its promise to pa.array without saying that
+    # pa.array has two converters: the typed one raises on these two, and the
+    # sequence converter a list goes through truncates both without a word.
+    assert "For an ndarray of a numeric or datetime dtype, or a :class:`pyarrow.Array`" in FACTORY_DOC
+    with pytest.raises(pa.ArrowInvalid):
+        _one_output_column(np.array([1.5]), pa.int64())
+    with pytest.raises(pa.ArrowInvalid):
+        _one_output_column(np.array([SUB_SECOND], dtype="datetime64[us]"), pa.timestamp("s"))
+
+
+def test_the_truncations_the_docstring_admits_for_a_list_are_the_ones_it_makes():
+    assert "goes through ``pa.array``'s sequence converter" in FACTORY_DOC
+    assert ("from a list alone, a fraction into an integer type and a timestamp unit change "
+            "that drops digits") in FACTORY_DOC
+    assert _one_output_column([1.5], pa.int64()).to_pylist() == [1]
+    assert _one_output_column([SUB_SECOND], pa.timestamp("s")).to_pylist() == [
+        SUB_SECOND.replace(microsecond=0)
+    ]

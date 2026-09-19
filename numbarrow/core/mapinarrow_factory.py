@@ -490,14 +490,22 @@ def make_mapinarrow_func(
         since Arrow matches struct fields by exact name and would otherwise
         fill the column with nulls.
 
-        What the declared type refuses is what ``pa.array`` refuses: an
-        integer out of the declared type's range, a float with a fraction
-        into an integer type and a timestamp unit change that drops digits
-        all raise :class:`pyarrow.ArrowInvalid`, and an integer beyond int64
-        altogether raises :class:`OverflowError`.  Not every lossy conversion
-        is refused:
-        a timestamp into ``date32`` or ``date64`` floors to the day, and
-        ``float64`` into ``float32`` overflows to ``inf``, both silently.
+        What the declared type refuses is what ``pa.array`` refuses, and that
+        depends on the shape the column arrives in.  For an ndarray of a
+        numeric or datetime dtype, or a :class:`pyarrow.Array`, an integer
+        out of the declared type's range, a float with a fraction into an
+        integer type and a timestamp unit change that drops digits all raise
+        :class:`pyarrow.ArrowInvalid`.  A Python list, and any other sequence
+        of Python objects, an object-dtype ndarray included, goes through
+        ``pa.array``'s sequence converter instead: an integer out of the
+        declared type's range still raises :class:`pyarrow.ArrowInvalid` and
+        one beyond int64 altogether raises :class:`OverflowError`, but a
+        float's fraction and a timestamp's extra digits are dropped silently.
+        So the lossy conversions that pass without a word are a timestamp
+        into ``date32`` or ``date64``, which floors to the day, ``float64``
+        into ``float32``, which overflows to ``inf``, and, from a list alone,
+        a fraction into an integer type and a timestamp unit change that
+        drops digits.
 
         Left as ``None`` the batch is built from the dict alone: insertion
         order decides, and every type is inferred from the value, so a unicode
