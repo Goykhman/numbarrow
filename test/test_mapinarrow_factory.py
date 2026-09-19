@@ -354,6 +354,31 @@ def test_a_struct_key_no_field_has_is_refused_at_any_depth():
     assert pairs.column("s").to_pylist() == [[("k", {"amount": 1})]]
 
 
+def test_a_missing_row_of_a_list_or_map_column_is_a_null_not_a_crash():
+    # pandas marks a missing row with NaN or pd.NA, never with None, and
+    # pa.array turns both into nulls. The key pre-pass walked into every row
+    # that was not exactly None and died on "'float' object is not iterable",
+    # refusing a whole batch whose column pa.array converts.
+    pd = pytest.importorskip("pandas")
+    inner = pa.struct([("amount", pa.int64())])
+    listed, mapped = pa.list_(inner), pa.map_(pa.string(), inner)
+    cases = {
+        "list rows, NaN": (listed, pd.Series([[{"amount": 1}], np.nan])),
+        "list rows, pd.NA": (listed, pd.Series([[{"amount": 1}], pd.NA])),
+        "map rows, NaN": (mapped, pd.Series([{"k": {"amount": 1}}, np.nan])),
+        "map rows, pd.NA": (mapped, pd.Series([{"k": {"amount": 1}}, pd.NA])),
+        "pair rows, NaN": (mapped, pd.Series([[("k", {"amount": 1})], np.nan])),
+    }
+    for label, (declared, value) in cases.items():
+        got = run_outputs({"s": value}, pa.schema([("s", declared)])).column("s")
+        assert got.to_pylist() == pa.array(value, type=declared).to_pylist(), label
+    # The typo the pre-pass exists for is still caught in the same shape.
+    for declared, value in ((listed, pd.Series([[{"Amount": 1}], np.nan])),
+                            (mapped, pd.Series([{"k": {"Amount": 1}}, np.nan]))):
+        with pytest.raises(ValueError, match="Amount"):
+            run_outputs({"s": value}, pa.schema([("s", declared)]))
+
+
 def test_a_malformed_map_pair_is_refused_naming_the_column():
     # A one-element "pair" reaches pa.array's own refusal rather than an
     # IndexError from the key check, so the column is named.

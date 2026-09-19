@@ -72,6 +72,18 @@ def _unexpected_fields(source_type, declared_type):
     return []
 
 
+def _iterable_rows(rows):
+    """The rows a key check can look inside; the rest carry no keys of their own.
+
+    A missing row is ``None`` in a list, ``NaN`` in a pandas Series of object
+    dtype and ``pd.NA`` in a nullable one, and ``pa.array`` turns every one of
+    them into a null. None of them is iterable, so a row that cannot be
+    iterated is passed over here and left to ``pa.array``, which converts what
+    it can and names the column when it cannot.
+    """
+    return [row for row in rows if hasattr(row, "__iter__")]
+
+
 def _check_keys(rows, arrow_type):
     """Refuse, at any depth, a dict key that no declared struct field has.
 
@@ -99,7 +111,7 @@ def _check_keys(rows, arrow_type):
             if _carries_keys(child_type):
                 _check_keys([row[name] for row in dicts if name in row], child_type)
     elif _is_list_like(arrow_type):
-        _check_keys([item for row in rows if row is not None for item in row], arrow_type.value_type)
+        _check_keys([item for row in _iterable_rows(rows) for item in row], arrow_type.value_type)
     elif pa.types.is_map(arrow_type):
         keys, items = _map_entries(rows)
         if _carries_keys(arrow_type.key_type):
@@ -115,11 +127,11 @@ def _map_entries(rows):
     names the column; indexing it here would not.
     """
     keys, items = [], []
-    for row in rows:
+    for row in _iterable_rows(rows):
         if isinstance(row, Mapping):
             keys.extend(row)
             items.extend(row.values())
-        elif row is not None:
+        else:
             for pair in row:
                 if isinstance(pair, (tuple, list)) and len(pair) == 2:
                     keys.append(pair[0])

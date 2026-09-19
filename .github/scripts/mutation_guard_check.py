@@ -105,6 +105,12 @@ MUTATIONS = [
         "    elif False:\n        _check_keys(",
     ),
     (
+        "the key check stops passing over a row it cannot look inside",
+        "numbarrow/core/mapinarrow_factory.py",
+        '    return [row for row in rows if hasattr(row, "__iter__")]',
+        "    return list(rows)",
+    ),
+    (
         "a struct key inside a map's keys stops being checked",
         "numbarrow/core/mapinarrow_factory.py",
         "        if _carries_keys(arrow_type.key_type):",
