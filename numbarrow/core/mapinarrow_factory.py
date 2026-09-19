@@ -435,12 +435,16 @@ def make_mapinarrow_func(
         inside one byte.
 
         Spark binds the columns of that batch to the declared output schema by
-        POSITION, not by name, and checks nothing about their types: it reads
+        POSITION, not by name, and checks nothing about their names: it reads
         each Arrow vector through the accessor its declared type expects, so
         an int64 column declared as a timestamp reads as a timestamp, and two
-        columns of any types that share an accessor family swap silently when
-        the dict is built in the other order; only a width mismatch, such as
-        int32 under LongType, fails.  Build the returned dict in the order the
+        columns whose types share an accessor family swap silently when the
+        dict is built in the other order.  A column read through the accessor
+        of another family fails in the JVM with
+        ``java.lang.UnsupportedOperationException`` whatever its width, as
+        float64 under ``LongType`` and int64 under ``DoubleType`` do, both 64
+        bits wide, and so does a width mismatch inside one family, such as
+        int32 under ``LongType``.  Build the returned dict in the order the
         output schema declares, or pass ``output_schema`` and let Arrow bind
         it by name instead.
 

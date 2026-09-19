@@ -263,3 +263,32 @@ def test_nullable_carries_nulls_back_through_spark(spark):
     assert sorted((row["id"], row["n"], row["x"], row["s"]) for row in rows) == [
         (1, None, None, None), (2, 20, 2.5, "b")
     ]
+
+
+def test_a_column_of_another_accessor_family_fails_whatever_its_width(spark):
+    # The docstring said only a width mismatch fails, so an operator chasing
+    # UnsupportedOperationException was told the types could not be the cause.
+    # float64 and int64 are both 64 bits wide and neither reads through the
+    # other's accessor.
+    doc = " ".join(make_mapinarrow_func.__doc__.split())
+    assert "read through the accessor of another family fails in the JVM" in doc
+    assert "float64 under ``LongType`` and int64 under ``DoubleType``" in doc
+    df = spark.createDataFrame([(1,), (2,)], StructType([StructField("v", LongType())]))
+
+    def collect_as(dtype, declared):
+        def main(data_dict, bitmap_dict, broadcasts):
+            return {"n": data_dict["v"].astype(dtype)}
+
+        out_schema = StructType([StructField("n", declared)])
+        return df.repartition(1).mapInArrow(make_mapinarrow_func(main), out_schema).collect()
+
+    refused = [
+        ("float64 under LongType", np.float64, LongType()),
+        ("int64 under DoubleType", np.int64, DoubleType()),
+        ("int32 under LongType", np.int32, LongType()),
+    ]
+    for label, dtype, declared in refused:
+        with pytest.raises(Exception) as excinfo:
+            collect_as(dtype, declared)
+        assert "UnsupportedOperationException" in str(excinfo.value), label
+    assert [row["n"] for row in collect_as(np.float64, DoubleType())] == [1.0, 2.0]
