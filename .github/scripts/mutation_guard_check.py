@@ -201,6 +201,13 @@ MUTATIONS = [
         "    if False:",
     ),
     (
+        "is_null_struct stops being compiled with one signature",
+        "numbarrow/core/is_null.py",
+        '@njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
+        '              Optional(Array(uint8, 1, "C", readonly=True))), **jit_options)',
+        "@njit(**jit_options)",
+    ),
+    (
         "viewers stop getting a cache name of their own",
         "numbarrow/utils/utils.py",
         '    viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"',

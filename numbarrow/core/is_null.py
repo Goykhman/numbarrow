@@ -9,7 +9,7 @@ bit position ``i % 8`` within that byte.
 
 import numpy as np
 from numba import njit
-from numba.core.types import boolean, int64, Array, uint8, bool_
+from numba.core.types import boolean, int64, Array, Optional, uint8, bool_
 
 from numbarrow.core.configurations import jit_options
 
@@ -64,7 +64,8 @@ def unpack_booleans(offset: int, length: int, packed_data: np.ndarray) -> np.nda
 # design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
 
 
-@njit(**jit_options)
+@njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),
+              Optional(Array(uint8, 1, "C", readonly=True))), **jit_options)
 def is_null_struct(index_, struct_bitmap, field_bitmap):
     """Check whether a struct field value is null at either the struct or field layer.
 
@@ -73,7 +74,15 @@ def is_null_struct(index_, struct_bitmap, field_bitmap):
     particular field null within a non-null row?).  A value is null if either
     layer marks it as null.
 
-    :param index_: zero-based element index
+    Compiled at import with one signature: an ``int64`` index and, for each
+    layer, a read-only uint8 bitmap or ``None``. Every caller resolves to it,
+    an index of another integer type converting to ``int64`` and a writable
+    bitmap being accepted where a read-only one is declared. One signature is
+    one entry in numba's on-disk cache, and numba names the next data file by
+    counting the entries in the index it just read, so a second entry is
+    something two processes warming a cold cache can disagree about.
+
+    :param index_: zero-based element index, converted to ``int64``
     :param struct_bitmap: uint8 packed bitmap for struct-level validity, or None
     :param field_bitmap: uint8 packed bitmap for field-level validity, or None
     :returns: True if null at either layer
