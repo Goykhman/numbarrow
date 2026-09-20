@@ -72,9 +72,10 @@ and a naive `timestamp[us]` holding the same int64 adapt to the same
 `datetime64[us]`, exactly as pyarrow's `to_numpy` does, so a UDF's calendar
 arithmetic runs on UTC instants and can disagree with Spark's own `to_date` by
 the session offset. On the way back out of `make_mapinarrow_func` a
-`datetime64` output becomes a naive timestamp of its unit, and a `date64` input
-passed through comes back `timestamp[ms]`; pass `output_schema` to restore a
-zone or a date type.
+`datetime64` output becomes a naive timestamp of its unit, except
+`datetime64[D]`, which becomes `date32`, and a `date64` input passed through
+comes back `timestamp[ms]`; pass `output_schema` to restore a zone or a date
+type.
 
 A `ListArray` of structs flattens its elements and returns no offsets, so a null
 outer row can be neither reported nor accounted for in the element-to-row

@@ -515,7 +515,8 @@ def make_mapinarrow_func(
         order decides, and every type is inferred from the value, so a unicode
         or bytes array comes back ``string`` or ``binary`` whatever type went
         in, a ``datetime64`` array comes back a naive ``timestamp`` of its
-        unit, and an object array holding only ``None`` comes back ``null``.
+        unit, except a day-unit one, which comes back ``date32``, and an
+        object array holding only ``None`` comes back ``null``.
     """
     broadcasts = broadcasts if broadcasts is not None else {}
     if isinstance(input_columns, str):

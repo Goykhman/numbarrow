@@ -22,6 +22,9 @@ README = Path(__file__).resolve().parent.parent / "README.md"
 # The docstring as one line, so a claim that wraps is still one string.
 FACTORY_DOC = " ".join(make_mapinarrow_func.__doc__.split())
 
+# The README the same way, for the sentences it repeats.
+README_TEXT = " ".join(README.read_text().split())
+
 SUB_SECOND = datetime.datetime(2020, 1, 1, 12, 34, 56, 789012)
 
 # One representative array per documented type. Kept beside the table it
@@ -144,3 +147,29 @@ def test_the_truncations_the_docstring_admits_for_a_list_are_the_ones_it_makes()
     assert _one_output_column([SUB_SECOND], pa.timestamp("s")).to_pylist() == [
         SUB_SECOND.replace(microsecond=0)
     ]
+
+
+def _inferred_output_column(value):
+    """The column a UDF returning *value* with no output_schema yields."""
+    batch = pa.RecordBatch.from_pydict({"v": [1.0]})
+    fn = make_mapinarrow_func(lambda d, b, br: {"out": value})
+    return list(fn(iter([batch])))[0].column("out")
+
+
+def test_an_inferred_datetime64_column_comes_back_as_the_docs_say():
+    # Both sentences promised a timestamp of the array's unit for every unit,
+    # and pa.array infers date32 for the day one, which the round-trip test's
+    # own drift table admits by leaving date32 out of it.
+    assert ("a ``datetime64`` array comes back a naive ``timestamp`` of its unit, except a "
+            "day-unit one, which comes back ``date32``") in FACTORY_DOC
+    assert ("a `datetime64` output becomes a naive timestamp of its unit, except "
+            "`datetime64[D]`, which becomes `date32`") in README_TEXT
+    days = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
+    column = _inferred_output_column(days)
+    assert column.type == pa.date32()
+    assert column.to_pylist() == [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)]
+    midnights = [datetime.datetime(2020, 1, 1), datetime.datetime(2020, 1, 2)]
+    for unit in ("s", "ms", "us", "ns"):
+        column = _inferred_output_column(days.astype(f"datetime64[{unit}]"))
+        assert column.type == pa.timestamp(unit), unit
+        assert column.to_pylist() == midnights, unit
