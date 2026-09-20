@@ -79,6 +79,13 @@ MUTATIONS = [
         "        return pa.array(value.tolist(), type=arrow_type)",
     ),
     (
+        "a day-unit datetime64 stops being widened for its declared timestamp",
+        "numbarrow/core/mapinarrow_factory.py",
+        '    if value.dtype == np.dtype("datetime64[D]") and arrow_type is not None '
+        "and pa.types.is_timestamp(arrow_type):",
+        "    if False:",
+    ),
+    (
         "a dict under one output key stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
         "    if isinstance(value, Mapping):",

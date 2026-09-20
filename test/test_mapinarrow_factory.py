@@ -1,3 +1,5 @@
+import datetime
+
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -301,6 +303,44 @@ def test_output_schema_builds_a_string_column_as_declared():
     assert got.column("s").to_pylist() == ["x", "y\x00z"]
     empty = run_outputs({"s": np.empty(0, dtype="<U1")}, schema)
     assert empty.column("s").type == pa.large_string()
+
+
+def test_a_day_unit_datetime64_declared_as_a_timestamp_keeps_its_dates():
+    # pa.array reads a day-unit array's 8-byte values as the 4-byte days of a
+    # date32, so three dates declared timestamp[s] came back as the first, the
+    # epoch and the second: every other row wrong, with nothing raised.
+    days = np.array(["2020-01-01", "2020-01-02", "2020-01-03"], dtype="datetime64[D]")
+    midnights = [datetime.datetime(2020, 1, day) for day in (1, 2, 3)]
+    for unit in ("s", "ms", "us", "ns"):
+        got = run_outputs({"t": days}, pa.schema([("t", pa.timestamp(unit))])).column("t")
+        assert got.type == pa.timestamp(unit), unit
+        assert got.to_pylist() == midnights, unit
+    zoned = run_outputs({"t": days}, pa.schema([("t", pa.timestamp("s", "UTC"))])).column("t")
+    assert zoned.to_pylist() == [stamp.replace(tzinfo=datetime.timezone.utc) for stamp in midnights]
+
+
+def test_a_declared_type_keeps_the_other_datetime64_conversions():
+    # What widening the day unit must leave alone: a unit change that drops
+    # digits still raises, a date type still floors to the day without a word,
+    # and a timedelta is still a dtype pa.array has no converter for.
+    days = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
+    sub_second = datetime.datetime(2020, 1, 1, 12, 34, 56, 789012)
+    seconds = np.array([sub_second], dtype="datetime64[s]")
+    for unit in ("ms", "us"):
+        got = run_outputs({"t": seconds}, pa.schema([("t", pa.timestamp(unit))])).column("t")
+        assert got.to_pylist() == [sub_second.replace(microsecond=0)], unit
+    with pytest.raises(pa.ArrowInvalid, match=r"'t'.*would lose data"):
+        run_outputs({"t": np.array([sub_second], dtype="datetime64[ms]")},
+                    pa.schema([("t", pa.timestamp("s"))]))
+    floored = run_outputs({"t": seconds}, pa.schema([("t", pa.date32())])).column("t")
+    assert floored.to_pylist() == [datetime.date(2020, 1, 1)]
+    dated = run_outputs({"t": days}, pa.schema([("t", pa.date64())])).column("t")
+    assert dated.to_pylist() == [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)]
+    spans = np.array([1, 2], dtype="timedelta64[D]")
+    with pytest.raises(pa.ArrowNotImplementedError, match=r"'t'.*timedelta64"):
+        run_outputs({"t": spans}, pa.schema([("t", pa.duration("s"))]))
+    with pytest.raises(pa.ArrowNotImplementedError, match=r"'t'.*timedelta64"):
+        run_outputs({"t": spans})
 
 
 def test_output_schema_refuses_a_struct_key_no_field_has():
