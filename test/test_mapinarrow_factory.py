@@ -512,6 +512,22 @@ def test_a_nullable_keeps_the_nulls_the_data_already_has():
     assert got.to_pylist() == [None, {"i": 3, "f": 4.5}]
 
 
+def test_a_nullable_dictionary_column_is_masked_rather_than_rebuilt():
+    # pa.Array.from_buffers cannot rebuild a dictionary column: Arrow's C++
+    # aborts the process on "Check failed: (data->dictionary) != (nullptr)",
+    # taking the whole run with it rather than raising. The flat path is kept
+    # off a dictionary type for that reason, and masking gives the values back
+    # with the bitmap's nulls.
+    values = pa.array(["a", "b", "c"]).dictionary_encode()
+    bitmap = np.array([0b101], dtype=np.uint8)
+    declared = pa.schema([("d", pa.dictionary(pa.int32(), pa.string()))])
+    for schema in (None, declared):
+        got = run_outputs({"d": Nullable(values, bitmap)}, schema).column("d")
+        assert got.type == values.type, schema
+        assert got.to_pylist() == ["a", None, "c"], schema
+        assert got.null_count == 1, schema
+
+
 def test_a_nullable_with_no_bitmap_is_the_bare_array():
     # bitmap_dict hands out None where the batch carries no validity buffer,
     # so passing it through must cost nothing and change nothing.

@@ -275,6 +275,12 @@ MUTATIONS = [
         "    if not isinstance(bitmap, np.ndarray):",
         "    if False:",
     ),
+    (
+        "a dictionary column stops being kept off the flat path",
+        "numbarrow/core/mapinarrow_factory.py",
+        "and not pa.types.is_dictionary(array.type)",
+        "and True",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "docs"]
