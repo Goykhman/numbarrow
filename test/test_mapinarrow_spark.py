@@ -292,3 +292,13 @@ def test_a_column_of_another_accessor_family_fails_whatever_its_width(spark):
             collect_as(dtype, declared)
         assert "UnsupportedOperationException" in str(excinfo.value), label
     assert [row["n"] for row in collect_as(np.float64, DoubleType())] == [1.0, 2.0]
+
+
+def test_a_spark_struct_type_as_output_schema_is_refused():
+    # The schema mapInArrow takes and the factory's own output_schema share a
+    # name and are not the same thing, and the Spark one carries .names too,
+    # so it reached the first batch and died on a field's missing .type. No
+    # session is needed to hand one to the factory.
+    schema = StructType([StructField("n", LongType())])
+    with pytest.raises(TypeError, match="output_schema must be a pyarrow.Schema, not a StructType"):
+        make_mapinarrow_func(lambda d, b, br: {}, output_schema=schema)

@@ -523,6 +523,13 @@ def make_mapinarrow_func(
         raise TypeError(
             f"input_columns must be a list of column names, not the string {input_columns!r}"
         )
+    if output_schema is not None and not isinstance(output_schema, pa.Schema):
+        # A PySpark StructType is the schema mapInArrow itself takes, and it
+        # carries .names too, so one handed here got as far as the first batch
+        # and died on a field's missing .type.
+        raise TypeError(
+            f"output_schema must be a pyarrow.Schema, not a {type(output_schema).__name__}"
+        )
 
     def _(iterator):
         for batch in iterator:

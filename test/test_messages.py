@@ -108,6 +108,27 @@ def test_input_columns_as_a_string_is_refused():
         make_mapinarrow_func(lambda d, b, br: {}, input_columns="value")
 
 
+def test_an_output_schema_that_is_not_a_pyarrow_schema_is_refused():
+    # A PySpark StructType is what the README's own example calls
+    # output_schema, and it carries .names too, so it got as far as the first
+    # batch and died there on a bare "'StructField' object has no attribute
+    # 'type'", naming neither the parameter nor the type it needs.
+    class Field:
+        def __init__(self, name):
+            self.name, self.dataType = name, object()
+
+    class Schema:
+        def __init__(self, fields):
+            self.fields = fields
+            self.names = [field.name for field in fields]
+
+        def __iter__(self):
+            return iter(self.fields)
+
+    with pytest.raises(TypeError, match="output_schema must be a pyarrow.Schema, not a Schema"):
+        make_mapinarrow_func(lambda d, b, br: {}, output_schema=Schema([Field("out")]))
+
+
 def test_a_missing_input_column_names_the_batch_columns():
     # Spark's projection is case-insensitive and rewrites the name it was
     # given, so the README's own example died on KeyError: 'value'.

@@ -153,6 +153,12 @@ MUTATIONS = [
         "    if False:",
     ),
     (
+        "an output_schema that is not a pyarrow Schema stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if output_schema is not None and not isinstance(output_schema, pa.Schema):",
+        "    if False:",
+    ),
+    (
         "a missing input column stops naming the batch's columns",
         "numbarrow/core/mapinarrow_factory.py",
         "                if col not in names:",
