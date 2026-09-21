@@ -363,6 +363,42 @@ MUTATIONS = [
         '    if pa.types.is_dictionary(source_type) and pa.types.is_dictionary(declared_type):',
         '    if False:',
     ),
+    (
+        'a record array under a non-struct declared type stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        "    if not pa.types.is_struct(arrow_type):\n"
+        "        raise TypeError",
+        "    if False:\n"
+        "        raise TypeError",
+    ),
+    (
+        'a ChunkedArray output stops being combined',
+        'numbarrow/core/mapinarrow_factory.py',
+        "    if isinstance(value, pa.ChunkedArray):\n"
+        "        value = value.combine_chunks()",
+        "    if False:\n"
+        "        value = value.combine_chunks()",
+    ),
+    (
+        'renamed() stops falling back to ValueError',
+        'numbarrow/utils/arrow_array_utils.py',
+        "    if not (isinstance(exc, pa.ArrowException) or cls in kept):\n"
+        "        cls = ValueError",
+        "    if False:\n"
+        "        cls = ValueError",
+    ),
+    (
+        "map entries stop checking a pair's shape",
+        'numbarrow/core/mapinarrow_factory.py',
+        '                if isinstance(pair, (tuple, list)) and len(pair) == 2:',
+        '                if True:',
+    ),
+    (
+        'a record array field failure stops naming the field',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            raise renamed(exc, f"field {field.name!r}") from exc',
+        '            raise',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

@@ -170,3 +170,11 @@ def test_an_adapter_failure_names_the_column():
     nested = pa.array([{"f": 1.0}], type=pa.struct([("f", pa.float32())]))
     with pytest.raises(NotImplementedError, match="column 's'.*struct field 'f'"):
         list(fn(iter([_batch(s=nested)])))
+
+
+def test_an_exception_that_cannot_be_rebuilt_from_a_message_is_renamed_as_a_value_error():
+    # A UnicodeDecodeError takes five constructor arguments, so rebuilding it
+    # from the prefixed message would raise a second error and lose the prefix.
+    wrapped = renamed(UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"), "column 'x'")
+    assert type(wrapped) is ValueError
+    assert str(wrapped).startswith("column 'x': ")

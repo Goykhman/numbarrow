@@ -504,6 +504,12 @@ def test_a_malformed_map_pair_is_refused_naming_the_column():
     schema = pa.schema([("m", pa.map_(pa.string(), pa.int64()))])
     with pytest.raises((ValueError, TypeError), match="'m'"):
         run_outputs({"m": [[("k",)]]}, schema)
+    # The key check walks the pairs of a map of structs itself, and passes a
+    # malformed one over the same way.
+    of_structs = pa.schema([("m", pa.map_(pa.string(), pa.struct([("amount", pa.int64())])))])
+    for rows in ([[("k",)]], [[("k", {"amount": 1}, 2)]]):
+        with pytest.raises((ValueError, TypeError), match="'m'"):
+            run_outputs({"m": rows}, of_structs)
 
 
 def test_output_columns_of_different_lengths_are_named():
@@ -543,6 +549,12 @@ def test_a_record_array_becomes_a_struct_column():
     assert got.column("r").to_pylist() == [{"i": 1, "s": "ab", "extra": None}, {"i": 3, "s": "c\x00d", "extra": None}]
     with pytest.raises(ValueError, match="'f'"):
         run_outputs({"r": records}, declared)
+    with pytest.raises(TypeError, match=r"'r'.*cannot become int64"):
+        run_outputs({"r": records}, pa.schema([("r", pa.int64())]))
+    # A child that fails conversion names its field as well as the column.
+    wide = np.array([(2 ** 40,), (1,)], dtype=[("i", "i8")])
+    with pytest.raises(pa.ArrowInvalid, match=r"'r'.*field 'i'"):
+        run_outputs({"r": wide}, pa.schema([("r", pa.struct([("i", pa.int32())]))]))
 
 
 def test_a_record_array_with_no_fields_keeps_its_rows():
@@ -554,6 +566,18 @@ def test_a_record_array_with_no_fields_keeps_its_rows():
         got = run_outputs({"r": records}, schema)
         assert got.column("r").type == pa.struct([])
         assert got.column("r").to_pylist() == [{}, {}]
+
+
+def test_a_chunked_output_is_combined_before_it_is_read():
+    # Left as chunks, a ChunkedArray is read as a sequence of scalars: a
+    # struct scalar is a Mapping, so the row key check refuses it as dicts
+    # would be. Combined first it is an Array, and the ready-built array
+    # check refuses it by its type.
+    chunked = pa.chunked_array([pa.array([{"x": 1}], type=pa.struct([("x", pa.int64())]))])
+    with pytest.raises(ValueError, match=r"the array is struct<x: int64>"):
+        run_outputs({"s": chunked}, pa.schema([("s", pa.struct([("y", pa.int64())]))]))
+    got = run_outputs({"s": pa.chunked_array([[1, 2], [3]], type=pa.int32())}).column("s")
+    assert got.type == pa.int32() and got.to_pylist() == [1, 2, 3]
 
 
 def test_an_output_side_failure_names_its_column():
