@@ -251,12 +251,13 @@ def _ndarray_to_arrow(value, arrow_type):
         return pa.array(value.tolist(), type=arrow_type or pa.string())
     if kind == "S":
         return pa.array(value.tolist(), type=arrow_type or pa.binary())
-    if value.dtype == np.dtype("datetime64[D]") and arrow_type is not None and pa.types.is_timestamp(arrow_type):
-        # Under a declared timestamp ``pa.array`` reads a day-unit array's
-        # 8-byte values as the 4-byte days of a date32, so every other row
-        # came back the epoch. Seconds are exact for whole days and are a unit
-        # it reads, and going through them leaves its own refusals in place.
-        value = value.astype("datetime64[s]")
+    if value.dtype == np.dtype("datetime64[D]") and arrow_type is not None:
+        # Under a declared timestamp or int32 ``pa.array`` reads a day-unit
+        # array's 8-byte values as the 4-byte days of a date32, so every other
+        # row came back the epoch, or a zero. Inferred first the array is a
+        # date32, and the cast gives the day numbers under int32, midnights
+        # under a timestamp, and leaves pyarrow's own refusals in place.
+        return pa.array(value).cast(arrow_type)
     return pa.array(value, type=arrow_type)
 
 

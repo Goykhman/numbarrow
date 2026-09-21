@@ -319,6 +319,20 @@ def test_a_day_unit_datetime64_declared_as_a_timestamp_keeps_its_dates():
     assert zoned.to_pylist() == [stamp.replace(tzinfo=datetime.timezone.utc) for stamp in midnights]
 
 
+def test_a_day_unit_datetime64_under_another_declared_type_is_its_date32_cast():
+    # The same misread under int32 gave two day numbers and two zeros for
+    # four dates. Inferred first the array is a date32, and the cast to the
+    # declared type gives the day numbers, the ISO dates, or pyarrow's own
+    # refusal naming the column.
+    days = np.array(["2020-03-05", "1999-12-31", "2024-01-02", "1970-01-05"], dtype="datetime64[D]")
+    numbers = run_outputs({"t": days}, pa.schema([("t", pa.int32())])).column("t")
+    assert numbers.to_pylist() == [18326, 10956, 19724, 4]
+    strings = run_outputs({"t": days}, pa.schema([("t", pa.string())])).column("t")
+    assert strings.to_pylist() == ["2020-03-05", "1999-12-31", "2024-01-02", "1970-01-05"]
+    with pytest.raises(pa.ArrowNotImplementedError, match=r"'t'.*date32"):
+        run_outputs({"t": days}, pa.schema([("t", pa.int64())]))
+
+
 def test_a_declared_type_keeps_the_other_datetime64_conversions():
     # What widening the day unit must leave alone: a unit change that drops
     # digits still raises, a date type still floors to the day without a word,
