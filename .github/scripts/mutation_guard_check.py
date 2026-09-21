@@ -309,7 +309,7 @@ MUTATIONS = [
     ),
 ]
 
-COPY = ["numbarrow", "test", "README.md", "docs"]
+COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
 
 
 def build_tree(repo: Path, dest: Path):

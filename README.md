@@ -180,11 +180,11 @@ ends of the pyarrow row in a job of their own; the pandas and pyspark rows are
 not swept. The pyspark floor is 3.4.0 because pyspark 3.3
 bundles cloudpickle 2.0.0, which predates the `co_qualname` argument Python
 3.11 added to `code()`, so on the declared Python every UDF dies in the worker
-with `TypeError: code() argument 13 must be str, not int`. The pandas row is
-2.2.2 rather than the 1.5.0 declared in the `mapinarrow` extra: no pandas
-below 2.1.1 publishes a Python 3.12 wheel, and 2.1.1 installs next to numpy 2
-but fails to import with `numpy.dtype size changed`; 2.2.2 is the first
-release built against numpy 2. The package also builds and passes its suite
+with `TypeError: code() argument 13 must be str, not int`. The pandas floor is
+2.2.2 in both extras: no pandas below 2.1.1 publishes a Python 3.12 wheel, and
+2.1.1 installs next to numpy 2 but fails to import with `numpy.dtype size
+changed`; 2.2.2 is the first release built against numpy 2. The package also
+builds and passes its suite
 on Python 3.10 and 3.11 when installed with `--ignore-requires-python`; treat
 that as regression signal rather than a supported configuration, since pip
 refuses the install below the declared floor. The pyarrow range is measured

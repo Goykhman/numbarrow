@@ -18,6 +18,7 @@ from numbarrow.core.adapters import arrow_array_adapter
 from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
 
 README = Path(__file__).resolve().parent.parent / "README.md"
+PYPROJECT = README.parent / "pyproject.toml"
 
 # The docstring as one line, so a claim that wraps is still one string.
 FACTORY_DOC = " ".join(make_mapinarrow_func.__doc__.split())
@@ -173,3 +174,12 @@ def test_an_inferred_datetime64_column_comes_back_as_the_docs_say():
         column = _inferred_output_column(days.astype(f"datetime64[{unit}]"))
         assert column.type == pa.timestamp(unit), unit
         assert column.to_pylist() == midnights, unit
+
+
+def test_the_readme_names_the_pandas_floor_the_extras_declare():
+    # The README kept explaining a 2.2.2 row against a 1.5.0 extra after both
+    # extras had moved to 2.2.2, so the floors are read from the file.
+    floors = set(re.findall(r'"pandas>=([\d.]+)"', PYPROJECT.read_text()))
+    row = re.search(r"\| pandas \| ([\d.]+)\+", README.read_text()).group(1)
+    assert floors == {row}, (floors, row)
+    assert "1.5.0" not in README_TEXT
