@@ -331,6 +331,27 @@ MUTATIONS = [
         "        viewer = self[dtype_] = numpy_array_from_ptr_factory(dtype_)",
         "        viewer = numpy_array_from_ptr_factory(dtype_)",
     ),
+    (
+        'a struct field inside a struct field stops being checked in a ready-built array',
+        'numbarrow/core/mapinarrow_factory.py',
+        '                found.extend(_unexpected_fields(field.type, declared[field.name]))',
+        '                pass',
+    ),
+    (
+        'a struct field inside a list stops being checked in a ready-built array',
+        'numbarrow/core/mapinarrow_factory.py',
+        "    if _is_list_like(source_type) and _is_list_like(declared_type):\n"
+        "        return _unexpected_fields(source_type.value_type, declared_type.value_type)",
+        "    if _is_list_like(source_type) and _is_list_like(declared_type):\n"
+        "        return []",
+    ),
+    (
+        'a struct field inside a map stops being checked in a ready-built array',
+        'numbarrow/core/mapinarrow_factory.py',
+        "        return (_unexpected_fields(source_type.key_type, declared_type.key_type)\n"
+        "                + _unexpected_fields(source_type.item_type, declared_type.item_type))",
+        '        return []',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

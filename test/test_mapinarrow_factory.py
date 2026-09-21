@@ -368,6 +368,17 @@ def test_output_schema_refuses_a_struct_array_whose_fields_differ():
     nested = pa.array([[{"x": 1}]], type=pa.list_(pa.struct([("x", pa.int64())])))
     with pytest.raises(ValueError, match="'x'"):
         run_outputs({"s": nested}, pa.schema([("s", pa.list_(pa.struct([("p", pa.int64())])))]))
+    # One case per branch of the depth check: a struct inside a struct and a
+    # struct inside a map, each with an inner field the declared type does
+    # not name.
+    inner_built = pa.array([{"a": {"x": 1, "Y": 2}}],
+                           type=pa.struct([("a", pa.struct([("x", pa.int64()), ("Y", pa.int64())]))]))
+    inner_declared = pa.struct([("a", pa.struct([("x", pa.int64()), ("y", pa.int64())]))])
+    with pytest.raises(ValueError, match="'Y'"):
+        run_outputs({"s": inner_built}, pa.schema([("s", inner_declared)]))
+    mapped_built = pa.array([[("k", {"Y": 1})]], type=pa.map_(pa.string(), pa.struct([("Y", pa.int64())])))
+    with pytest.raises(ValueError, match="'Y'"):
+        run_outputs({"s": mapped_built}, pa.schema([("s", pa.map_(pa.string(), pa.struct([("y", pa.int64())])))]))
 
 
 def test_a_struct_key_no_field_has_is_refused_at_any_depth():
