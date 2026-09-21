@@ -394,6 +394,17 @@ def test_a_struct_key_no_field_has_is_refused_at_any_depth():
     assert pairs.column("s").to_pylist() == [[("k", {"amount": 1})]]
 
 
+def test_a_generator_output_keeps_its_rows_past_the_key_check():
+    # The key check reads the rows before pa.array does, and a generator read
+    # once has nothing left for the second reader: without the list it is
+    # read into first, a generator of well-keyed dicts came back as a column
+    # of no rows. Only the typo path, which raises before pa.array reads,
+    # had a test.
+    schema = pa.schema([("s", pa.struct([("amount", pa.int64())]))])
+    got = run_outputs({"s": ({"amount": i} for i in range(2))}, schema)
+    assert got.column("s").to_pylist() == [{"amount": 0}, {"amount": 1}]
+
+
 def test_a_missing_row_of_a_list_or_map_column_is_a_null_not_a_crash():
     # pandas marks a missing row with NaN or pd.NA, never with None, and
     # pa.array turns both into nulls. The key pre-pass walked into every row

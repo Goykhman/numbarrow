@@ -313,6 +313,12 @@ MUTATIONS = [
         '        if isinstance(value, str) and name not in ("error_model", "inline"):',
         "        if False:",
     ),
+    (
+        "a generator output stops being read into a list before the key check",
+        "numbarrow/core/mapinarrow_factory.py",
+        '        if not hasattr(value, "__len__"):',
+        "        if False:",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
