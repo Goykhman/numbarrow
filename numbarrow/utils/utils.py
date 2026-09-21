@@ -63,14 +63,20 @@ def numpy_array_from_ptr_factory(dtype_):
     return njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)(viewer)
 
 
-# The viewers the adapters are built on: uint8 for validity bitmaps and packed
-# booleans, int32 and int64 for string offsets. Each is compiled at import and
-# carries an index and a data file of its own in the numba cache, so an entry
-# nothing reads is not free.
-arrays_viewers = {
-    np_type: numpy_array_from_ptr_factory(np_type) for np_type in [
-        np.int32,
-        np.int64,
-        np.uint8
-    ]
-}
+class _Viewers(dict):
+    """The viewers by dtype, each built the first time it is asked for and kept for the next time.
+
+    ``arrays_viewers[np.int32]`` compiles the int32 viewer through
+    :func:`numpy_array_from_ptr_factory` on the first request and returns the
+    same function on every request after. A viewer carries an index and a
+    data file of its own in the numba cache, so nothing is compiled that
+    nothing asks for; the adapters ask for uint8 for validity bitmaps and
+    packed booleans, and int32 and int64 for string offsets.
+    """
+
+    def __missing__(self, dtype_):
+        viewer = self[dtype_] = numpy_array_from_ptr_factory(dtype_)
+        return viewer
+
+
+arrays_viewers = _Viewers()

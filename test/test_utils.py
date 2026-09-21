@@ -10,5 +10,14 @@ def test_int32_array_from_ptr_as_int():
     assert_equal(a_, a)
 
 
+def test_a_viewer_is_built_when_first_asked_for_and_kept():
+    # arrays_viewers compiles a viewer through the factory on the first
+    # request for a dtype and hands the same one back after.
+    a = np.array([0.5, -1.0], dtype=np.float64)
+    viewer = arrays_viewers[np.float64]
+    assert viewer(a.ctypes.data, len(a)).tolist() == [0.5, -1.0]
+    assert arrays_viewers[np.float64] is viewer
+
+
 if __name__ == "__main__":
     test_int32_array_from_ptr_as_int()

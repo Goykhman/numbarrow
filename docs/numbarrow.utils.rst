@@ -12,11 +12,13 @@ Provides Numba-compatible functions that reinterpret a raw memory address
 (from ``pyarrow.Buffer.address``) as a typed NumPy array, enabling ``@njit``
 code to read Arrow buffer data directly without copying.
 
-``arrays_viewers`` holds the three viewers the adapters are built on, uint8
-for validity bitmaps and packed booleans, int32 and int64 for string offsets.
-Each takes ``(address, length)`` and returns a bare view over the memory at
-that address, with no owner and no read-only flag, valid only while that
-memory is. The supported way in is
+``arrays_viewers`` builds a viewer the first time a dtype is asked for and
+keeps it, so ``arrays_viewers[np.int32]`` is compiled once per process and
+nothing is compiled that nothing asks for; the adapters ask for uint8 for
+validity bitmaps and packed booleans, and int32 and int64 for string offsets.
+Each viewer takes ``(address, length)`` and returns a bare view over the
+memory at that address, with no owner and no read-only flag, valid only while
+that memory is. The supported way in is
 :func:`~numbarrow.core.adapters.arrow_array_adapter`, which returns read-only
 arrays tied to the Arrow array they view.
 

@@ -325,6 +325,12 @@ MUTATIONS = [
         "    if not children:",
         "    if False:",
     ),
+    (
+        "a viewer built on request stops being kept",
+        "numbarrow/utils/utils.py",
+        "        viewer = self[dtype_] = numpy_array_from_ptr_factory(dtype_)",
+        "        viewer = numpy_array_from_ptr_factory(dtype_)",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

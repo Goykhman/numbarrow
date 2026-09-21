@@ -1,4 +1,4 @@
-"""The on-disk numba cache, as the three viewers and is_null_struct use it.
+"""The on-disk numba cache, as the viewers and is_null_struct use it.
 
 numba names a cache entry after the function's qualname and source line, so
 the viewers one factory makes shared one index file and one set of data
@@ -97,12 +97,22 @@ def _data_files(cache_dir, function):
     return sorted(path.name for path in Path(cache_dir).rglob("*.nbc") if function in path.name)
 
 
+def _viewer_index_files(cache_dir):
+    return [name for name in _index_files(cache_dir) if "numpy_array_from_ptr_factory" in name]
+
+
 def test_each_viewer_has_its_own_cache_index(tmp_path):
-    out = _run(IMPORT_AND_VIEW, _env(tmp_path / "cache", {"cache": True}), tmp_path)
+    # A viewer is compiled when a dtype is first asked for, so one request
+    # leaves one index file, and the three the adapters use leave three.
+    env = _env(tmp_path / "cache", {"cache": True})
+    out = _run(IMPORT_AND_VIEW, env, tmp_path)
     assert out.returncode == 0, out.stderr
-    names = _index_files(tmp_path / "cache")
-    viewers = [name for name in names if "numpy_array_from_ptr_factory" in name]
-    assert len(viewers) == 3, names
+    viewers = _viewer_index_files(tmp_path / "cache")
+    assert len(viewers) == 1 and "view_int32" in viewers[0], viewers
+    out = _run(CHECK_EVERY_VIEWER, env, tmp_path)
+    assert out.returncode == 0, out.stderr
+    viewers = _viewer_index_files(tmp_path / "cache")
+    assert len(viewers) == 3, viewers
     for dtype in ("int32", "int64", "uint8"):
         assert any(f"view_{dtype}" in name for name in viewers), (dtype, viewers)
 
@@ -116,8 +126,9 @@ def test_jit_options_reach_the_decorators(tmp_path):
 
 
 def test_a_cold_cache_survives_a_concurrent_first_import(tmp_path):
-    # Eight processes importing together on an empty cache directory, then a
-    # ninth reading every viewer back from what they wrote.
+    # Eight processes asking for the int32 viewer together on an empty cache
+    # directory, then a ninth reading it back and building the other two
+    # beside it.
     env = _env(tmp_path / "cache", {"cache": True})
     procs = [
         subprocess.Popen([sys.executable, "-c", IMPORT_AND_VIEW], env=env, cwd=str(tmp_path),
