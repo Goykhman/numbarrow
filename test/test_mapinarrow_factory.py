@@ -286,6 +286,13 @@ def test_output_schema_refuses_a_key_it_does_not_name():
         run_outputs(outputs, OUT_SCHEMA)
 
 
+def test_an_output_key_that_is_not_a_str_is_refused_by_name():
+    # pa.RecordBatch.from_arrays died on "expected bytes, int found", naming
+    # neither the key nor the rule.
+    with pytest.raises(TypeError, match=r"5 is a int, not a str"):
+        run_outputs({5: np.arange(2)})
+
+
 def test_a_dict_under_one_output_key_is_refused():
     # pa.array iterates a mapping, so this used to come back as a string
     # column of the keys, two rows long, with nothing raised.

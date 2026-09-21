@@ -385,6 +385,12 @@ def _build_batch(outputs, output_schema, handed=MappingProxyType({})):
         )
     if output_schema is None:
         names = list(outputs)
+        for name in names:
+            if not isinstance(name, str):
+                raise TypeError(
+                    f"output column {name!r} is a {type(name).__name__}, not a str: the keys of the dict "
+                    f"main_func returns are its column names"
+                )
         arrays = [_to_arrow(outputs[name], name, None, handed) for name in names]
     else:
         extra = [name for name in outputs if name not in output_schema.names]

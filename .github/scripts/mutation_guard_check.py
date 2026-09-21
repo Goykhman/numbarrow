@@ -351,6 +351,12 @@ MUTATIONS = [
         '    if value.dtype == np.dtype("datetime64[D]") and arrow_type is not None:',
         '    if False:',
     ),
+    (
+        'an output key that is not a str stops being refused by name',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            if not isinstance(name, str):',
+        '            if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
