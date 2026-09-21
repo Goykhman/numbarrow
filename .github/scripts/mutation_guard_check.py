@@ -114,8 +114,20 @@ MUTATIONS = [
     (
         "the key check stops passing over a row it cannot look inside",
         "numbarrow/core/mapinarrow_factory.py",
-        '    return [row for row in rows if hasattr(row, "__iter__")]',
-        "    return list(rows)",
+        '        if hasattr(row, "__iter__")\n',
+        "        if True\n",
+    ),
+    (
+        "the key check spreads a str or bytes row again",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        and not isinstance(row, (str, bytes))\n",
+        "",
+    ),
+    (
+        "the key check spreads a numeric ndarray row again",
+        "numbarrow/core/mapinarrow_factory.py",
+        '        and not (isinstance(row, np.ndarray) and row.dtype.kind != "O")\n',
+        "",
     ),
     (
         "a struct key inside a map's keys stops being checked",

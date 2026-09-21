@@ -79,9 +79,18 @@ def _iterable_rows(rows):
     dtype and ``pd.NA`` in a nullable one, and ``pa.array`` turns every one of
     them into a null. None of them is iterable, so a row that cannot be
     iterated is passed over here and left to ``pa.array``, which converts what
-    it can and names the column when it cannot.
+    it can and names the column when it cannot. A str, a bytes and an ndarray
+    of a non-object dtype iterate, but over scalars that carry no keys, so
+    they are passed over too: ``pa.array`` refuses such a row at its first
+    element, where spreading it into a list here first took seconds and
+    hundreds of megabytes for a long one.
     """
-    return [row for row in rows if hasattr(row, "__iter__")]
+    return [
+        row for row in rows
+        if hasattr(row, "__iter__")
+        and not isinstance(row, (str, bytes))
+        and not (isinstance(row, np.ndarray) and row.dtype.kind != "O")
+    ]
 
 
 def _check_keys(rows, arrow_type):

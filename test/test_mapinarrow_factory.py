@@ -419,6 +419,36 @@ def test_a_missing_row_of_a_list_or_map_column_is_a_null_not_a_crash():
             run_outputs({"s": value}, pa.schema([("s", declared)]))
 
 
+def test_a_scalar_row_of_a_list_or_map_column_is_not_spread_by_the_key_check():
+    # A str, a bytes and a numeric ndarray iterate, over scalars that carry no
+    # keys, and pa.array refuses such a row at its first element. The key
+    # pre-pass used to spread the whole row into a list before that refusal,
+    # seconds and hundreds of megabytes for a long one.
+    class SpreadStr(str):
+        def __iter__(self):
+            raise AssertionError("the key check spread a str row")
+
+    class SpreadBytes(bytes):
+        def __iter__(self):
+            raise AssertionError("the key check spread a bytes row")
+
+    class SpreadArray(np.ndarray):
+        def __iter__(self):
+            raise AssertionError("the key check spread an ndarray row")
+
+    inner = pa.struct([("amount", pa.int64())])
+    listed, mapped = pa.list_(inner), pa.map_(pa.string(), inner)
+    rows = [SpreadStr("abc"), SpreadBytes(b"abc"), np.arange(3).view(SpreadArray)]
+    for declared, wrap in ((listed, lambda row: [row]), (mapped, lambda row: [row]),
+                           (pa.list_(listed), lambda row: [[row]])):
+        for row in rows:
+            with pytest.raises((ValueError, TypeError), match="'s'"):
+                run_outputs({"s": wrap(row)}, pa.schema([("s", declared)]))
+    # The rows beside it are still looked inside.
+    with pytest.raises(ValueError, match="Amount"):
+        run_outputs({"s": [[{"Amount": 1}], SpreadStr("abc")]}, pa.schema([("s", listed)]))
+
+
 def test_a_malformed_map_pair_is_refused_naming_the_column():
     # A one-element "pair" reaches pa.array's own refusal rather than an
     # IndexError from the key check, so the column is named.
