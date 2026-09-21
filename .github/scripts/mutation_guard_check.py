@@ -319,6 +319,12 @@ MUTATIONS = [
         '        if not hasattr(value, "__len__"):',
         "        if False:",
     ),
+    (
+        "a record array with no fields stops keeping its rows",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if not children:",
+        "    if False:",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

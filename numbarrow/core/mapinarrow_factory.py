@@ -148,6 +148,13 @@ def _map_entries(rows):
     return keys, items
 
 
+def _struct_column(children, rows, **layout):
+    """A struct array from its children, or *rows* empty structs when there is no child to take a length from."""
+    if not children:
+        return pa.StructArray.from_buffers(pa.struct([]), rows, [None], children=[])
+    return pa.StructArray.from_arrays(children, **layout)
+
+
 def _record_to_struct(value, arrow_type):
     """A numpy record array as a struct column, one child per field.
 
@@ -155,12 +162,14 @@ def _record_to_struct(value, arrow_type):
     type, and the one ndarray shape that means struct, but ``pa.array``
     refuses it with "Unsupported numpy type". Each field goes through the
     same conversion as a column of its own, so a unicode field keeps its NULs
-    and a declared child type is honoured.
+    and a declared child type is honoured. A record array with no fields
+    becomes that many empty structs: a struct array with no children has no
+    length of its own.
     """
     names = list(value.dtype.names)
     if arrow_type is None:
         children = [_convert(value[name], None) for name in names]
-        return pa.StructArray.from_arrays(children, names=names)
+        return _struct_column(children, len(value), names=names)
     if not pa.types.is_struct(arrow_type):
         raise TypeError(f"a record array with fields {names} cannot become {type_repr(arrow_type)}")
     fields = _struct_fields(arrow_type)
@@ -179,7 +188,7 @@ def _record_to_struct(value, arrow_type):
             children.append(_convert(value[field.name], field.type))
         except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
             raise renamed(exc, f"field {field.name!r}") from exc
-    return pa.StructArray.from_arrays(children, fields=fields)
+    return _struct_column(children, len(value), fields=fields)
 
 
 def _convert(value, arrow_type):

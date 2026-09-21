@@ -507,6 +507,17 @@ def test_a_record_array_becomes_a_struct_column():
         run_outputs({"r": records}, declared)
 
 
+def test_a_record_array_with_no_fields_keeps_its_rows():
+    # pa.StructArray.from_arrays([], names=[]) has no child to take a length
+    # from, so the column came back with no rows and, as the only output
+    # column, dropped the batch without a word.
+    records = np.array([()] * 2, dtype=[])
+    for schema in (None, pa.schema([("r", pa.struct([]))])):
+        got = run_outputs({"r": records}, schema)
+        assert got.column("r").type == pa.struct([])
+        assert got.column("r").to_pylist() == [{}, {}]
+
+
 def test_an_output_side_failure_names_its_column():
     with pytest.raises(pa.ArrowInvalid, match="'bad'"):
         run_outputs({"bad": np.zeros((2, 2))})
