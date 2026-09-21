@@ -55,6 +55,10 @@ def _carries_keys(arrow_type):
 
 def _unexpected_fields(source_type, declared_type):
     """Field names the source type carries, at any depth, that the declared type does not."""
+    if pa.types.is_dictionary(source_type) and pa.types.is_dictionary(declared_type):
+        # A dictionary is a layout: the cast decodes it and matches the value
+        # structs by name, and filled a whole column with nulls the same way.
+        return _unexpected_fields(source_type.value_type, declared_type.value_type)
     if pa.types.is_struct(source_type) and pa.types.is_struct(declared_type):
         declared = {field.name: field.type for field in _struct_fields(declared_type)}
         found = []

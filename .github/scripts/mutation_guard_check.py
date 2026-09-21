@@ -357,6 +357,12 @@ MUTATIONS = [
         '            if not isinstance(name, str):',
         '            if False:',
     ),
+    (
+        'a struct field inside a dictionary stops being checked in a ready-built array',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if pa.types.is_dictionary(source_type) and pa.types.is_dictionary(declared_type):',
+        '    if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

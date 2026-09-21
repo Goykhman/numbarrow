@@ -400,6 +400,12 @@ def test_output_schema_refuses_a_struct_array_whose_fields_differ():
     mapped_built = pa.array([[("k", {"Y": 1})]], type=pa.map_(pa.string(), pa.struct([("Y", pa.int64())])))
     with pytest.raises(ValueError, match="'Y'"):
         run_outputs({"s": mapped_built}, pa.schema([("s", pa.map_(pa.string(), pa.struct([("y", pa.int64())])))]))
+    # A dictionary is a layout: the cast decodes it and matches the value
+    # structs by name, which filled a whole column with nulls.
+    encoded = pa.DictionaryArray.from_arrays(pa.array([0, 1, 0], type=pa.int32()),
+                                             pa.array([{"x": 1}, {"x": 2}], type=pa.struct([("x", pa.int64())])))
+    with pytest.raises(ValueError, match="'x'"):
+        run_outputs({"s": encoded}, pa.schema([("s", pa.dictionary(pa.int32(), pa.struct([("y", pa.int64())])))]))
 
 
 def test_a_struct_key_no_field_has_is_refused_at_any_depth():
