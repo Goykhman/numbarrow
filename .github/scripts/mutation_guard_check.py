@@ -307,6 +307,12 @@ MUTATIONS = [
         "and not pa.types.is_dictionary(array.type)",
         "and True",
     ),
+    (
+        "a string for a JIT option other than cache stops being refused",
+        "numbarrow/core/configurations.py",
+        '        if isinstance(value, str) and name not in ("error_model", "inline"):',
+        "        if False:",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

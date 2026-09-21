@@ -41,6 +41,19 @@ def test_a_cache_value_that_is_not_a_boolean_is_rejected(monkeypatch, value):
         get_jit_options()
 
 
+@pytest.mark.parametrize("value", ['{"boundscheck": "false"}', '{"nogil": "true"}', '{"parallel": "false"}'])
+def test_a_string_for_any_other_option_is_rejected(monkeypatch, value):
+    # The same reading: '{"boundscheck": "false"}' turned bounds checking on.
+    monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", value)
+    with pytest.raises(ValueError, match=re.escape(json.loads(value).popitem()[0])):
+        get_jit_options()
+
+
+def test_the_two_string_options_are_passed_through(monkeypatch):
+    monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", '{"error_model": "numpy", "inline": "never", "cache": false}')
+    assert get_jit_options() == {"error_model": "numpy", "inline": "never", "cache": False}
+
+
 def test_an_explicit_object_replaces_the_default(monkeypatch):
     # Documented rather than merged: '{}' turns caching off.
     monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", "{}")
