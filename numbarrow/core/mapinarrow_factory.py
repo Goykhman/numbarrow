@@ -451,8 +451,8 @@ def make_mapinarrow_func(
         that maps each output column's name to an ndarray, a list or a
         :class:`pyarrow.Array`, from which a PyArrow ``RecordBatch`` is built.
         A numpy record array becomes a struct column, one child per field.
-        Four shapes carry a null out: a list holding ``None``, a
-        :class:`pyarrow.Array`, a numpy masked array, and a
+        A null comes out of a list, a tuple or an object array holding
+        ``None``, a :class:`pyarrow.Array`, a numpy masked array, and a
         :class:`Nullable`, ``Nullable(data, bitmap)``, whose ``bitmap`` is a
         packed uint8 validity bitmap in the layout ``bitmap_dict`` hands out,
         ``(rows + 7) // 8`` bytes with a set bit for a valid row, or ``None``.

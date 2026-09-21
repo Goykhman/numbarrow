@@ -15,7 +15,7 @@ import numpy as np
 import pyarrow as pa
 import pytest
 from numbarrow.core.adapters import arrow_array_adapter
-from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
+from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
 
 README = Path(__file__).resolve().parent.parent / "README.md"
 PYPROJECT = README.parent / "pyproject.toml"
@@ -183,3 +183,27 @@ def test_the_readme_names_the_pandas_floor_the_extras_declare():
     row = re.search(r"\| pandas \| ([\d.]+)\+", README.read_text()).group(1)
     assert floors == {row}, (floors, row)
     assert "1.5.0" not in README_TEXT
+
+
+def _output_column(value):
+    batch = pa.RecordBatch.from_arrays([pa.array([0, 0], type=pa.int64())], names=["c"])
+    fn = make_mapinarrow_func(lambda data, bitmap, broadcasts: {"o": value}, input_columns=["c"])
+    return list(fn(iter([batch])))[0].column("o")
+
+
+def test_the_shapes_the_docstring_says_carry_a_null_out_do():
+    # The sentence named four shapes while a tuple and an object array
+    # holding None carried a null out too.
+    assert ("A null comes out of a list, a tuple or an object array holding ``None``, a :class:`pyarrow.Array`, "
+            "a numpy masked array, and a :class:`Nullable`") in FACTORY_DOC
+    shapes = {
+        "list": [None, 1],
+        "tuple": (None, 1),
+        "object array": np.array([None, 1], dtype=object),
+        "pyarrow Array": pa.array([None, 1]),
+        "masked array": np.ma.array([0, 1], mask=[True, False]),
+        "Nullable": Nullable(np.array([0, 1]), np.array([0b10], dtype=np.uint8)),
+    }
+    for label, value in shapes.items():
+        assert _output_column(value).null_count == 1, label
+    assert _output_column(np.array([0, 1])).null_count == 0
