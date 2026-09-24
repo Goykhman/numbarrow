@@ -283,10 +283,10 @@ def _with_validity(array, bitmap):
     The bitmap has the layout ``bitmap_dict`` hands out and
     :func:`~numbarrow.core.is_null.is_null` reads: one bit per row, LSB first,
     set for a valid row, ``(rows + 7) // 8`` bytes of uint8. A fixed-width or
-    string column with no nulls of its own takes the bitmap as its validity
-    buffer and keeps its data buffer, so neither side is copied when the
-    bitmap is contiguous, which every bitmap ``bitmap_dict`` hands out is.
-    Any other column, one that already carries nulls, a sliced Arrow array or
+    string array with no nulls yet takes the bitmap as its validity buffer
+    and keeps its data buffer, so neither side is copied when the bitmap is
+    contiguous, which is the case for every bitmap ``bitmap_dict`` hands out.
+    Any other array, one that already carries nulls, a sliced Arrow array or
     a nested type, is masked through ``if_else``, which keeps the nulls it
     had. The bitmap carries no row count of its own: the length check here is
     per byte, eight rows to a byte, and the caller checks a bitmap the batch

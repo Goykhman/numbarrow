@@ -644,8 +644,8 @@ def test_a_nullable_masks_a_value_the_caller_masked_out():
 
 
 def test_a_nullable_takes_the_bitmap_and_the_data_zero_copy():
-    # A fixed-width column with no nulls of its own takes the bitmap as its
-    # validity buffer and keeps the ndarray as its data buffer.
+    # A fixed-width array with no nulls yet takes the bitmap as its validity
+    # buffer and keeps the ndarray as its data buffer.
     data = np.array([1, 2, 3], dtype=np.int64)
     bitmap = np.array([0b101], dtype=np.uint8)
     got = run_outputs({"a": Nullable(data, bitmap)}).column("a")
