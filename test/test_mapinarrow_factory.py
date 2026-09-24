@@ -1,4 +1,5 @@
 import datetime
+import weakref
 
 import numpy as np
 import pyarrow as pa
@@ -778,6 +779,27 @@ def test_a_handed_out_field_bitmap_covers_the_flattened_elements():
 
     with pytest.raises(ValueError, match=r"'out'.*handed out.*6 rows.*3 rows"):
         list(make_mapinarrow_func(half, input_columns=["s"])(iter([batch])))
+
+
+def test_a_handed_out_bitmap_stays_alive_while_the_udf_runs():
+    # An id is reusable once its object is freed. A UDF that dropped a bitmap
+    # from bitmap_dict freed it, the next one-byte bitmap the UDF built landed
+    # on the same id, and a correct resized column was refused as if it
+    # carried the handed-out bitmap. The handed-out bitmaps stay alive for the
+    # batch, so nothing the UDF builds can share an id with one. A second
+    # column keeps the first one's bitmap from surviving on the adapter's
+    # return value alone.
+    column = pa.array([1.0, None, 3.0, 4.0, None])
+    batch = pa.RecordBatch.from_arrays([column, pa.array(range(5))], names=["v", "w"])
+
+    def drops_and_rebuilds(data_dict, bitmap_dict, broadcasts):
+        handed = weakref.ref(bitmap_dict["v"])
+        del bitmap_dict["v"]
+        assert handed() is not None, "the handed-out bitmap was freed"
+        return {"out": Nullable(data_dict["v"][:3] * 2, np.packbits([1, 0, 1], bitorder="little"))}
+
+    got = list(make_mapinarrow_func(drops_and_rebuilds)(iter([batch])))[0]
+    assert got.column("out").to_pylist() == [2.0, None, 6.0]
 
 
 def test_a_bare_tuple_is_a_sequence_not_a_pair():

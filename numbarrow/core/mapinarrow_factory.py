@@ -347,7 +347,7 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
         array = _convert(value, arrow_type)
         if bitmap is None:
             return array
-        covers = handed.get(id(bitmap))
+        _, covers = handed.get(id(bitmap), (None, None))
         if covers is not None and len(array) != covers:
             raise ValueError(
                 f"the bitmap is one this batch handed out for {covers} rows, but the column has "
@@ -359,12 +359,16 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
 
 
 def _handed_bitmaps(data_dict, bitmap_dict):
-    """Each bitmap the batch hands out, by id, with the count of rows it covers.
+    """Each bitmap the batch hands out, by id, with the bitmap itself and the count of rows it covers.
 
     A column's bitmap covers the batch's rows, a struct field's covers the
     field's own elements, and for a list of structs those are the flattened
     elements rather than the outer rows. The count therefore comes from the
-    data handed out beside the bitmap, never from the batch.
+    data handed out beside the bitmap, never from the batch. The bitmap rides
+    along to stay alive for the batch: an id is reusable once its object is
+    freed, and a UDF that drops a bitmap from ``bitmap_dict`` frees it, after
+    which a bitmap of its own could land on that id and be refused as the
+    handed-out one.
     """
     handed = {}
     for name, bitmaps in bitmap_dict.items():
@@ -372,15 +376,15 @@ def _handed_bitmaps(data_dict, bitmap_dict):
         leaves = bitmaps.items() if isinstance(bitmaps, dict) else [(None, bitmaps)]
         for field, bitmap in leaves:
             if bitmap is not None:
-                handed[id(bitmap)] = len(datas if field is None else datas[field])
+                handed[id(bitmap)] = (bitmap, len(datas if field is None else datas[field]))
     return handed
 
 
 def _build_batch(outputs, output_schema, handed=MappingProxyType({})):
     """The RecordBatch a UDF's result becomes, bound to ``output_schema`` when there is one.
 
-    ``handed`` maps the id of each bitmap the batch handed the UDF to the row
-    count that bitmap covers; see ``_to_arrow``.
+    ``handed`` maps the id of each bitmap the batch handed the UDF to that
+    bitmap and the row count it covers; see ``_to_arrow``.
     """
     if not isinstance(outputs, Mapping):
         raise TypeError(

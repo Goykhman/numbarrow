@@ -273,8 +273,14 @@ MUTATIONS = [
     (
         "a handed-out bitmap's count stops coming from the data beside it",
         "numbarrow/core/mapinarrow_factory.py",
-        "                handed[id(bitmap)] = len(datas if field is None else datas[field])",
-        "                handed[id(bitmap)] = len(datas)",
+        "                handed[id(bitmap)] = (bitmap, len(datas if field is None else datas[field]))",
+        "                handed[id(bitmap)] = (bitmap, len(datas))",
+    ),
+    (
+        "a handed-out bitmap stops being kept alive for the batch",
+        "numbarrow/core/mapinarrow_factory.py",
+        "                handed[id(bitmap)] = (bitmap, len(datas if field is None else datas[field]))",
+        "                handed[id(bitmap)] = (None, len(datas if field is None else datas[field]))",
     ),
     (
         "a Nullable's bitmap of the wrong length stops being refused",
