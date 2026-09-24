@@ -456,9 +456,10 @@ def make_mapinarrow_func(
         :class:`Nullable`, ``Nullable(data, bitmap)``, whose ``bitmap`` is a
         packed uint8 validity bitmap in the layout ``bitmap_dict`` hands out,
         ``(rows + 7) // 8`` bytes with a set bit for a valid row, or ``None``.
-        A bare array carries no nulls out: every null the UDF received comes
-        back as whatever sat under it.  Passing the input's validity through
-        is ``{"out": Nullable(result, bitmap_dict["value"])}``, or
+        A bare array carries no nulls out: a row that came in null goes out
+        valid, holding whatever the UDF computed from the placeholder under
+        the null.  Passing the input's validity through is
+        ``{"out": Nullable(result, bitmap_dict["value"])}``, or
         ``bitmap_dict["column"]["field"]`` for a struct field, and a UDF
         that decides its own nulls hands back a bitmap of that layout, which
         is the one :func:`~numbarrow.core.is_null.is_null` reads.  A bitmap

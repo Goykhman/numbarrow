@@ -32,10 +32,12 @@ Usage::
 Every name in ``data_dict`` is also a key of ``bitmap_dict``, so a batch that
 happens to contain no nulls is indexable exactly like one that does.
 
-On the way out a bare array carries no nulls: every null the UDF received
-comes back as whatever sat under it. ``Nullable(data, bitmap)`` keeps the
-column's validity, the bitmap being in the layout ``bitmap_dict`` hands out, so
-a UDF passes the input's validity through with
+On the way out a bare array carries no nulls: a row that came in null goes out
+valid, holding whatever the UDF computed from the placeholder under the null,
+which is ``0``, ``0.0`` or ``''`` in a batch from Spark.
+``Nullable(data, bitmap)`` keeps the column's validity, the bitmap being in
+the layout ``bitmap_dict`` hands out, so a UDF passes the input's validity
+through with
 ``Nullable(result, bitmap_dict[column])``, or ``bitmap_dict[column][field]``
 for a struct field, and one that decides its own nulls hands back a bitmap of
 that layout. A packed bitmap carries no row count, so a bitmap the batch handed

@@ -244,9 +244,9 @@ def test_a_struct_field_sharing_a_column_name_reaches_the_udf_through_spark(spar
 
 
 def test_nullable_carries_nulls_back_through_spark(spark):
-    # A bare array republishes a null as whatever sat under it, so a row of
-    # (1, None, None, None) came back (1, 0, 0.0, ''). Nullable carries each
-    # column's validity out, and Spark's Arrow transport carries it back.
+    # A bare array carries no nulls out, so a row of (1, None, None, None) came
+    # back (1, 0, 0.0, ''), the placeholders under its nulls. Nullable carries
+    # each column's validity out, and Spark's Arrow transport carries it back.
     schema = StructType([
         StructField("id", LongType()), StructField("n", LongType()),
         StructField("x", DoubleType()), StructField("s", StringType()),

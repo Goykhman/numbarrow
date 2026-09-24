@@ -151,8 +151,9 @@ output_schema = ...   # caller-provided PySpark StructType
 df_out = df_in.mapInArrow(udf, output_schema)
 ```
 
-A bare array returned under a column name carries no nulls out: every null the
-UDF received comes back as whatever sat under it, `0`, `0.0` or `''`.
+A bare array returned under a column name carries no nulls out: a row that came
+in null goes out valid, holding whatever the UDF computed from the placeholder
+under the null, which is `0`, `0.0` or `''` in a batch from Spark.
 `Nullable(data, bitmap)` keeps the column's validity, the bitmap being a packed
 uint8 array in the layout `bitmap_dict` hands out, or `None`; a UDF that
 decides its own nulls hands back a bitmap of that layout. A packed bitmap
