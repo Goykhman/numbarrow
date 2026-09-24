@@ -458,11 +458,13 @@ def make_mapinarrow_func(
         ``(rows + 7) // 8`` bytes with a set bit for a valid row, or ``None``.
         A bare array carries no nulls out: a row that came in null goes out
         valid, holding whatever the UDF computed from the placeholder under
-        the null.  Passing the input's validity through is
+        the null.  A result that is null exactly where one input column is
+        passes that column's bitmap through,
         ``{"out": Nullable(result, bitmap_dict["value"])}``, or
-        ``bitmap_dict["column"]["field"]`` for a struct field, and a UDF
-        that decides its own nulls hands back a bitmap of that layout, which
-        is the one :func:`~numbarrow.core.is_null.is_null` reads.  A bitmap
+        ``bitmap_dict["column"]["field"]`` for a struct field, and any other
+        result builds its own in that layout, the one
+        :func:`~numbarrow.core.is_null.is_null` reads, for instance
+        ``np.packbits(valid, bitorder="little")`` from a boolean array.  A bitmap
         that is not an ndarray, or is one of another length or dtype, raises
         naming the column, and so does a bitmap the batch handed out on a
         column whose row count is not the count that bitmap covers, the

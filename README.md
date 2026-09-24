@@ -142,7 +142,8 @@ def compute(data_dict, bitmap_dict, broadcasts):
     #              elements, not the outer list rows: a list column holding a
     #              null row is refused
     result = data_dict["value"] * broadcasts["scale"]
-    # A bare array carries no nulls out; Nullable keeps the column's validity
+    # result is null wherever value is, so value's bitmap goes out with it;
+    # a bare array would carry no nulls out
     return {"output": Nullable(result, bitmap_dict["value"])}
 
 udf = make_mapinarrow_func(compute, broadcasts={"scale": 2.0})
@@ -154,14 +155,16 @@ df_out = df_in.mapInArrow(udf, output_schema)
 A bare array returned under a column name carries no nulls out: a row that came
 in null goes out valid, holding whatever the UDF computed from the placeholder
 under the null, which is `0`, `0.0` or `''` in a batch from Spark.
-`Nullable(data, bitmap)` keeps the column's validity, the bitmap being a packed
-uint8 array in the layout `bitmap_dict` hands out, or `None`; a UDF that
-decides its own nulls hands back a bitmap of that layout. A packed bitmap
-carries no row count, so a bitmap the batch handed out is accepted only on a
-column of the length it covers, the batch's rows for a column's own bitmap and
-the flattened elements for a struct field's, and a UDF that resizes the column
-needs a bitmap of its own. A list holding `None`, a `pyarrow.Array` and a numpy
-masked array carry nulls out as well.
+`Nullable(data, bitmap)` carries nulls out, the bitmap being a packed uint8
+array in the layout `bitmap_dict` hands out, or `None`. A result that is null
+exactly where one input column is, like the one above, passes that column's
+bitmap through; any other result builds its own, for instance
+`np.packbits(valid, bitorder="little")` from a boolean array `valid`. A packed
+bitmap carries no row count, so a bitmap the batch handed out is accepted only
+on a column of the length it covers, the batch's rows for a column's own bitmap
+and the flattened elements for a struct field's, and a UDF that resizes the
+column needs a bitmap of its own. A list holding `None`, a `pyarrow.Array` and
+a numpy masked array carry nulls out as well.
 
 See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complete runnable example.
 

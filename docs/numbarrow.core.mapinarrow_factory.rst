@@ -21,9 +21,10 @@ Usage::
         #              column the struct-level validity is folded into each
         #              field's bitmap
         # broadcasts:  {key: value}
-        result = ...
-        # A bare array carries no nulls out; Nullable(data, bitmap) keeps them,
-        # bitmap being the packed uint8 array bitmap_dict hands out, or None
+        result = data_dict["input_col"] * broadcasts["scale"]
+        # result is null wherever input_col is, so input_col's bitmap goes out
+        # with it; a bare array would carry no nulls out, and a result with
+        # nulls of its own packs them: np.packbits(valid, bitorder="little")
         return {"output_col": Nullable(result, bitmap_dict["input_col"])}
 
     udf = make_mapinarrow_func(my_func, broadcasts={"scale": 1.5})
@@ -35,14 +36,15 @@ happens to contain no nulls is indexable exactly like one that does.
 On the way out a bare array carries no nulls: a row that came in null goes out
 valid, holding whatever the UDF computed from the placeholder under the null,
 which is ``0``, ``0.0`` or ``''`` in a batch from Spark.
-``Nullable(data, bitmap)`` keeps the column's validity, the bitmap being in
-the layout ``bitmap_dict`` hands out, so a UDF passes the input's validity
-through with
+``Nullable(data, bitmap)`` carries nulls out, the bitmap being in the layout
+``bitmap_dict`` hands out. A result that is null exactly where one input
+column is, as in the example, passes that column's bitmap through,
 ``Nullable(result, bitmap_dict[column])``, or ``bitmap_dict[column][field]``
-for a struct field, and one that decides its own nulls hands back a bitmap of
-that layout. A packed bitmap carries no row count, so a bitmap the batch handed
-out is accepted only on a column of the length it covers, the batch's rows for
-a column's own bitmap and the flattened elements for a struct field's; one that
+for a struct field; any other result builds its own, for instance
+``np.packbits(valid, bitorder="little")`` from a boolean array ``valid``. A
+packed bitmap carries no row count, so a bitmap the batch handed out is
+accepted only on a column of the length it covers, the batch's rows for a
+column's own bitmap and the flattened elements for a struct field's; one that
 resizes the column needs a bitmap of its own.
 
 For a ``StructArray`` column the struct-level validity is folded into each
