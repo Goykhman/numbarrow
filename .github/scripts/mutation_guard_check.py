@@ -417,6 +417,18 @@ MUTATIONS = [
         "            input_columns_ = named if named is not None else list(dict.fromkeys(names))",
         "            input_columns_ = list(dict.fromkeys(input_columns if input_columns is not None else names))",
     ),
+    (
+        'a time unit multiplier stops being folded in',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if target == unit and count == 1:\n        return value',
+        '    if target == unit:\n        return value',
+    ),
+    (
+        'a coarse time unit stops being taken to seconds',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if unit in ("h", "m") or (family == "timedelta64" and unit in ("W", "D")):\n        target = "s"',
+        '    if False:\n        target = "s"',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

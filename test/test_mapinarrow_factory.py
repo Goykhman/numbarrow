@@ -361,7 +361,8 @@ def test_a_day_unit_datetime64_under_another_declared_type_is_its_date32_cast():
 def test_a_declared_type_keeps_the_other_datetime64_conversions():
     # What widening the day unit must leave alone: a unit change that drops
     # digits still raises, a date type still floors to the day without a word,
-    # and a timedelta is still a dtype pa.array has no converter for.
+    # a day-unit timedelta comes back in seconds, which pa.array models, and a
+    # month one has no fixed length and is refused.
     days = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
     sub_second = datetime.datetime(2020, 1, 1, 12, 34, 56, 789012)
     seconds = np.array([sub_second], dtype="datetime64[s]")
@@ -376,10 +377,11 @@ def test_a_declared_type_keeps_the_other_datetime64_conversions():
     dated = run_outputs({"t": days}, pa.schema([("t", pa.date64())])).column("t")
     assert dated.to_pylist() == [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)]
     spans = np.array([1, 2], dtype="timedelta64[D]")
-    with pytest.raises(pa.ArrowNotImplementedError, match=r"'t'.*timedelta64"):
-        run_outputs({"t": spans}, pa.schema([("t", pa.duration("s"))]))
-    with pytest.raises(pa.ArrowNotImplementedError, match=r"'t'.*timedelta64"):
-        run_outputs({"t": spans})
+    for schema in (None, pa.schema([("t", pa.duration("s"))])):
+        got = run_outputs({"t": spans}, schema).column("t")
+        assert got.type == pa.duration("s") and got.to_pylist() == [datetime.timedelta(days=d) for d in (1, 2)]
+    with pytest.raises(TypeError, match=r"'t'.*no fixed length"):
+        run_outputs({"t": np.array([1, 2], dtype="timedelta64[M]")})
 
 
 def test_output_schema_refuses_a_struct_key_no_field_has():
@@ -841,3 +843,41 @@ def test_a_bare_tuple_is_a_sequence_not_a_pair():
     assert listed.type == pa.list_(pa.int64()) and listed.to_pylist() == [[1, 2], None]
     arrays = run_outputs({"a": (np.array([1, 2]), np.array([3, 4]))}).column("a")
     assert arrays.type == pa.list_(pa.int64()) and arrays.to_pylist() == [[1, 2], [3, 4]]
+
+
+def test_a_time_unit_multiplier_is_folded_in_before_arrow_reads_it():
+    # pa.array reads numpy's base unit and ignored the multiplier, so five-second
+    # bins came back at one-second steps, and datetime64[2D] slipped past the
+    # day-unit inference into the misread it guards against.
+    base = np.datetime64("2020-03-01T10:00:00")
+    stamps = (base + np.arange(3) * np.timedelta64(5, "s")).astype("datetime64[5s]")
+    expected = [datetime.datetime(2020, 3, 1, 10, 0, s) for s in (0, 5, 10)]
+    got = run_outputs({"t": stamps}).column("t")
+    assert got.type == pa.timestamp("s") and got.to_pylist() == expected
+    declared = pa.schema([("t", pa.timestamp("s"))])
+    assert run_outputs({"t": stamps}, declared).column("t").to_pylist() == expected
+    days = np.array(["2020-03-01", "2020-03-03", "2020-03-05"], dtype="datetime64[2D]")
+    assert run_outputs({"d": days}).column("d").to_pylist() == [datetime.date(2020, 3, d) for d in (1, 3, 5)]
+    stamped = run_outputs({"d": days}, pa.schema([("d", pa.timestamp("s"))])).column("d")
+    assert stamped.to_pylist() == [datetime.datetime(2020, 3, d) for d in (1, 3, 5)]
+    deltas = np.array([15, 60, 45], dtype="timedelta64[s]").astype("timedelta64[15s]")
+    assert run_outputs({"e": deltas}).column("e").to_pylist() == [datetime.timedelta(seconds=s) for s in (15, 60, 45)]
+
+
+def test_a_coarse_time_unit_becomes_seconds_or_days_and_a_finer_one_is_refused():
+    # pa.array models seconds down to nanoseconds; an hour, minute, week, month
+    # or year unit raised ArrowNotImplementedError against the docstring's
+    # promise of a timestamp of the unit.
+    hours = np.array(["2020-03-01T10", "2020-03-01T11"], dtype="datetime64[h]")
+    got = run_outputs({"t": hours}).column("t")
+    assert got.type == pa.timestamp("s")
+    assert got.to_pylist() == [datetime.datetime(2020, 3, 1, h) for h in (10, 11)]
+    months = np.array(["2020-03", "2020-04"], dtype="datetime64[M]")
+    got = run_outputs({"d": months}).column("d")
+    assert got.type == pa.date32() and got.to_pylist() == [datetime.date(2020, 3, 1), datetime.date(2020, 4, 1)]
+    weeks = np.array([1, 2], dtype="timedelta64[W]")
+    assert run_outputs({"e": weeks}).column("e").to_pylist() == [datetime.timedelta(weeks=w) for w in (1, 2)]
+    with pytest.raises(TypeError, match=r"'t'.*nanoseconds"):
+        run_outputs({"t": np.array([1, 2], dtype="datetime64[ps]")})
+    with pytest.raises(TypeError, match=r"'e'.*no fixed length"):
+        run_outputs({"e": np.array([1, 2], dtype="timedelta64[M]")})

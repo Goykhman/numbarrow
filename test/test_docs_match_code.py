@@ -161,10 +161,12 @@ def test_an_inferred_datetime64_column_comes_back_as_the_docs_say():
     # Both sentences promised a timestamp of the array's unit for every unit,
     # and pa.array infers date32 for the day one, which the round-trip test's
     # own drift table admits by leaving date32 out of it.
-    assert ("a ``datetime64`` array comes back a naive ``timestamp`` of its unit, except a "
-            "day-unit one, which comes back ``date32``") in FACTORY_DOC
-    assert ("a `datetime64` output becomes a naive timestamp of its unit, except "
-            "`datetime64[D]`, which becomes `date32`") in README_TEXT
+    assert ("a ``datetime64`` array comes back a naive ``timestamp`` of its unit, with a multiplier such as "
+            "``datetime64[5s]`` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
+            "unit comes back ``date32``, a unit finer than a nanosecond is refused") in FACTORY_DOC
+    assert ("a `datetime64` output becomes a naive timestamp of its unit, with a multiplier such as "
+            "`datetime64[5s]` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
+            "unit becomes `date32`, a unit finer than a nanosecond is refused") in README_TEXT
     days = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
     column = _inferred_output_column(days)
     assert column.type == pa.date32()

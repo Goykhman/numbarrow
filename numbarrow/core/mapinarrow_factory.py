@@ -252,6 +252,42 @@ def _convert(value, arrow_type):
     return pa.array(value, type=arrow_type)
 
 
+def _at_arrow_unit(value):
+    """A datetime64 or timedelta64 array at a unit pyarrow models, with any multiplier folded in.
+
+    ``pa.array`` reads numpy's base unit and ignores a multiplier, so a
+    ``datetime64[5s]`` column of five-second bins came back at one-second
+    steps, 2020 read as 1980, and ``datetime64[2D]`` slipped past the day-unit
+    inference in ``_ndarray_to_arrow`` into the misread it exists to prevent.
+    A multiplier folds into its base unit exactly; an hour or minute unit
+    becomes seconds and a week, month or year unit becomes days, exactly too,
+    where ``pa.array`` refused them outright. A unit finer than a nanosecond,
+    and a month or year timedelta, which has no fixed length, would not
+    convert exactly and are refused instead.
+    """
+    family = "datetime64" if value.dtype.kind == "M" else "timedelta64"
+    unit, count = np.datetime_data(value.dtype)
+    if unit in ("ps", "fs", "as"):
+        raise TypeError(
+            f"a {value.dtype} array has no Arrow type: pyarrow models seconds down to nanoseconds; "
+            f"convert it to {family}[ns] first, which drops the finer digits"
+        )
+    if family == "timedelta64" and unit in ("M", "Y"):
+        raise TypeError(
+            f"a {value.dtype} array has no fixed length in seconds; convert it to {family}[D] or "
+            f"{family}[s] first"
+        )
+    if unit in ("h", "m") or (family == "timedelta64" and unit in ("W", "D")):
+        target = "s"
+    elif unit in ("W", "M", "Y"):
+        target = "D"
+    else:
+        target = unit
+    if target == unit and count == 1:
+        return value
+    return value.astype(f"{family}[{target}]")
+
+
 def _ndarray_to_arrow(value, arrow_type):
     """An ndarray of a non-object dtype as an Arrow array; see ``_convert``."""
     if value.dtype.names is not None:
@@ -261,6 +297,8 @@ def _ndarray_to_arrow(value, arrow_type):
         return pa.array(value.tolist(), type=arrow_type or pa.string())
     if kind == "S":
         return pa.array(value.tolist(), type=arrow_type or pa.binary())
+    if kind in ("M", "m"):
+        value = _at_arrow_unit(value)
     if value.dtype == np.dtype("datetime64[D]") and arrow_type is not None:
         # Under a declared timestamp or int32 ``pa.array`` reads a day-unit
         # array's 8-byte values as the 4-byte days of a date32, so every other
@@ -565,8 +603,10 @@ def make_mapinarrow_func(
         order decides, and every type is inferred from the value, so a unicode
         or bytes array comes back ``string`` or ``binary`` whatever type went
         in, a ``datetime64`` array comes back a naive ``timestamp`` of its
-        unit, except a day-unit one, which comes back ``date32``, and an
-        object array holding only ``None`` comes back ``null``.
+        unit, with a multiplier such as ``datetime64[5s]`` folded in and an
+        hour or minute unit taken to seconds; a day, week, month or year unit
+        comes back ``date32``, a unit finer than a nanosecond is refused, and
+        an object array holding only ``None`` comes back ``null``.
     """
     broadcasts = broadcasts if broadcasts is not None else {}
     if isinstance(input_columns, str):
