@@ -10,7 +10,7 @@ include = ["numbarrow*"]
 name = "numbarrow"
 dependencies = [
     "numba>=0.60.0,<0.68.0",
-    "pyarrow<=24.0.0"
+    "pyarrow<=25.0.1"
 ]
 dynamic = ["version"]
 requires-python = ">=3.12"
@@ -23,14 +23,19 @@ readme = "README.md"
 
 [project.optional-dependencies]
 test = [
-    "pandas>=1.5.0",
-    "pyspark>=3.3.0,<4.0.0",
+    # 2.2.2 is the first pandas built against numpy 2; 2.1.1 installs next to
+    # it and fails to import.
+    "pandas>=2.2.2",
+    # pyspark 3.3 bundles cloudpickle 2.0.0, which predates the co_qualname
+    # argument Python 3.11 added to code(), so on the declared Python every
+    # UDF dies in the worker. 3.4.0 is the first release that runs one.
+    "pyspark>=3.4.0,<4.0.0",
     "pytest",
     "python-dateutil>=2.8.0",
     "setuptools>=75.0.0"
 ]
 mapinarrow = [
-    "pandas>=1.5.0",
+    "pandas>=2.2.2",
     # pyspark's mapInArrow path imports distutils, which PEP 632 removed from
     # the standard library in 3.12, the floor this package declares. setuptools
     # is the only supplier, and without it mapInArrow dies on

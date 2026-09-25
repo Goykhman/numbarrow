@@ -1,8 +1,10 @@
 import gc
+import os
 import random
 import subprocess
 import sys
 from decimal import Decimal
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -14,6 +16,11 @@ from numbarrow.utils.arrow_array_utils import (
     uniform_arrow_array_adapter
 )
 from numbarrow.core.is_null import is_null
+
+# The tree under test, named to every child interpreter: from any cwd but the
+# checkout root the child would otherwise import whichever numbarrow it finds
+# installed, and these tests would validate a different copy.
+CHILD_ENV = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent))
 
 
 def owner_of(array):
@@ -235,7 +242,7 @@ def test_plain_list_raises_the_same_typed_error_under_dash_O():
         "except NotImplementedError as exc:\n"
         "    print('typed', 'int64' in str(exc))\n"
     )
-    out = subprocess.run([sys.executable, "-O", "-c", src], capture_output=True, text=True)
+    out = subprocess.run([sys.executable, "-O", "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.stdout.strip() == "typed True", out
 
 
@@ -300,7 +307,7 @@ def test_adapter_result_survives_an_unbound_source():
         "    assert data.tolist() == list(range(n)), n\n"
         "print('ok')\n"
     )
-    out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True)
+    out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.returncode == 0 and out.stdout.strip() == "ok", (out.returncode, out.stderr[-400:])
 
 
@@ -320,7 +327,7 @@ def test_zero_length_list_array_with_null_buffers():
         "assert datas['v'].tolist() == []\n"
         "print('ok')\n"
     )
-    out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True)
+    out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.returncode == 0 and out.stdout.strip() == "ok", (out.returncode, out.stderr[-300:])
 
 
@@ -610,6 +617,27 @@ def test_result_is_read_only_whatever_the_buffer_provenance():
         _, data = arrow_array_adapter(arr)
         assert not data.flags.writeable, label
         assert data.tolist() == [10, 20, 30, 40], label
+
+
+def test_the_read_only_flag_cannot_be_flipped_back():
+    # A flag is the caller's to flip: `data.flags.writeable = True` used to
+    # succeed on a view over a locally built array, and a store through it then
+    # changed the source Arrow array. pyarrow's own to_numpy(zero_copy_only=True)
+    # refuses the flip, and so does a view whose base is a read-only memoryview.
+    views = {
+        "int64": pa.array([1, 2, 3], type=pa.int64()),
+        "float64": pa.array([1.5, 2.5], type=pa.float64()),
+        "date64": pa.array([86400000], type=pa.int64()).cast(pa.date64()),
+        "timestamp": pa.array([1, 2], type=pa.int64()).cast(pa.timestamp("ms")),
+        "struct child": pa.array([{"f": 1}], type=pa.struct([("f", pa.int64())])),
+    }
+    for label, arr in views.items():
+        adapted = arrow_array_adapter(arr)
+        data = adapted[2]["f"] if len(adapted) == 3 else adapted[1]
+        before = arr.to_pylist()
+        with pytest.raises(ValueError, match="WRITEABLE"):
+            data.flags.writeable = True
+        assert arr.to_pylist() == before, label
 
 
 def test_a_bool_array_is_refused_by_the_uniform_adapter():

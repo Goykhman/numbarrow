@@ -12,21 +12,76 @@ import pyarrow as pa
 from numbarrow.utils.utils import arrays_viewers
 
 
-# The numpy view type for each Arrow type that has one, covering exactly the
-# keys of ``arrays_viewers``. Resolved directly rather than through
-# ``pa.DataType.to_pandas_dtype()``, which imports pandas, and so made a stock
-# install unable to adapt an int or a float column.
-# ``pa.bool_()`` is deliberately absent even though ``np.bool_`` is a key of
-# ``arrays_viewers``: Arrow packs booleans one bit per element, so there is no
-# uniform view of them, and the old ``to_pandas_dtype()`` lookup succeeded with
-# an itemsize-1 viewer and returned wrong values. Boolean arrays go through the
-# dispatcher's own handler, which unpacks the bits.
+# The numpy view type for each Arrow type that has one. Resolved directly
+# rather than through ``pa.DataType.to_pandas_dtype()``, which imports pandas,
+# and so made a stock install unable to adapt an int or a float column.
+# ``pa.bool_()`` is deliberately absent: Arrow packs booleans one bit per
+# element, so there is no uniform view of them, and the old
+# ``to_pandas_dtype()`` lookup succeeded with an itemsize-1 viewer and
+# returned wrong values. Boolean arrays go through the dispatcher's own
+# handler, which unpacks the bits.
 arrow_to_numpy_dtypes = {
     pa.float64(): np.float64,
     pa.int32(): np.int32,
     pa.int64(): np.int64,
     pa.uint8(): np.uint8,
 }
+
+# The longest pyarrow type an error message carries in full.
+TYPE_REPR_WIDTH = 120
+
+
+def type_repr(arrow_type) -> str:
+    """``str(arrow_type)``, cut at a fixed width with a note of what was cut.
+
+    A message that interpolates a pyarrow type grows with the schema: a
+    thousand-field struct is 13,000 characters at the dispatcher, and a message
+    that size lands in every log line that catches the traceback. The bound
+    leaves the one-field case, which is the one people read, untouched.
+    """
+    text = str(arrow_type)
+    if len(text) <= TYPE_REPR_WIDTH:
+        return text
+    cut = text[:TYPE_REPR_WIDTH]
+    more = len(text) - TYPE_REPR_WIDTH
+    if pa.types.is_struct(arrow_type):
+        return f"{cut}... ({arrow_type.num_fields} fields, {more} more characters)"
+    return f"{cut}... ({more} more characters)"
+
+
+class MissingKeyError(KeyError):
+    """A KeyError whose message reads as written.
+
+    ``KeyError.__str__`` reprs its single argument, so a sentence raised
+    through a plain KeyError arrives wrapped in a second pair of quotes, and
+    one that was already rendered arrives mangled. ``except KeyError`` still
+    catches this; only the rendering changes.
+    """
+
+    def __str__(self):
+        return str(self.args[0]) if len(self.args) == 1 else super().__str__()
+
+
+def renamed(exc: Exception, prefix: str) -> Exception:
+    """The same exception with *prefix* in front of its message.
+
+    The class is kept when it can be rebuilt from one string, which every
+    pyarrow error and a plain TypeError, ValueError, NotImplementedError or
+    OverflowError can; anything else, such as a UnicodeDecodeError with its
+    five constructor arguments, comes back as a ValueError so that the prefix
+    is never lost to a second error raised while building the message. A
+    plain KeyError comes back as a :class:`MissingKeyError`, since its str()
+    is the repr of its argument and a KeyError rebuilt from that would repr
+    it again. Raise the result ``from exc`` to keep the original traceback.
+    """
+    if isinstance(exc, KeyError) and not isinstance(exc, pa.ArrowException):
+        text = str(exc.args[0]) if len(exc.args) == 1 else str(exc)
+        return MissingKeyError(f"{prefix}: {text}")
+    cls = type(exc)
+    kept = (TypeError, ValueError, NotImplementedError, OverflowError)
+    if not (isinstance(exc, pa.ArrowException) or cls in kept):
+        cls = ValueError
+    return cls(f"{prefix}: {exc}")
 
 
 def create_bitmap(bitmap_buf: pa.Buffer | None, offset: int = 0, length: int = 0):
@@ -166,7 +221,14 @@ def create_str_array(pa_str_array: pa.StringArray | pa.LargeStringArray) -> tupl
             continue
         start = int(bounds[i])
         length = int(bounds[i + 1]) - start
-        str_array[i] = bytes(buf_view[start:start + length]).decode("utf-8")
+        try:
+            str_array[i] = bytes(buf_view[start:start + length]).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            # The bare error's "position" is a byte offset inside the element,
+            # which says nothing about which element of the batch it is in.
+            raise ValueError(
+                f"element {i} of a {n}-element {pa_str_array.type} array is not valid UTF-8: {exc}"
+            ) from exc
     bitmap = create_bitmap(bitmap_buf, offset, n)
     # A fresh numpy allocation, but read-only all the same, so that the
     # contract does not depend on which Arrow type the caller happened to pass.
@@ -185,7 +247,7 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
     NumPy adapter of PyArrow `StructArray`.
 
     Returns a 3-tuple:
-    - struct-level validity bitmap (None if all rows valid)
+    - struct-level validity bitmap (None when the array carries no validity buffer)
     - dict mapping field names to per-field validity bitmaps
     - dict mapping field names to per-field value arrays
     """
@@ -193,9 +255,13 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
     # handlers are defined in terms of the adapters in this module.
     from numbarrow.core.adapters import arrow_array_adapter
 
-    assert isinstance(struct_array, pa.StructArray)
+    if not isinstance(struct_array, pa.StructArray):
+        # A bare assert here vanished under -O and let any array reach the
+        # field loop, which then died on an error about something else.
+        raise TypeError(
+            f"structured_array_adapter takes a StructArray, not {type(struct_array).__name__}"
+        )
     data_type: pa.StructType = struct_array.type
-    assert isinstance(data_type, pa.StructType)
     struct_bitmap_buf = struct_array.buffers()[0]
     struct_bitmap = create_bitmap(
         struct_bitmap_buf, struct_array.offset, len(struct_array)
@@ -208,7 +274,7 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
         # neither the struct nor the cause.
         raise NotImplementedError(
             f"Not implemented for a struct with repeated field names "
-            f"{sorted(duplicates)} in {struct_array.type}"
+            f"{sorted(duplicates)} in {type_repr(struct_array.type)}"
         )
     bitmaps = {}
     datas = {}
@@ -237,10 +303,16 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
         # holding one bit per element; and a child with more than two buffers
         # has no uniform layout to view at all, so it needs its own handler or
         # the dispatcher's typed error.
-        adapted = arrow_array_adapter(pa_array)
+        try:
+            adapted = arrow_array_adapter(pa_array)
+        except (NotImplementedError, ValueError, TypeError, pa.ArrowException) as exc:
+            # The dispatcher's message names the child's type but not which
+            # field of the struct it is, and thirteen of the common Arrow types
+            # are unregistered, so the field name is what a caller needs.
+            raise renamed(exc, f"struct field {field_name!r}") from exc
         if len(adapted) != 2:
             raise NotImplementedError(
-                f"Not implemented for struct field {field_name!r} of type {pa_array.type}: "
+                f"Not implemented for struct field {field_name!r} of type {type_repr(pa_array.type)}: "
                 f"a structured child adapts to per-field dictionaries, which do not fit "
                 f"a single field's bitmap and data"
             )
@@ -265,10 +337,11 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
         Each list is in turn of the same length, and each element of the list
         is of `pa.StructType`.
 
-    Returns a 3-tuple of: the struct-level validity bitmap (or ``None`` if
-    all values are valid), a dictionary mapping field names to per-field
-    validity bitmaps (each ``None`` if all values are valid), and a
-    dictionary mapping field names to the contiguous field data arrays.
+    Returns a 3-tuple of: the struct-level validity bitmap (or ``None`` when
+    the elements carry no validity buffer), a dictionary mapping field names to
+    per-field validity bitmaps (each ``None`` when that field carries no
+    validity buffer), and a dictionary mapping field names to the contiguous
+    field data arrays.
 
     Whether a field's data is copied depends on the field's type. A
     fixed-width child is a zero-copy view over the contiguous
@@ -287,15 +360,21 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
     it contributes no elements, so ``list_array.null_count`` must be zero and
     a non-zero one raises ``NotImplementedError``.
     """
-    assert isinstance(list_array, pa.ListArray)
+    if not isinstance(list_array, pa.ListArray):
+        # A bare assert here vanished under -O and let any array through to
+        # `.values`, which then died on an AttributeError.
+        raise TypeError(
+            f"structured_list_array_adapter takes a ListArray, not {type(list_array).__name__}"
+        )
     values: pa.Array = list_array.values
     if not pa.types.is_struct(values.type):
         # The array itself is deliberately not interpolated: its repr carries
         # every value it holds, which grows without bound and puts the
-        # caller's data into whatever log catches the traceback.
+        # caller's data into whatever log catches the traceback. The element
+        # type is already part of the list type, so it is not repeated.
         raise NotImplementedError(
             f"Not implemented for a list array of {len(list_array)} rows of "
-            f"type {list_array.type}: elements are {values.type}, not a struct"
+            f"type {type_repr(list_array.type)}: its elements are not structs"
         )
     # The result is the flattened elements with no offsets, so a caller can
     # only map element i back to a row by assuming every row holds the same
@@ -307,8 +386,8 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
     if list_array.null_count:
         raise NotImplementedError(
             f"Not implemented for a list array of {len(list_array)} rows of type "
-            f"{list_array.type} with {list_array.null_count} null row(s): a null "
-            f"row contributes no elements, so the flattened result would "
+            f"{type_repr(list_array.type)} with {list_array.null_count} null row(s): a "
+            f"null row contributes no elements, so the flattened result would "
             f"silently misalign with the rows"
         )
     if len(list_array):
@@ -318,10 +397,10 @@ def structured_list_array_adapter(list_array: pa.ListArray) -> tuple[
         if low != high:
             raise NotImplementedError(
                 f"Not implemented for a list array of {len(list_array)} rows of type "
-                f"{list_array.type} whose rows are not all the same length: they run "
-                f"from {low} to {high}. Element order alone cannot say which row an "
-                f"element belongs to unless every row is the same length, so the "
-                f"result would silently misalign with the rows"
+                f"{type_repr(list_array.type)} whose rows are not all the same length: "
+                f"they run from {low} to {high}. Element order alone cannot say which "
+                f"row an element belongs to unless every row is the same length, so "
+                f"the result would silently misalign with the rows"
             )
     # `values` is the whole child array and ignores this array's own offset,
     # so a sliced or offset list column would hand back the elements of rows
@@ -345,10 +424,11 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, 
     """ NumPy adapter for PyArrow arrays with uniformly sized elements.
 
     Returns the validity bitmap, which owns its memory, and a zero-copy numpy
-    view over the array's data buffer. The view is read-only: Arrow buffers are
-    immutable by contract, and this is what pyarrow's own
-    ``Array.to_numpy(zero_copy_only=True)`` returns. Declare numba signatures
-    that receive it with ``readonly=True``, which accepts writable arrays too.
+    view over the array's data buffer. The view is read-only and cannot be made
+    writable: Arrow buffers are immutable by contract, and this is what
+    pyarrow's own ``Array.to_numpy(zero_copy_only=True)`` returns. Declare numba
+    signatures that receive it with ``readonly=True``, which accepts writable
+    arrays too.
     """
     data_arrow_ty = pa_array.type
     data_np_ty = arrow_to_numpy_dtypes.get(data_arrow_ty, None)
@@ -389,18 +469,20 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, 
     # result reads freed memory: correct at tiny sizes, wrong from a few
     # hundred elements, and a segfault once the allocation is large enough to
     # be returned to the system.
+    # The buffer is viewed read-only. np.frombuffer only reports read-only for
+    # buffers pyarrow marks immutable, which depends on where the buffer came
+    # from: a locally built array is mutable, while the same data after an
+    # Arrow IPC round trip, which is the transport mapInArrow uses, is not.
+    # Clearing the flag afterwards made the result the same either way, but a
+    # flag is the caller's to flip back, and a store through the flipped view
+    # changed the source Arrow array. numpy refuses to set WRITEABLE on an
+    # array whose base is read-only, which is also what makes pyarrow's own
+    # to_numpy(zero_copy_only=True) refuse the flip.
     data = np.frombuffer(
-        memoryview(data_buf),
+        memoryview(data_buf).toreadonly(),
         dtype=data_np_ty,
         count=data_len,
         offset=pa_array.offset * data_item_byte_size
     )
-    # np.frombuffer only reports read-only for buffers pyarrow marks immutable,
-    # which depends on where the buffer came from: a locally built array is
-    # mutable, while the same data after an Arrow IPC round trip, which is the
-    # transport mapInArrow uses, is not. Clearing the flag makes the result the
-    # same either way, instead of a UDF compiling in a unit test and failing on
-    # a real Spark batch.
-    data.flags.writeable = False
     bitmap = create_bitmap(bitmap_buf, pa_array.offset, len(pa_array))
     return bitmap, data

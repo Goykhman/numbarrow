@@ -15,7 +15,10 @@ such bitmaps:
   index is null according to a single bitmap.
 - :func:`~numbarrow.core.is_null.is_null_struct` answers the same
   question across a struct's two validity layers, its own and the
-  field's, since a value is null when either layer says so.
+  field's, since a value is null when either layer says so. Its index
+  is ``int64`` and each layer takes a read-only uint8 bitmap or
+  ``None``; an index of another integer type converts to ``int64`` at
+  the call.
 - :func:`~numbarrow.core.is_null.unpack_booleans` expands bit-packed
   boolean *data* into a boolean array; Arrow packs boolean values the
   same way it packs validity bits.

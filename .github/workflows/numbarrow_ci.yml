@@ -50,6 +50,11 @@ jobs:
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
+      # The Spark leg skips itself wherever it cannot run, so losing every
+      # end-to-end test would be a green run. The linux cells have a jvm that
+      # runs it and are told to require it; windows never runs it.
+      env:
+        NUMBARROW_REQUIRE_SPARK: ${{ !startsWith(matrix.arch, 'windows') && '1' || '' }}
       run: |
         pytest
     - name: Install build dependencies
@@ -78,7 +83,7 @@ jobs:
         include:
           - pyarrow-version: "14.0.0"
             numpy-pin: "numpy<2"
-          - pyarrow-version: "24.0.0"
+          - pyarrow-version: "25.0.1"
             numpy-pin: ""
     runs-on: ubuntu-latest
 

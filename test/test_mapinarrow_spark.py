@@ -6,10 +6,16 @@ from numba.core.types import Array, float64, int32, int64, Optional, uint8
 
 from numbarrow.core.is_null import is_null
 from numbarrow.core.configurations import jit_options
-from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
+from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
+from test.conftest import spark_leg_required
 
-pytest.importorskip("pyspark")
-pytest.importorskip("pandas")
+if spark_leg_required():
+    # A missing pyspark is then a collection error, not a silent skip.
+    import pandas  # noqa: F401
+    import pyspark  # noqa: F401
+else:
+    pytest.importorskip("pyspark")
+    pytest.importorskip("pandas")
 
 from pyspark.sql import functions as sf  # noqa: E402
 from pyspark.sql.types import (  # noqa: E402
@@ -107,12 +113,13 @@ def calculate(
 
 
 def main(data_dict: dict, bitmap_dict: dict, broadcasts: dict):
+    # `data` is a list-of-struct column, so its fields sit under its own name.
     res = calculate(
         data_dict["size"],
         data_dict["coordinate"],
-        data_dict["index"],
-        data_dict["magnitude"],
-        bitmap_dict["magnitude"],
+        data_dict["data"]["index"],
+        data_dict["data"]["magnitude"],
+        bitmap_dict["data"]["magnitude"],
         broadcasts["rescale"]
     )
     return {"id": data_dict["id"], "intensity": res}
@@ -182,8 +189,8 @@ def test_struct_null_row_survives_the_arrow_transport(spark):
     df = spark.createDataFrame([("a", {"v": 10}), ("b", None), ("c", {"v": 30})], schema)
 
     def main(data_dict, bitmap_dict, broadcasts):
-        bitmap = bitmap_dict["v"]
-        n = len(data_dict["v"])
+        bitmap = bitmap_dict["point"]["v"]
+        n = len(data_dict["point"]["v"])
         flags = np.array(
             [False] * n if bitmap is None else [is_null(i, bitmap) for i in range(n)],
             dtype=np.bool_
@@ -216,10 +223,10 @@ def test_null_free_batch_still_carries_its_bitmap_key(spark):
     assert [row["key_present"] for row in rows] == [True, True, True]
 
 
-def test_colliding_struct_field_name_raises_through_spark(spark):
+def test_a_struct_field_sharing_a_column_name_reaches_the_udf_through_spark(spark):
     # Four ordinary Spark StructTypes convert to this shape: a top-level column
-    # and a struct field sharing a name. Silently dropping one of them also
-    # misaligns the row count, since the flattened field is longer.
+    # and a struct field sharing a name. The field sits under its column, so
+    # both arrive, each under its own key.
     schema = StructType([
         StructField("id", LongType()),
         StructField("order", StructType([
@@ -229,8 +236,69 @@ def test_colliding_struct_field_name_raises_through_spark(spark):
     df = spark.createDataFrame([(1, {"id": 10, "total": 1.5}), (2, {"id": 20, "total": 2.5})], schema)
 
     def main(data_dict, bitmap_dict, broadcasts):
-        return {"id": data_dict["id"]}
+        return {"id": data_dict["id"], "order_id": data_dict["order"]["id"]}
 
-    out_schema = StructType([StructField("id", LongType())])
-    with pytest.raises(Exception, match="'id'"):
-        df.repartition(1).mapInArrow(make_mapinarrow_func(main), out_schema).collect()
+    out_schema = StructType([StructField("id", LongType()), StructField("order_id", LongType())])
+    rows = df.repartition(1).mapInArrow(make_mapinarrow_func(main), out_schema).collect()
+    assert sorted((row["id"], row["order_id"]) for row in rows) == [(1, 10), (2, 20)]
+
+
+def test_nullable_carries_nulls_back_through_spark(spark):
+    # A bare array carries no nulls out, so a row of (1, None, None, None) came
+    # back (1, 0, 0.0, ''), the placeholders under its nulls. Nullable carries
+    # each column's validity out, and Spark's Arrow transport carries it back.
+    schema = StructType([
+        StructField("id", LongType()), StructField("n", LongType()),
+        StructField("x", DoubleType()), StructField("s", StringType()),
+    ])
+    df = spark.createDataFrame([(1, None, None, None), (2, 20, 2.5, "b")], schema)
+
+    def main(data_dict, bitmap_dict, broadcasts):
+        out = {"id": data_dict["id"]}
+        for name in ("n", "x", "s"):
+            out[name] = Nullable(data_dict[name], bitmap_dict[name])
+        return out
+
+    rows = df.repartition(1).mapInArrow(make_mapinarrow_func(main), schema).collect()
+    assert sorted((row["id"], row["n"], row["x"], row["s"]) for row in rows) == [
+        (1, None, None, None), (2, 20, 2.5, "b")
+    ]
+
+
+def test_a_column_of_another_accessor_family_fails_whatever_its_width(spark):
+    # The docstring said only a width mismatch fails, so an operator chasing
+    # UnsupportedOperationException was told the types could not be the cause.
+    # float64 and int64 are both 64 bits wide and neither reads through the
+    # other's accessor.
+    doc = " ".join(make_mapinarrow_func.__doc__.split())
+    assert "read through the accessor of another family fails in the JVM" in doc
+    assert "float64 under ``LongType`` and int64 under ``DoubleType``" in doc
+    df = spark.createDataFrame([(1,), (2,)], StructType([StructField("v", LongType())]))
+
+    def collect_as(dtype, declared):
+        def main(data_dict, bitmap_dict, broadcasts):
+            return {"n": data_dict["v"].astype(dtype)}
+
+        out_schema = StructType([StructField("n", declared)])
+        return df.repartition(1).mapInArrow(make_mapinarrow_func(main), out_schema).collect()
+
+    refused = [
+        ("float64 under LongType", np.float64, LongType()),
+        ("int64 under DoubleType", np.int64, DoubleType()),
+        ("int32 under LongType", np.int32, LongType()),
+    ]
+    for label, dtype, declared in refused:
+        with pytest.raises(Exception) as excinfo:
+            collect_as(dtype, declared)
+        assert "UnsupportedOperationException" in str(excinfo.value), label
+    assert [row["n"] for row in collect_as(np.float64, DoubleType())] == [1.0, 2.0]
+
+
+def test_a_spark_struct_type_as_output_schema_is_refused():
+    # The schema mapInArrow takes and the factory's own output_schema share a
+    # name and are not the same thing, and the Spark one carries .names too,
+    # so it reached the first batch and died on a field's missing .type. No
+    # session is needed to hand one to the factory.
+    schema = StructType([StructField("n", LongType())])
+    with pytest.raises(TypeError, match="output_schema must be a pyarrow.Schema, not a StructType"):
+        make_mapinarrow_func(lambda d, b, br: {}, output_schema=schema)

@@ -63,8 +63,173 @@ MUTATIONS = [
     (
         "output path stops routing unicode via tolist()",
         "numbarrow/core/mapinarrow_factory.py",
-        'if getattr(output, "dtype", None) is not None and output.dtype.kind == "U":',
-        "if False:",
+        '    if kind == "U":',
+        "    if False:",
+    ),
+    (
+        "output path stops routing bytes via tolist()",
+        "numbarrow/core/mapinarrow_factory.py",
+        '    if kind == "S":',
+        "    if False:",
+    ),
+    (
+        "unicode output stops naming its type",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        return pa.array(value.tolist(), type=arrow_type or pa.string())",
+        "        return pa.array(value.tolist(), type=arrow_type)",
+    ),
+    (
+        "a dict under one output key stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if isinstance(value, Mapping):",
+        "    if False:",
+    ),
+    (
+        "a struct dict key no field has stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        if unexpected_keys:\n            raise ValueError(\n"
+        "                f\"declared {type_repr(arrow_type)} but the dicts",
+        "        if False:\n            raise ValueError(\n"
+        "                f\"declared {type_repr(arrow_type)} but the dicts",
+    ),
+    (
+        "a struct key inside a struct field stops being checked",
+        "numbarrow/core/mapinarrow_factory.py",
+        "            if _carries_keys(child_type):",
+        "            if False:",
+    ),
+    (
+        "a struct key inside a list stops being checked",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    elif _is_list_like(arrow_type):\n        _check_keys(",
+        "    elif False:\n        _check_keys(",
+    ),
+    (
+        "the key check stops passing over a row it cannot look inside",
+        "numbarrow/core/mapinarrow_factory.py",
+        '        if hasattr(row, "__iter__")\n',
+        "        if True\n",
+    ),
+    (
+        "the key check spreads a str or bytes row again",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        and not isinstance(row, (str, bytes))\n",
+        "",
+    ),
+    (
+        "the key check spreads a numeric ndarray row again",
+        "numbarrow/core/mapinarrow_factory.py",
+        '        and not (isinstance(row, np.ndarray) and row.dtype.kind != "O")\n',
+        "",
+    ),
+    (
+        "a struct key inside a map's keys stops being checked",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        if _carries_keys(arrow_type.key_type):",
+        "        if False:",
+    ),
+    (
+        "a ready-built array whose fields differ stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        if unexpected:",
+        "        if False:",
+    ),
+    (
+        "output columns of different lengths stop being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if len(set(lengths.values())) > 1:",
+        "    if False:",
+    ),
+    (
+        "a ChunkedArray stops being named as such",
+        "numbarrow/core/adapters.py",
+        "    if isinstance(pa_array, pa.ChunkedArray):",
+        "    if False:",
+    ),
+    (
+        "a struct child's failure stops naming the field",
+        "numbarrow/utils/arrow_array_utils.py",
+        '            raise renamed(exc, f"struct field {field_name!r}") from exc',
+        "            raise",
+    ),
+    (
+        "invalid UTF-8 stops naming the element",
+        "numbarrow/utils/arrow_array_utils.py",
+        "        except UnicodeDecodeError as exc:",
+        "        except ():",
+    ),
+    (
+        "a string input_columns stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if isinstance(input_columns, str):",
+        "    if False:",
+    ),
+    (
+        "an output_schema that is not a pyarrow Schema stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if output_schema is not None and not isinstance(output_schema, pa.Schema):",
+        "    if False:",
+    ),
+    (
+        "a missing input column stops naming the batch's columns",
+        "numbarrow/core/mapinarrow_factory.py",
+        "                if col not in names:",
+        "                if False:",
+    ),
+    (
+        "a column the batch carries twice stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "                if names.count(col) > 1:",
+        "                if False:",
+    ),
+    (
+        "an adapter failure stops naming the column",
+        "numbarrow/core/mapinarrow_factory.py",
+        '                    raise renamed(exc, f"column {col!r}") from exc',
+        "                    raise",
+    ),
+    (
+        "a record array stops becoming a struct",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if value.dtype.names is not None:",
+        "    if False:",
+    ),
+    (
+        "a non-dict UDF result stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if not isinstance(outputs, Mapping):",
+        "    if False:",
+    ),
+    (
+        "an output key the schema does not name stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        if extra:",
+        "        if False:",
+    ),
+    (
+        "a non-boolean cache option stops being refused",
+        "numbarrow/core/configurations.py",
+        '    if "cache" in as_json and not isinstance(as_json["cache"], bool):',
+        "    if False:",
+    ),
+    (
+        "is_null_struct stops being compiled with one signature",
+        "numbarrow/core/is_null.py",
+        '@njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
+        '              Optional(Array(uint8, 1, "C", readonly=True))), **jit_options)',
+        "@njit(**jit_options)",
+    ),
+    (
+        "viewers stop getting a cache name of their own",
+        "numbarrow/utils/utils.py",
+        '    viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"',
+        "    pass",
+    ),
+    (
+        "uniform view stops being read-only at the buffer",
+        "numbarrow/utils/arrow_array_utils.py",
+        "        memoryview(data_buf).toreadonly(),",
+        "        memoryview(data_buf),",
     ),
     (
         "empty string result stops being read-only",
@@ -88,14 +253,161 @@ MUTATIONS = [
         "    pass",
     ),
     (
-        "key collision stops raising",
+        "a Nullable stops being split into data and bitmap",
         "numbarrow/core/mapinarrow_factory.py",
-        "        if owner is not None:",
+        "    if isinstance(value, Nullable):",
+        "    if False:",
+    ),
+    (
+        "a Nullable's bitmap stops being folded in",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        return _with_validity(array, bitmap)",
+        "        return array",
+    ),
+    (
+        "a handed-out bitmap stops being checked against the rows it covers",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        if covers is not None and len(array) != covers:",
         "        if False:",
+    ),
+    (
+        "a handed-out bitmap's count stops coming from the data beside it",
+        "numbarrow/core/mapinarrow_factory.py",
+        "                handed[id(bitmap)] = (bitmap, len(datas if field is None else datas[field]))",
+        "                handed[id(bitmap)] = (bitmap, len(datas))",
+    ),
+    (
+        "a handed-out bitmap stops being kept alive for the batch",
+        "numbarrow/core/mapinarrow_factory.py",
+        "                handed[id(bitmap)] = (bitmap, len(datas if field is None else datas[field]))",
+        "                handed[id(bitmap)] = (None, len(datas if field is None else datas[field]))",
+    ),
+    (
+        "a Nullable's bitmap of the wrong length stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if len(bitmap) != (rows + 7) // 8:",
+        "    if False:",
+    ),
+    (
+        "a Nullable's bitmap that is not packed uint8 stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if bitmap.dtype != np.uint8 or bitmap.ndim != 1:",
+        "    if False:",
+    ),
+    (
+        "a Nullable's bitmap that is not an ndarray stops being refused",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if not isinstance(bitmap, np.ndarray):",
+        "    if False:",
+    ),
+    (
+        "a dictionary column stops being kept off the flat path",
+        "numbarrow/core/mapinarrow_factory.py",
+        "and not pa.types.is_dictionary(array.type)",
+        "and True",
+    ),
+    (
+        "a string for a JIT option other than cache stops being refused",
+        "numbarrow/core/configurations.py",
+        '        if isinstance(value, str) and name not in ("error_model", "inline"):',
+        "        if False:",
+    ),
+    (
+        "a generator output stops being read into a list before the key check",
+        "numbarrow/core/mapinarrow_factory.py",
+        '        if not hasattr(value, "__len__"):',
+        "        if False:",
+    ),
+    (
+        "a record array with no fields stops keeping its rows",
+        "numbarrow/core/mapinarrow_factory.py",
+        "    if not children:",
+        "    if False:",
+    ),
+    (
+        "a viewer built on request stops being kept",
+        "numbarrow/utils/utils.py",
+        "        viewer = self[dtype_] = numpy_array_from_ptr_factory(dtype_)",
+        "        viewer = numpy_array_from_ptr_factory(dtype_)",
+    ),
+    (
+        'a struct field inside a struct field stops being checked in a ready-built array',
+        'numbarrow/core/mapinarrow_factory.py',
+        '                found.extend(_unexpected_fields(field.type, declared[field.name]))',
+        '                pass',
+    ),
+    (
+        'a struct field inside a list stops being checked in a ready-built array',
+        'numbarrow/core/mapinarrow_factory.py',
+        "    if _is_list_like(source_type) and _is_list_like(declared_type):\n"
+        "        return _unexpected_fields(source_type.value_type, declared_type.value_type)",
+        "    if _is_list_like(source_type) and _is_list_like(declared_type):\n"
+        "        return []",
+    ),
+    (
+        'a struct field inside a map stops being checked in a ready-built array',
+        'numbarrow/core/mapinarrow_factory.py',
+        "        return (_unexpected_fields(source_type.key_type, declared_type.key_type)\n"
+        "                + _unexpected_fields(source_type.item_type, declared_type.item_type))",
+        '        return []',
+    ),
+    (
+        'a day-unit datetime64 under a declared type stops being inferred first',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if value.dtype == np.dtype("datetime64[D]") and arrow_type is not None:',
+        '    if False:',
+    ),
+    (
+        'an output key that is not a str stops being refused by name',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            if not isinstance(name, str):',
+        '            if False:',
+    ),
+    (
+        'a struct field inside a dictionary stops being checked in a ready-built array',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if pa.types.is_dictionary(source_type) and pa.types.is_dictionary(declared_type):',
+        '    if False:',
+    ),
+    (
+        'a record array under a non-struct declared type stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        "    if not pa.types.is_struct(arrow_type):\n"
+        "        raise TypeError",
+        "    if False:\n"
+        "        raise TypeError",
+    ),
+    (
+        'a ChunkedArray output stops being combined',
+        'numbarrow/core/mapinarrow_factory.py',
+        "    if isinstance(value, pa.ChunkedArray):\n"
+        "        value = value.combine_chunks()",
+        "    if False:\n"
+        "        value = value.combine_chunks()",
+    ),
+    (
+        'renamed() stops falling back to ValueError',
+        'numbarrow/utils/arrow_array_utils.py',
+        "    if not (isinstance(exc, pa.ArrowException) or cls in kept):\n"
+        "        cls = ValueError",
+        "    if False:\n"
+        "        cls = ValueError",
+    ),
+    (
+        "map entries stop checking a pair's shape",
+        'numbarrow/core/mapinarrow_factory.py',
+        '                if isinstance(pair, (tuple, list)) and len(pair) == 2:',
+        '                if True:',
+    ),
+    (
+        'a record array field failure stops naming the field',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            raise renamed(exc, f"field {field.name!r}") from exc',
+        '            raise',
     ),
 ]
 
-COPY = ["numbarrow", "test", "README.md", "docs"]
+COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
 
 
 def build_tree(repo: Path, dest: Path):
@@ -110,10 +422,13 @@ def build_tree(repo: Path, dest: Path):
             shutil.copy2(src, dest / name)
 
 
-def run_suite(tree: Path, neutral_cwd: Path, cache_dir: Path) -> bool:
-    """True when the suite passes. Run from a cwd outside the tree, or the
-    real installed package lands on sys.path[0] and shadows this copy, which
-    is how a mutation can appear to survive when it was never even loaded."""
+def run_suite(tree: Path, neutral_cwd: Path, cache_dir: Path) -> tuple[bool, str]:
+    """Whether the suite passes, and the tail of what it printed.
+
+    Run from a cwd outside the tree, or the real installed package lands on
+    sys.path[0] and shadows this copy, which is how a mutation can appear to
+    survive when it was never even loaded. The tail is what a red job has to
+    show: without it a failing baseline named nothing."""
     env = dict(os.environ)
     env["PYTHONPATH"] = str(tree)
     # Own cache dir, so this never disturbs a numba cache shared with other work.
@@ -122,7 +437,8 @@ def run_suite(tree: Path, neutral_cwd: Path, cache_dir: Path) -> bool:
         [sys.executable, "-m", "pytest", str(tree / "test"), "-x", "-q",
          "-p", "no:cacheprovider"],
         cwd=str(neutral_cwd), env=env, capture_output=True, text=True)
-    return proc.returncode == 0
+    tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-25:])
+    return proc.returncode == 0, tail
 
 
 def main(argv=None):
@@ -142,10 +458,12 @@ def main(argv=None):
         baseline.mkdir()
         build_tree(repo, baseline)
         print("baseline: ", end="", flush=True)
-        if not run_suite(baseline, neutral, cache):
+        passes, tail = run_suite(baseline, neutral, cache)
+        if not passes:
             print("FAILS")
             print("The unmutated suite does not pass, so mutation results would be "
-                  "meaningless. Fix the suite first.")
+                  "meaningless. Fix the suite first. The suite's last lines:")
+            print(tail)
             return 1
         print("passes")
 
@@ -163,7 +481,7 @@ def main(argv=None):
                 print(f"  [{i + 1}/{len(MUTATIONS)}] STALE   {label}")
                 continue
             target.write_text(text.replace(old, new))
-            survived = run_suite(tree, neutral, cache)
+            survived, _tail = run_suite(tree, neutral, cache)
             if survived:
                 failures.append(
                     f"SURVIVED  {label}\n"

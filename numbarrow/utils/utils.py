@@ -34,26 +34,49 @@ def numpy_array_from_ptr_factory(dtype_):
     Returns an ``@njit`` function with signature ``(ptr_as_int, sz) -> ndarray``
     that uses :func:`numba.carray` to reinterpret *sz* elements starting at
     address *ptr_as_int* as a contiguous C-order NumPy array of *dtype_*.
-    No data is copied — the returned array is a view over the original memory.
+    No data is copied: the returned array is a bare view over the memory at
+    that address, with no owner and no read-only flag, valid only while that
+    memory is. Reading it after the source is gone is undefined, and a write
+    through it changes the source. The supported way in is
+    :func:`~numbarrow.core.adapters.arrow_array_adapter`, which returns
+    read-only arrays tied to the Arrow array they view; this is the primitive
+    it is built on.
 
     :param dtype_: NumPy dtype for the resulting array (e.g. ``np.int32``)
     :returns: JIT-compiled function ``(int, int) -> np.ndarray``
     """
-    @njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)
-    def _(ptr_as_int: int, sz: int):
+    def viewer(ptr_as_int: int, sz: int):
         # carray interprets raw memory at ptr as a typed NumPy array (zero-copy view)
         return carray(_ptr_as_int_to_voidptr(ptr_as_int), shape=(sz,), dtype=dtype_)
-    return _
+    # numba names a function's cache files after its qualname and source line,
+    # so every viewer this factory makes shared one index file and one set of
+    # data files, and numba writes those without a lock. Processes importing
+    # together on a cold cache read one index and picked the same data-file
+    # name for different viewers, and every process afterwards loaded the wrong
+    # machine code: an int32 column read as float64, or a crash in
+    # NRT_adapt_ndarray_to_python. A qualname per dtype gives each viewer its
+    # own index and data files, and one entry per index leaves nothing for two
+    # writers to disagree about.
+    name = f"view_{np.dtype(dtype_).name}"
+    viewer.__name__ = name
+    viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"
+    return njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)(viewer)
 
 
-# Pre-built viewers for common NumPy types. Each entry maps a dtype to a
-# JIT-compiled function that views a memory address as an array of that type.
-arrays_viewers = {
-    np_type: numpy_array_from_ptr_factory(np_type) for np_type in [
-        np.bool_,
-        np.float64,
-        np.int32,
-        np.int64,
-        np.uint8
-    ]
-}
+class _Viewers(dict):
+    """The viewers by dtype, each built the first time it is asked for and kept for the next time.
+
+    ``arrays_viewers[np.int32]`` compiles the int32 viewer through
+    :func:`numpy_array_from_ptr_factory` on the first request and returns the
+    same function on every request after. A viewer carries an index and a
+    data file of its own in the numba cache, so nothing is compiled that
+    nothing asks for; the adapters ask for uint8 for validity bitmaps and
+    packed booleans, and int32 and int64 for string offsets.
+    """
+
+    def __missing__(self, dtype_):
+        viewer = self[dtype_] = numpy_array_from_ptr_factory(dtype_)
+        return viewer
+
+
+arrays_viewers = _Viewers()

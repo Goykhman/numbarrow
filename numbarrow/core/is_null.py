@@ -9,7 +9,7 @@ bit position ``i % 8`` within that byte.
 
 import numpy as np
 from numba import njit
-from numba.core.types import boolean, int64, Array, uint8, bool_
+from numba.core.types import boolean, int64, Array, Optional, uint8, bool_
 
 from numbarrow.core.configurations import jit_options
 
@@ -20,6 +20,13 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
 
     Arrow validity bitmaps store one bit per element, packed LSB-first into
     uint8 bytes. A set bit (1) means valid; a cleared bit (0) means null.
+
+    ``index_`` must satisfy ``0 <= index_ < 8 * len(bitmap)``. Compiled without
+    bounds checking, which is numba's default, an index past the bitmap reads
+    memory that is not the bitmap's; ``NUMBARROW_JIT_OPTIONS='{"boundscheck":
+    true}'`` turns that into ``IndexError``. A negative index reads from the
+    bitmap's end like any numpy index, which is the wrong bit and in bounds,
+    so bounds checking does not catch it.
 
     :param index_: zero-based element index
     :param bitmap: uint8 array containing the packed validity bitmap
@@ -35,6 +42,10 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
 @njit(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)), **jit_options)
 def unpack_booleans(offset: int, length: int, packed_data: np.ndarray) -> np.ndarray:
     """Unpack bit-packed boolean data into a boolean array.
+
+    ``offset + length`` must not exceed ``8 * len(packed_data)``; past it the
+    read is out of bounds, and only ``NUMBARROW_JIT_OPTIONS='{"boundscheck":
+    true}'`` makes that an ``IndexError``.
 
     :param offset: bit offset into packed_data to start reading
     :param length: number of boolean values to extract
@@ -53,7 +64,8 @@ def unpack_booleans(offset: int, length: int, packed_data: np.ndarray) -> np.nda
 # design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
 
 
-@njit(**jit_options)
+@njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),
+              Optional(Array(uint8, 1, "C", readonly=True))), **jit_options)
 def is_null_struct(index_, struct_bitmap, field_bitmap):
     """Check whether a struct field value is null at either the struct or field layer.
 
@@ -62,7 +74,15 @@ def is_null_struct(index_, struct_bitmap, field_bitmap):
     particular field null within a non-null row?).  A value is null if either
     layer marks it as null.
 
-    :param index_: zero-based element index
+    Compiled at import with one signature: an ``int64`` index and, for each
+    layer, a read-only uint8 bitmap or ``None``. Every caller resolves to it,
+    an index of another integer type converting to ``int64`` and a writable
+    bitmap being accepted where a read-only one is declared. One signature is
+    one entry in numba's on-disk cache, and numba names the next data file by
+    counting the entries in the index it just read, so a second entry is
+    something two processes warming a cold cache can disagree about.
+
+    :param index_: zero-based element index, converted to ``int64``
     :param struct_bitmap: uint8 packed bitmap for struct-level validity, or None
     :param field_bitmap: uint8 packed bitmap for field-level validity, or None
     :returns: True if null at either layer
