@@ -524,6 +524,12 @@ MUTATIONS = [
         '            or pa.types.is_fixed_size_list(arrow_type) or _is_list_view(arrow_type))',
         '            or pa.types.is_fixed_size_list(arrow_type))',
     ),
+    (
+        "a later batch's inferred schema stops being compared with the first's",
+        'numbarrow/core/mapinarrow_factory.py',
+        '                elif built.schema != inferred:',
+        '                elif False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

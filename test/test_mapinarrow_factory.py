@@ -1000,3 +1000,25 @@ def test_the_field_guard_sees_through_extension_map_and_view_layouts():
         viewed = pa.schema([("v", pa.list_view(pa.struct([("amount", pa.int64())])))])
         with pytest.raises(ValueError, match=r"'v'.*'Amount'"):
             run_outputs({"v": [[{"Amount": 5}]]}, viewed)
+
+
+def test_a_batch_whose_inferred_type_differs_from_the_first_is_refused_by_name():
+    # Spark's writer refused the second schema it saw, naming nothing: an
+    # all-None list beside one holding strings, or ints beside floats.
+    batches = [pa.RecordBatch.from_pydict({"x": [1, 2]}), pa.RecordBatch.from_pydict({"x": [3]})]
+    values = iter([[None, None], ["a"]])
+    fn = make_mapinarrow_func(lambda d, b, br: {"s": next(values)})
+    with pytest.raises(ValueError, match=r"'s'.*null.*string.*output_schema"):
+        list(fn(iter(batches)))
+    values = iter([[1, 2], [1.5]])
+    fn = make_mapinarrow_func(lambda d, b, br: {"n": next(values)})
+    with pytest.raises(ValueError, match=r"'n'.*int64.*double"):
+        list(fn(iter(batches)))
+    values = iter([{"a": [1, 2]}, {"b": [3]}])
+    fn = make_mapinarrow_func(lambda d, b, br: next(values))
+    with pytest.raises(ValueError, match=r"\['b'\].*\['a'\]"):
+        list(fn(iter(batches)))
+    values = iter([[None, None], ["a"]])
+    declared = pa.schema([("s", pa.string())])
+    fn = make_mapinarrow_func(lambda d, b, br: {"s": next(values)}, output_schema=declared)
+    assert [batch.column("s").to_pylist() for batch in fn(iter(batches))] == [[None, None], ["a"]]

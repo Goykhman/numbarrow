@@ -578,6 +578,20 @@ def _build_batch(outputs, output_schema, handed=MappingProxyType({})):
     return pa.RecordBatch.from_arrays(arrays, schema=output_schema)
 
 
+def _schema_drift(first, later):
+    """Why a batch built by inference differs from the partition's first, naming the column."""
+    remedy = ("Spark's writer refuses a batch whose schema differs from the first it wrote, so return the "
+              "same columns every batch and declare output_schema where a batch may be empty or all null")
+    if first.names != later.names:
+        return f"this batch built columns {later.names} where the first built {first.names}; {remedy}"
+    for name in first.names:
+        before, now = first.field(name).type, later.field(name).type
+        if before != now:
+            return (f"output column {name!r} was inferred as {type_repr(before)} from the first batch and "
+                    f"{type_repr(now)} from this one; {remedy}")
+    return f"this batch's schema differs from the first batch's; {remedy}"
+
+
 def _fold_struct_validity(struct_bitmap, field_bitmap):
     """Combine a struct's own validity bits into one field's bits.
 
@@ -715,7 +729,12 @@ def make_mapinarrow_func(
         unit, with a multiplier such as ``datetime64[5s]`` folded in and an
         hour or minute unit taken to seconds; a day, week, month or year unit
         comes back ``date32``, a unit finer than a nanosecond is refused, and
-        an object array holding only ``None`` comes back ``null``.
+        an object array holding only ``None`` comes back ``null``.  The
+        first batch's inferred schema is held for the partition, and a later
+        batch whose inferred types differ, an all-``None`` list beside one
+        holding values, or ints beside floats, is refused naming the column,
+        since Spark's writer would refuse it naming nothing; declare
+        ``output_schema`` where a batch may be empty or all null.
     """
     broadcasts = broadcasts if broadcasts is not None else {}
     if isinstance(input_columns, str):
@@ -737,6 +756,7 @@ def make_mapinarrow_func(
         )
 
     def _(iterator):
+        inferred = None
         for batch in iterator:
             data_dict: dict[str, np.ndarray | dict[str, np.ndarray]] = {}
             bitmap_dict: dict[str, np.ndarray | None | dict[str, np.ndarray | None]] = {}
@@ -776,5 +796,14 @@ def make_mapinarrow_func(
                 else:
                     bitmap_dict[col], data_dict[col] = adapted
             handed = _handed_bitmaps(data_dict, bitmap_dict)
-            yield _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema, handed)
+            built = _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema, handed)
+            if output_schema is None:
+                # An all-None list beside one holding values, or ints beside
+                # floats, inferred a second schema, and Spark's writer refused
+                # it naming nothing.
+                if inferred is None:
+                    inferred = built.schema
+                elif built.schema != inferred:
+                    raise ValueError(_schema_drift(inferred, built.schema))
+            yield built
     return _
