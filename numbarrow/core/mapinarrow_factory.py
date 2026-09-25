@@ -38,12 +38,28 @@ def _struct_fields(struct_type):
     return [struct_type[i] for i in range(struct_type.num_fields)]
 
 
+def _storage(arrow_type):
+    """The type under any extension wrapping: a cast and a key check work on the storage."""
+    while isinstance(arrow_type, pa.BaseExtensionType):
+        arrow_type = arrow_type.storage_type
+    return arrow_type
+
+
+def _is_list_view(arrow_type):
+    # The view layouts arrived in pyarrow 16; on an older one nothing is a view.
+    is_view = getattr(pa.types, "is_list_view", None)
+    is_large_view = getattr(pa.types, "is_large_list_view", None)
+    return bool(is_view and is_view(arrow_type)) or bool(is_large_view and is_large_view(arrow_type))
+
+
 def _is_list_like(arrow_type):
-    return pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type) or pa.types.is_fixed_size_list(arrow_type)
+    return (pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type)
+            or pa.types.is_fixed_size_list(arrow_type) or _is_list_view(arrow_type))
 
 
 def _carries_keys(arrow_type):
     """Whether a value of this type is built from dicts somewhere inside it."""
+    arrow_type = _storage(arrow_type)
     if pa.types.is_struct(arrow_type):
         return True
     if _is_list_like(arrow_type):
@@ -54,7 +70,21 @@ def _carries_keys(arrow_type):
 
 
 def _unexpected_fields(source_type, declared_type):
-    """Field names the source type carries, at any depth, that the declared type does not."""
+    """Field names the source type carries, at any depth, that the declared type does not.
+
+    The kinds are paired through their layouts: an extension type through its
+    storage, and a map with a declared list of key/value structs through its
+    entries struct, since a cast matches those by name too and filled the
+    value struct with nulls behind either wrapping.
+    """
+    source_type = _storage(source_type)
+    declared_type = _storage(declared_type)
+    if pa.types.is_map(source_type) and _is_list_like(declared_type):
+        entries = pa.struct([source_type.key_field, source_type.item_field])
+        return _unexpected_fields(entries, declared_type.value_type)
+    if _is_list_like(source_type) and pa.types.is_map(declared_type):
+        entries = pa.struct([declared_type.key_field, declared_type.item_field])
+        return _unexpected_fields(source_type.value_type, entries)
     if pa.types.is_dictionary(source_type) and pa.types.is_dictionary(declared_type):
         # A dictionary is a layout: the cast decodes it and matches the value
         # structs by name, and filled a whole column with nulls the same way.
@@ -121,6 +151,7 @@ def _check_keys(rows, arrow_type):
     declared order, and one that names the declared fields in another order,
     which would swap every same-typed field without a word, is refused.
     """
+    arrow_type = _storage(arrow_type)
     if pa.types.is_struct(arrow_type):
         fields = {field.name: field.type for field in _struct_fields(arrow_type)}
         names = list(fields)

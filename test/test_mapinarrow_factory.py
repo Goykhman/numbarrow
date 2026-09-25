@@ -979,3 +979,24 @@ def test_a_key_error_from_pa_array_names_the_column_and_the_field():
     declared = pa.schema([("r", pa.struct([("i", pa.int64()), ("o", pa.struct([("amount", pa.int64())]))]))])
     with pytest.raises(KeyError, match=r"'r'.*field 'o': 0"):
         run_outputs({"r": records}, declared)
+
+
+def test_the_field_guard_sees_through_extension_map_and_view_layouts():
+    # An extension array with struct storage, a map declared as a list of
+    # key/value structs, and a list view were compared as unlike kinds, so the
+    # guard returned nothing and the cast filled the column with nulls.
+    point = pa.struct([("x", pa.float64()), ("y", pa.float64())])
+    if hasattr(pa, "opaque"):
+        ext_type = pa.opaque(point, "point", "vendor")
+        ext = pa.ExtensionArray.from_storage(ext_type, pa.array([{"x": 1.0, "y": 2.0}], type=point))
+        declared = pa.schema([("p", pa.struct([("lon", pa.float64()), ("lat", pa.float64())]))])
+        with pytest.raises(ValueError, match=r"'p'.*\['x', 'y'\]"):
+            run_outputs({"p": ext}, declared)
+    mapped = pa.array([[("k", {"Amount": 1})]], type=pa.map_(pa.string(), pa.struct([("Amount", pa.int64())])))
+    entries = pa.struct([("key", pa.string()), ("value", pa.struct([("amount", pa.int64())]))])
+    with pytest.raises(ValueError, match=r"'m'.*\['Amount'\]"):
+        run_outputs({"m": mapped}, pa.schema([("m", pa.list_(entries))]))
+    if hasattr(pa, "list_view"):
+        viewed = pa.schema([("v", pa.list_view(pa.struct([("amount", pa.int64())])))])
+        with pytest.raises(ValueError, match=r"'v'.*'Amount'"):
+            run_outputs({"v": [[{"Amount": 5}]]}, viewed)

@@ -505,6 +505,25 @@ MUTATIONS = [
         '    if isinstance(array, pa.ChunkedArray):\n        # A pandas Series over a multi-chunk',
         '    if False:\n        # A pandas Series over a multi-chunk',
     ),
+    (
+        'the field guard stops seeing through an extension type',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    source_type = _storage(source_type)\n'
+        '    declared_type = _storage(declared_type)',
+        '    declared_type = _storage(declared_type)',
+    ),
+    (
+        'a map source stops being paired with a declared list of entries',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if pa.types.is_map(source_type) and _is_list_like(declared_type):',
+        '    if False:',
+    ),
+    (
+        'view layouts stop counting as list-like',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            or pa.types.is_fixed_size_list(arrow_type) or _is_list_view(arrow_type))',
+        '            or pa.types.is_fixed_size_list(arrow_type))',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
