@@ -88,13 +88,24 @@ def _iterable_rows(rows):
     they are passed over too: ``pa.array`` refuses such a row at its first
     element, where spreading it into a list here first took seconds and
     hundreds of megabytes for a long one.
+
+    Iterability is tested with ``iter`` rather than by the ``__iter__``
+    attribute: a sequence by ``__getitem__`` alone has no such attribute and
+    iterates all the same, and ``pa.array`` reads it item by item. A pyarrow
+    scalar row is passed over as well: ``pa.array`` checks one against the
+    declared type itself, and from pyarrow 21 a MapScalar is a Mapping whose
+    ``values`` is an array rather than a method.
     """
-    return [
-        row for row in rows
-        if hasattr(row, "__iter__")
-        and not isinstance(row, (str, bytes))
-        and not (isinstance(row, np.ndarray) and row.dtype.kind != "O")
-    ]
+    kept = []
+    for row in rows:
+        if isinstance(row, (str, bytes, pa.Scalar)) or (isinstance(row, np.ndarray) and row.dtype.kind != "O"):
+            continue
+        try:
+            iter(row)
+        except TypeError:
+            continue
+        kept.append(row)
+    return kept
 
 
 def _check_keys(rows, arrow_type):
@@ -105,11 +116,16 @@ def _check_keys(rows, arrow_type):
     ``amount`` builds a whole column of nulls under an identical schema,
     without a word. The same typo on a top-level key raises; this makes the
     nested one raise too, however deep the struct sits inside a list, a map or
-    another struct.
+    another struct. A row given as a tuple, a namedtuple or a pyspark Row
+    binds by position, so its elements are checked against the fields in
+    declared order, and one that names the declared fields in another order,
+    which would swap every same-typed field without a word, is refused.
     """
     if pa.types.is_struct(arrow_type):
         fields = {field.name: field.type for field in _struct_fields(arrow_type)}
-        dicts = [row for row in rows if isinstance(row, Mapping)]
+        names = list(fields)
+        dicts = [row for row in rows if isinstance(row, Mapping) and not isinstance(row, pa.Scalar)]
+        tuples = [row for row in rows if isinstance(row, tuple) and not isinstance(row, pa.Scalar)]
         seen = set()
         for row in dicts:
             seen.update(row)
@@ -120,9 +136,18 @@ def _check_keys(rows, arrow_type):
                 f"that no declared field has; Arrow matches struct fields by exact name and "
                 f"fills a missing one with null"
             )
-        for name, child_type in fields.items():
+        for row in tuples:
+            given = getattr(row, "_fields", None) or getattr(row, "__fields__", None)
+            if given is not None and set(given) == set(names) and list(given) != names:
+                raise ValueError(
+                    f"declared {type_repr(arrow_type)} but a row names its fields {list(given)}; a tuple's "
+                    f"fields bind by position, so build it in the declared order or return dicts"
+                )
+        for index, (name, child_type) in enumerate(fields.items()):
             if _carries_keys(child_type):
-                _check_keys([row[name] for row in dicts if name in row], child_type)
+                children = [row[name] for row in dicts if name in row]
+                children.extend(row[index] for row in tuples if index < len(row))
+                _check_keys(children, child_type)
     elif _is_list_like(arrow_type):
         _check_keys([item for row in _iterable_rows(rows) for item in row], arrow_type.value_type)
     elif pa.types.is_map(arrow_type):
@@ -146,7 +171,12 @@ def _map_entries(rows):
             items.extend(row.values())
         else:
             for pair in row:
-                if isinstance(pair, (tuple, list)) and len(pair) == 2:
+                if isinstance(pair, Mapping) and set(pair) == {"key", "value"}:
+                    # The entry shape Spark's map_entries produces, which
+                    # pa.array reads as a pair.
+                    keys.append(pair["key"])
+                    items.append(pair["value"])
+                elif isinstance(pair, (tuple, list)) and len(pair) == 2:
                     keys.append(pair[0])
                     items.append(pair[1])
     return keys, items

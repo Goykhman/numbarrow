@@ -1,3 +1,4 @@
+import collections
 import datetime
 import weakref
 
@@ -889,3 +890,60 @@ def test_a_nullable_inside_a_nullable_is_refused():
     inner = Nullable(np.arange(2, dtype=np.int64), None)
     with pytest.raises(TypeError, match=r"'out'.*Nullable inside a Nullable"):
         run_outputs({"out": Nullable(inner, None)})
+
+
+def test_the_key_check_reaches_rows_that_are_not_dicts():
+    # A tuple, a namedtuple, a pyspark Row and a sequence by __getitem__ alone
+    # bind by position in pa.array, and none of them was looked inside, so a
+    # mistyped nested key was silently nulled behind any of them.
+    Outer = collections.namedtuple("Outer", ["id", "inner"])
+
+    class Row(tuple):
+        __fields__ = ["id", "inner"]
+
+    class Seq:
+        def __init__(self, items):
+            self._items = items
+
+        def __len__(self):
+            return len(self._items)
+
+        def __getitem__(self, index):
+            return self._items[index]
+
+    nested = pa.schema([("s", pa.struct([("id", pa.int64()), ("inner", pa.struct([("amount", pa.int64())]))]))])
+    for rows in ([(1, {"Amount": 5}), (2, {"Amount": 6})],
+                 [Outer(1, {"Amount": 5}), Outer(2, {"Amount": 6})],
+                 [Row((1, {"Amount": 5})), Row((2, {"Amount": 6}))]):
+        with pytest.raises(ValueError, match=r"'s'.*'Amount'"):
+            run_outputs({"s": rows}, nested)
+    listed = pa.schema([("s", pa.list_(pa.struct([("amount", pa.int64())])))])
+    with pytest.raises(ValueError, match=r"'s'.*'Amount'"):
+        run_outputs({"s": [Seq([{"amount": 1}]), Seq([{"Amount": 2}])]}, listed)
+    mapped = pa.schema([("s", pa.map_(pa.string(), pa.struct([("amount", pa.int64())])))])
+    entries = [[{"key": "k", "value": {"Amount": 1}}], [{"key": "j", "value": {"amount": 2}}]]
+    with pytest.raises(ValueError, match=r"'s'.*'Amount'"):
+        run_outputs({"s": entries}, mapped)
+    good = run_outputs({"s": [Outer(1, {"amount": 5}), (2, {"amount": 6})]}, nested).column("s")
+    assert good.to_pylist() == [{"id": 1, "inner": {"amount": 5}}, {"id": 2, "inner": {"amount": 6}}]
+
+
+def test_a_namedtuple_row_naming_the_fields_in_another_order_is_refused():
+    # pa.array binds a namedtuple by position, so YX(y=100, x=0) under
+    # struct<x, y> put 100 in x and 0 in y without a word.
+    YX = collections.namedtuple("YX", ["y", "x"])
+    schema = pa.schema([("s", pa.struct([("x", pa.int64()), ("y", pa.int64())]))])
+    with pytest.raises(ValueError, match=r"'s'.*\['y', 'x'\].*position"):
+        run_outputs({"s": [YX(100, 0), YX(200, 1)]}, schema)
+    XY = collections.namedtuple("XY", ["x", "y"])
+    got = run_outputs({"s": [XY(0, 100), XY(1, 200)]}, schema).column("s")
+    assert got.to_pylist() == [{"x": 0, "y": 100}, {"x": 1, "y": 200}]
+
+
+def test_pyarrow_scalar_rows_are_left_to_pa_array():
+    # From pyarrow 21 a MapScalar is a Mapping whose values is an array, so the
+    # key check died calling it; pa.array checks a scalar row itself.
+    mapped = pa.map_(pa.string(), pa.struct([("amount", pa.int64())]))
+    rows = list(pa.array([[("k", {"amount": 1})], [("j", {"amount": 2}), ("i", {"amount": 3})]], type=mapped))
+    got = run_outputs({"s": rows}, pa.schema([("s", mapped)])).column("s")
+    assert got.to_pylist() == [[("k", {"amount": 1})], [("j", {"amount": 2}), ("i", {"amount": 3})]]

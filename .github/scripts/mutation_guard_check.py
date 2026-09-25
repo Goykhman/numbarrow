@@ -447,6 +447,36 @@ MUTATIONS = [
         "    if isinstance(value, Nullable):\n        # A helper's Nullable",
         "    if False:\n        # A helper's Nullable",
     ),
+    (
+        'tuple rows stop being checked by position',
+        'numbarrow/core/mapinarrow_factory.py',
+        '                children.extend(row[index] for row in tuples if index < len(row))',
+        '                pass',
+    ),
+    (
+        'a namedtuple naming the fields in another order stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            if given is not None and set(given) == set(names) and list(given) != names:',
+        '            if False:',
+    ),
+    (
+        'iterability stops being tested with iter',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        try:\n            iter(row)\n        except TypeError:\n            continue\n        kept.append(row)',
+        '        if not hasattr(row, "__iter__"):\n            continue\n        kept.append(row)',
+    ),
+    (
+        'a key/value entry dict stops being read as a pair',
+        'numbarrow/core/mapinarrow_factory.py',
+        '                if isinstance(pair, Mapping) and set(pair) == {"key", "value"}:',
+        '                if False:',
+    ),
+    (
+        'pyarrow scalar rows stop being passed over by the key check',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        if isinstance(row, (str, bytes, pa.Scalar)) or',
+        '        if isinstance(row, (str, bytes)) or',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
