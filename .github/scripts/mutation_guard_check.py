@@ -402,8 +402,8 @@ MUTATIONS = [
     (
         'a record array field failure stops naming the field',
         'numbarrow/core/mapinarrow_factory.py',
-        '            raise renamed(exc, f"field {field.name!r}") from exc',
-        '            raise',
+        '        raise renamed(exc, f"field {name!r}") from exc',
+        '        raise',
     ),
     (
         "a record array converted as inferred stops naming a failing field",
