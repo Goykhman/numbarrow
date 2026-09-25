@@ -92,6 +92,23 @@ def test_input_columns_selects_only_the_named_columns():
     assert seen["data"]["c"].tolist() == [5, 6]
 
 
+def test_input_columns_is_read_once_so_a_generator_serves_every_batch():
+    # The names were read from the argument inside the batch loop, so a
+    # generator, map() or filter() was used up by the first batch and every
+    # later batch was adapted with no columns: the UDF died on a bare KeyError.
+    batches = [pa.RecordBatch.from_pydict({"x": [1, 2], "y": [0, 0]}),
+               pa.RecordBatch.from_pydict({"x": [3], "y": [0]})]
+    seen = []
+
+    def main(data_dict, bitmap_dict, broadcasts):
+        seen.append(list(data_dict))
+        return {"out": data_dict["x"] * 2}
+
+    got = list(make_mapinarrow_func(main, input_columns=(name for name in ["x"]))(iter(batches)))
+    assert seen == [["x"], ["x"]]
+    assert [batch.column("out").to_pylist() for batch in got] == [[2, 4], [6]]
+
+
 def test_a_struct_field_sharing_a_column_name_reaches_the_udf():
     # Four ordinary Spark StructTypes convert to this shape: a top-level column
     # and a struct field sharing a name. Nested under its column, the field

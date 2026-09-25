@@ -411,6 +411,12 @@ MUTATIONS = [
         "        children = [_record_field(value, name, None) for name in names]",
         "        children = [_convert(value[name], None) for name in names]",
     ),
+    (
+        "input_columns is read again on every batch",
+        "numbarrow/core/mapinarrow_factory.py",
+        "            input_columns_ = named if named is not None else list(dict.fromkeys(names))",
+        "            input_columns_ = list(dict.fromkeys(input_columns if input_columns is not None else names))",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

@@ -527,7 +527,9 @@ def make_mapinarrow_func(
         does not have raises :class:`KeyError` listing the batch's columns,
         since Spark's case-insensitive projection may have spelled it
         differently, and a name the batch carries more than once, as an
-        unaliased join produces, raises :class:`ValueError`.
+        unaliased join produces, raises :class:`ValueError`.  The names are
+        read once, when the function is made, so a one-shot iterable such as
+        a generator serves as well as a list.
     :param broadcasts: optional dictionary of broadcast values
     :param output_schema: optional :class:`pyarrow.Schema` for the batch that is
         yielded.  When given, the dict returned by ``main_func`` is bound to it
@@ -572,6 +574,11 @@ def make_mapinarrow_func(
         raise TypeError(
             f"input_columns must be a list of column names, not the string {input_columns!r}"
         )
+    # dict.fromkeys keeps first-seen order. Naming a column twice produces the
+    # same arrays twice, so it stays harmless. Read once, here: read inside the
+    # batch loop, a generator, map() or filter() handed in was used up by the
+    # first batch, and every later batch then saw no columns at all.
+    named = None if input_columns is None else list(dict.fromkeys(input_columns))
     if output_schema is not None and not isinstance(output_schema, pa.Schema):
         # A PySpark StructType is the schema mapInArrow itself takes, and it
         # carries .names too, so one handed here got as far as the first batch
@@ -584,11 +591,8 @@ def make_mapinarrow_func(
         for batch in iterator:
             data_dict: dict[str, np.ndarray | dict[str, np.ndarray]] = {}
             bitmap_dict: dict[str, np.ndarray | None | dict[str, np.ndarray | None]] = {}
-            requested = input_columns if input_columns is not None else batch.schema.names
-            # dict.fromkeys keeps first-seen order. Naming a column twice
-            # produces the same arrays twice, so it stays harmless.
-            input_columns_ = list(dict.fromkeys(requested))
             names = batch.schema.names
+            input_columns_ = named if named is not None else list(dict.fromkeys(names))
             for col in input_columns_:
                 if col not in names:
                     # Spark's projection is case-insensitive and may have
