@@ -419,7 +419,8 @@ def _with_validity(array, bitmap):
     contiguous, which is the case for every bitmap ``bitmap_dict`` hands out.
     Any other array, one that already carries nulls, a sliced Arrow array or
     a nested type, is masked through ``if_else``, which keeps the nulls it
-    had. The bitmap carries no row count of its own: the length check here is
+    had; an extension array is masked through its storage and rewrapped. The
+    bitmap carries no row count of its own: the length check here is
     per byte, eight rows to a byte, and the caller checks a bitmap the batch
     handed out against the count it was handed out for. A bitmap that is not
     an ndarray at all is refused before any attribute of it is read, since the
@@ -444,6 +445,13 @@ def _with_validity(array, bitmap):
         )
     if rows == 0:
         return array
+    if isinstance(array, pa.ExtensionArray):
+        # The flat test below reads the extension type, which reports no
+        # fields and no dictionary whatever its storage, so a dictionary
+        # storage took the from_buffers path and aborted the interpreter, and
+        # a null or a slice went to if_else, which has no extension kernel.
+        # The storage carries the layout; the result is rewrapped.
+        return pa.ExtensionArray.from_storage(array.type, _with_validity(array.storage, bitmap))
     flat = (array.null_count == 0 and array.offset == 0 and array.type.num_fields == 0
             and not pa.types.is_dictionary(array.type) and not pa.types.is_null(array.type))
     if flat:

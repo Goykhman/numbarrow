@@ -530,6 +530,14 @@ MUTATIONS = [
         '                elif built.schema != inferred:',
         '                elif False:',
     ),
+    (
+        'an extension column stops being masked through its storage',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if isinstance(array, pa.ExtensionArray):\n'
+        '        # The flat test below',
+        '    if False:\n'
+        '        # The flat test below',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

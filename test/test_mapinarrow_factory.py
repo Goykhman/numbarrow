@@ -1022,3 +1022,18 @@ def test_a_batch_whose_inferred_type_differs_from_the_first_is_refused_by_name()
     declared = pa.schema([("s", pa.string())])
     fn = make_mapinarrow_func(lambda d, b, br: {"s": next(values)}, output_schema=declared)
     assert [batch.column("s").to_pylist() for batch in fn(iter(batches))] == [[None, None], ["a"]]
+
+
+def test_a_nullable_extension_column_is_masked_through_its_storage():
+    # The flat test read the extension type, which reports no dictionary
+    # whatever its storage, so a dictionary storage took the from_buffers path
+    # and aborted the interpreter, and one carrying a null went to if_else,
+    # which has no extension kernel.
+    if not hasattr(pa, "opaque"):
+        pytest.skip("pa.opaque arrived in pyarrow 17")
+    labels = pa.opaque(pa.dictionary(pa.int32(), pa.string()), "label", "vendor")
+    bitmap = np.array([0b101], dtype=np.uint8)
+    for storage in (pa.array(["a", "b", "c"]).dictionary_encode(), pa.array(["a", None, "c"]).dictionary_encode()):
+        column = pa.ExtensionArray.from_storage(labels, storage)
+        got = run_outputs({"out": Nullable(column, bitmap)}).column("out")
+        assert got.type == labels and got.storage.to_pylist() == ["a", None, "c"]
