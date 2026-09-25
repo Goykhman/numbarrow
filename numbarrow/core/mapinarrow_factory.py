@@ -193,7 +193,7 @@ def _record_field(value, name, arrow_type):
     """One field of a record array as an Arrow array; a failure names the field."""
     try:
         return _convert(value[name], arrow_type)
-    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
+    except (pa.ArrowException, TypeError, ValueError, OverflowError, KeyError) as exc:
         raise renamed(exc, f"field {name!r}") from exc
 
 
@@ -274,12 +274,27 @@ def _convert(value, arrow_type):
         return _ndarray_to_arrow(value, arrow_type)
     # An object array, a list, a tuple, a pandas Series or any other iterable
     # of Python objects.
+    if not hasattr(value, "__len__"):
+        # A generator would be consumed by the checks, so it is read once.
+        value = list(value)
+    if isinstance(value, (list, tuple)):
+        for row in value:
+            if _is_pandas(row, "Series", "DataFrame"):
+                # pa.array reads a Series row by its index labels, so a sorted
+                # or filtered one came back reordered, and one whose labels
+                # were not 0..n-1 died on a bare KeyError.
+                raise TypeError(
+                    f"a row is a pandas {type(row).__name__}, which pa.array reads by its labels "
+                    f"rather than in order; hand it over as row.to_numpy() or list(row)"
+                )
     if arrow_type is not None and _carries_keys(arrow_type):
-        if not hasattr(value, "__len__"):
-            # A generator would be consumed by the check, so it is read once.
-            value = list(value)
         _check_keys(value, arrow_type)
-    return pa.array(value, type=arrow_type)
+    array = pa.array(value, type=arrow_type)
+    if isinstance(array, pa.ChunkedArray):
+        # A pandas Series over a multi-chunk pyarrow array comes back as one,
+        # which RecordBatch.from_arrays refused naming no column.
+        array = array.combine_chunks()
+    return array
 
 
 def _at_arrow_unit(value):
@@ -342,6 +357,12 @@ def _ndarray_to_arrow(value, arrow_type):
         # under a timestamp, and leaves pyarrow's own refusals in place.
         return pa.array(value).cast(arrow_type)
     return pa.array(value, type=arrow_type)
+
+
+def _is_pandas(value, *names):
+    """Whether *value* is a pandas object of one of the given class names, without importing pandas."""
+    cls = type(value)
+    return cls.__name__ in names and cls.__module__.split(".")[0] == "pandas"
 
 
 def _split_pair(value):
@@ -437,6 +458,13 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
             f"output column {name!r} is a {type(value).__name__}, which pa.array would spread one "
             f"character per row; a constant column is np.full(rows, value)"
         )
+    if _is_pandas(value, "DataFrame"):
+        # Read by its column labels: a one-column frame died on a bare
+        # KeyError(0), and one with integer labels came back transposed.
+        raise TypeError(
+            f"output column {name!r} is a DataFrame, which pa.array reads by its column labels; "
+            f"return one Series or ndarray per column"
+        )
     try:
         array = _convert(value, arrow_type)
         if bitmap is None:
@@ -448,7 +476,7 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
                 f"{len(array)} rows; a resized column needs a bitmap of its own"
             )
         return _with_validity(array, bitmap)
-    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
+    except (pa.ArrowException, TypeError, ValueError, OverflowError, KeyError) as exc:
         raise renamed(exc, f"output column {name!r}") from exc
 
 

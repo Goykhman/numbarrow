@@ -947,3 +947,35 @@ def test_pyarrow_scalar_rows_are_left_to_pa_array():
     rows = list(pa.array([[("k", {"amount": 1})], [("j", {"amount": 2}), ("i", {"amount": 3})]], type=mapped))
     got = run_outputs({"s": rows}, pa.schema([("s", mapped)])).column("s")
     assert got.to_pylist() == [[("k", {"amount": 1})], [("j", {"amount": 2}), ("i", {"amount": 3})]]
+
+
+def test_a_pandas_series_row_is_refused_rather_than_read_by_label():
+    # pa.array reads a Series row by its index labels: a sorted one came back
+    # in label order, one from a groupby died on a bare KeyError, a frame under
+    # one key came back transposed, and a multi-chunk pyarrow-backed Series
+    # reached RecordBatch.from_arrays as a ChunkedArray.
+    pd = pytest.importorskip("pandas")
+    rows = [pd.Series([3, 1, 2]).sort_values(), pd.Series([6, 5, 4]).sort_values()]
+    schema = pa.schema([("s", pa.list_(pa.int64()))])
+    with pytest.raises(TypeError, match=r"'s'.*Series.*list\(row\)"):
+        run_outputs({"s": rows}, schema)
+    got = run_outputs({"s": [list(row) for row in rows]}, schema).column("s")
+    assert got.to_pylist() == [[1, 2, 3], [4, 5, 6]]
+    frame = pd.DataFrame({"x": [1, 2]})
+    with pytest.raises(TypeError, match=r"'out'.*DataFrame"):
+        run_outputs({"out": frame[["x"]]})
+    chunked = pd.concat([pd.Series(["a"], dtype="string[pyarrow]"), pd.Series(["b"], dtype="string[pyarrow]")])
+    assert run_outputs({"w": chunked}).column("w").to_pylist() == ["a", "b"]
+
+
+def test_a_key_error_from_pa_array_names_the_column_and_the_field():
+    # pa.array reads a UserDict row by index, and the KeyError it raised was
+    # outside the classes the output side renamed, so it escaped as "0".
+    rows = [collections.UserDict({"amount": 1}), collections.UserDict({"amount": 2})]
+    schema = pa.schema([("s", pa.struct([("amount", pa.int64())]))])
+    with pytest.raises(KeyError, match=r"output column 's': 0"):
+        run_outputs({"s": rows}, schema)
+    records = np.array([(1, rows[0])], dtype=[("i", "i8"), ("o", "O")])
+    declared = pa.schema([("r", pa.struct([("i", pa.int64()), ("o", pa.struct([("amount", pa.int64())]))]))])
+    with pytest.raises(KeyError, match=r"'r'.*field 'o': 0"):
+        run_outputs({"r": records}, declared)

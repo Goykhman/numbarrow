@@ -477,6 +477,34 @@ MUTATIONS = [
         '        if isinstance(row, (str, bytes, pa.Scalar)) or',
         '        if isinstance(row, (str, bytes)) or',
     ),
+    (
+        'a pandas Series row stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            if _is_pandas(row, "Series", "DataFrame"):',
+        '            if False:',
+    ),
+    (
+        'a KeyError from pa.array stops naming the column',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    except (pa.ArrowException, TypeError, ValueError, OverflowError, KeyError) as exc:\n'
+        '        raise renamed(exc, f"output column {name!r}") from exc',
+        '    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:\n'
+        '        raise renamed(exc, f"output column {name!r}") from exc',
+    ),
+    (
+        'a KeyError from a record field stops naming the field',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    except (pa.ArrowException, TypeError, ValueError, OverflowError, KeyError) as exc:\n'
+        '        raise renamed(exc, f"field {name!r}") from exc',
+        '    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:\n'
+        '        raise renamed(exc, f"field {name!r}") from exc',
+    ),
+    (
+        'a chunked array from pa.array stops being combined',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if isinstance(array, pa.ChunkedArray):\n        # A pandas Series over a multi-chunk',
+        '    if False:\n        # A pandas Series over a multi-chunk',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
