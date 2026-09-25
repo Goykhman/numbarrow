@@ -1,0 +1,729 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.mapinarrow_factory &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/core/mapinarrow_factory.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbarrow</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.mapinarrow_factory</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.core.mapinarrow_factory</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""</span>
+<span class="sd">Factory for PySpark ``mapInArrow`` UDF functions.</span>
+
+<span class="sd">Bridges PySpark's Arrow-based batch processing with Numba JIT-compiled functions</span>
+<span class="sd">by converting each :class:`pyarrow.RecordBatch` column through</span>
+<span class="sd">:func:`~numbarrow.core.adapters.arrow_array_adapter` before passing the data</span>
+<span class="sd">to a user-supplied computation function.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pa</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow.compute</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pc</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Mapping</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">MappingProxyType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">NamedTuple</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.adapters</span><span class="w"> </span><span class="kn">import</span> <span class="n">arrow_array_adapter</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.utils.arrow_array_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">MissingKeyError</span><span class="p">,</span> <span class="n">renamed</span><span class="p">,</span> <span class="n">type_repr</span>
+
+
+<div class="viewcode-block" id="Nullable">
+<a class="viewcode-back" href="../../../numbarrow.core.mapinarrow_factory.html#numbarrow.core.mapinarrow_factory.Nullable">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Nullable</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""An output column with its validity, ``Nullable(data, bitmap)``.</span>
+
+<span class="sd">    ``data`` is anything a column may be: an ndarray, a list, a</span>
+<span class="sd">    :class:`pyarrow.Array` or a numpy record array. ``bitmap`` is a packed</span>
+<span class="sd">    uint8 validity bitmap in the layout ``bitmap_dict`` hands out,</span>
+<span class="sd">    ``(rows + 7) // 8`` bytes with a set bit for a valid row, or ``None``,</span>
+<span class="sd">    which is what ``bitmap_dict`` holds for a column with no validity buffer.</span>
+<span class="sd">    A bare array carries no nulls out of a UDF; this does.</span>
+<span class="sd">    """</span>
+
+    <span class="n">data</span><span class="p">:</span> <span class="nb">object</span>
+    <span class="n">bitmap</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_struct_fields</span><span class="p">(</span><span class="n">struct_type</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">struct_type</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">struct_type</span><span class="o">.</span><span class="n">num_fields</span><span class="p">)]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_list_like</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_list</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span> <span class="ow">or</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_large_list</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span> <span class="ow">or</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_fixed_size_list</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_carries_keys</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Whether a value of this type is built from dicts somewhere inside it."""</span>
+    <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_struct</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">_is_list_like</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_carries_keys</span><span class="p">(</span><span class="n">arrow_type</span><span class="o">.</span><span class="n">value_type</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_map</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_carries_keys</span><span class="p">(</span><span class="n">arrow_type</span><span class="o">.</span><span class="n">key_type</span><span class="p">)</span> <span class="ow">or</span> <span class="n">_carries_keys</span><span class="p">(</span><span class="n">arrow_type</span><span class="o">.</span><span class="n">item_type</span><span class="p">)</span>
+    <span class="k">return</span> <span class="kc">False</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_unexpected_fields</span><span class="p">(</span><span class="n">source_type</span><span class="p">,</span> <span class="n">declared_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Field names the source type carries, at any depth, that the declared type does not."""</span>
+    <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_dictionary</span><span class="p">(</span><span class="n">source_type</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_dictionary</span><span class="p">(</span><span class="n">declared_type</span><span class="p">):</span>
+        <span class="c1"># A dictionary is a layout: the cast decodes it and matches the value</span>
+        <span class="c1"># structs by name, and filled a whole column with nulls the same way.</span>
+        <span class="k">return</span> <span class="n">_unexpected_fields</span><span class="p">(</span><span class="n">source_type</span><span class="o">.</span><span class="n">value_type</span><span class="p">,</span> <span class="n">declared_type</span><span class="o">.</span><span class="n">value_type</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_struct</span><span class="p">(</span><span class="n">source_type</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_struct</span><span class="p">(</span><span class="n">declared_type</span><span class="p">):</span>
+        <span class="n">declared</span> <span class="o">=</span> <span class="p">{</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">field</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">_struct_fields</span><span class="p">(</span><span class="n">declared_type</span><span class="p">)}</span>
+        <span class="n">found</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">_struct_fields</span><span class="p">(</span><span class="n">source_type</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">field</span><span class="o">.</span><span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">declared</span><span class="p">:</span>
+                <span class="n">found</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">found</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">_unexpected_fields</span><span class="p">(</span><span class="n">field</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">declared</span><span class="p">[</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">]))</span>
+        <span class="k">return</span> <span class="n">found</span>
+    <span class="k">if</span> <span class="n">_is_list_like</span><span class="p">(</span><span class="n">source_type</span><span class="p">)</span> <span class="ow">and</span> <span class="n">_is_list_like</span><span class="p">(</span><span class="n">declared_type</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_unexpected_fields</span><span class="p">(</span><span class="n">source_type</span><span class="o">.</span><span class="n">value_type</span><span class="p">,</span> <span class="n">declared_type</span><span class="o">.</span><span class="n">value_type</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_map</span><span class="p">(</span><span class="n">source_type</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_map</span><span class="p">(</span><span class="n">declared_type</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">_unexpected_fields</span><span class="p">(</span><span class="n">source_type</span><span class="o">.</span><span class="n">key_type</span><span class="p">,</span> <span class="n">declared_type</span><span class="o">.</span><span class="n">key_type</span><span class="p">)</span>
+                <span class="o">+</span> <span class="n">_unexpected_fields</span><span class="p">(</span><span class="n">source_type</span><span class="o">.</span><span class="n">item_type</span><span class="p">,</span> <span class="n">declared_type</span><span class="o">.</span><span class="n">item_type</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">[]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_iterable_rows</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The rows a key check can look inside; the rest carry no keys of their own.</span>
+
+<span class="sd">    A missing row is ``None`` in a list, ``NaN`` in a pandas Series of object</span>
+<span class="sd">    dtype and ``pd.NA`` in a nullable one, and ``pa.array`` turns every one of</span>
+<span class="sd">    them into a null. None of them is iterable, so a row that cannot be</span>
+<span class="sd">    iterated is passed over here and left to ``pa.array``, which converts what</span>
+<span class="sd">    it can and names the column when it cannot. A str, a bytes and an ndarray</span>
+<span class="sd">    of a non-object dtype iterate, but over scalars that carry no keys, so</span>
+<span class="sd">    they are passed over too: ``pa.array`` refuses such a row at its first</span>
+<span class="sd">    element, where spreading it into a list here first took seconds and</span>
+<span class="sd">    hundreds of megabytes for a long one.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="p">[</span>
+        <span class="n">row</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="s2">"__iter__"</span><span class="p">)</span>
+        <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">))</span>
+        <span class="ow">and</span> <span class="ow">not</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="ow">and</span> <span class="n">row</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">kind</span> <span class="o">!=</span> <span class="s2">"O"</span><span class="p">)</span>
+    <span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_check_keys</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Refuse, at any depth, a dict key that no declared struct field has.</span>
+
+<span class="sd">    Arrow matches struct fields by exact name and fills a missing one with</span>
+<span class="sd">    null, so a list of dicts keyed ``Amount`` against a field called</span>
+<span class="sd">    ``amount`` builds a whole column of nulls under an identical schema,</span>
+<span class="sd">    without a word. The same typo on a top-level key raises; this makes the</span>
+<span class="sd">    nested one raise too, however deep the struct sits inside a list, a map or</span>
+<span class="sd">    another struct.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_struct</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="n">fields</span> <span class="o">=</span> <span class="p">{</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">:</span> <span class="n">field</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">_struct_fields</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)}</span>
+        <span class="n">dicts</span> <span class="o">=</span> <span class="p">[</span><span class="n">row</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">)]</span>
+        <span class="n">seen</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">dicts</span><span class="p">:</span>
+            <span class="n">seen</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+        <span class="n">unexpected_keys</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">seen</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="n">fields</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">unexpected_keys</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"declared </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span><span class="si">}</span><span class="s2"> but the dicts carry keys </span><span class="si">{</span><span class="n">unexpected_keys</span><span class="si">}</span><span class="s2"> "</span>
+                <span class="sa">f</span><span class="s2">"that no declared field has; Arrow matches struct fields by exact name and "</span>
+                <span class="sa">f</span><span class="s2">"fills a missing one with null"</span>
+            <span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">child_type</span> <span class="ow">in</span> <span class="n">fields</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">_carries_keys</span><span class="p">(</span><span class="n">child_type</span><span class="p">):</span>
+                <span class="n">_check_keys</span><span class="p">([</span><span class="n">row</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">dicts</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">row</span><span class="p">],</span> <span class="n">child_type</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">_is_list_like</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="n">_check_keys</span><span class="p">([</span><span class="n">item</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">_iterable_rows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">row</span><span class="p">],</span> <span class="n">arrow_type</span><span class="o">.</span><span class="n">value_type</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_map</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="n">keys</span><span class="p">,</span> <span class="n">items</span> <span class="o">=</span> <span class="n">_map_entries</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">_carries_keys</span><span class="p">(</span><span class="n">arrow_type</span><span class="o">.</span><span class="n">key_type</span><span class="p">):</span>
+            <span class="n">_check_keys</span><span class="p">(</span><span class="n">keys</span><span class="p">,</span> <span class="n">arrow_type</span><span class="o">.</span><span class="n">key_type</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">_carries_keys</span><span class="p">(</span><span class="n">arrow_type</span><span class="o">.</span><span class="n">item_type</span><span class="p">):</span>
+            <span class="n">_check_keys</span><span class="p">(</span><span class="n">items</span><span class="p">,</span> <span class="n">arrow_type</span><span class="o">.</span><span class="n">item_type</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_map_entries</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The keys and the values of map rows given as dicts or as lists of pairs.</span>
+
+<span class="sd">    Anything that is not a pair is left for ``pa.array`` to refuse, which</span>
+<span class="sd">    names the column; indexing it here would not.</span>
+<span class="sd">    """</span>
+    <span class="n">keys</span><span class="p">,</span> <span class="n">items</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">_iterable_rows</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">):</span>
+            <span class="n">keys</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+            <span class="n">items</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">pair</span> <span class="ow">in</span> <span class="n">row</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="p">(</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">))</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">pair</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+                    <span class="n">keys</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pair</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                    <span class="n">items</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pair</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">keys</span><span class="p">,</span> <span class="n">items</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_struct_column</span><span class="p">(</span><span class="n">children</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="o">**</span><span class="n">layout</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A struct array from its children, or *rows* empty structs when there is no child to take a length from."""</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">children</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span><span class="o">.</span><span class="n">from_buffers</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">struct</span><span class="p">([]),</span> <span class="n">rows</span><span class="p">,</span> <span class="p">[</span><span class="kc">None</span><span class="p">],</span> <span class="n">children</span><span class="o">=</span><span class="p">[])</span>
+    <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span><span class="o">.</span><span class="n">from_arrays</span><span class="p">(</span><span class="n">children</span><span class="p">,</span> <span class="o">**</span><span class="n">layout</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_record_to_struct</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A numpy record array as a struct column, one child per field.</span>
+
+<span class="sd">    A record array is what an ``@njit`` function returns for a numba record</span>
+<span class="sd">    type, and the one ndarray shape that means struct, but ``pa.array``</span>
+<span class="sd">    refuses it with "Unsupported numpy type". Each field goes through the</span>
+<span class="sd">    same conversion as a column of its own, so a unicode field keeps its NULs</span>
+<span class="sd">    and a declared child type is honoured. A record array with no fields</span>
+<span class="sd">    becomes that many empty structs: a struct array with no children has no</span>
+<span class="sd">    length of its own.</span>
+<span class="sd">    """</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">names</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">arrow_type</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">children</span> <span class="o">=</span> <span class="p">[</span><span class="n">_convert</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="n">name</span><span class="p">],</span> <span class="kc">None</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">names</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">_struct_column</span><span class="p">(</span><span class="n">children</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">names</span><span class="o">=</span><span class="n">names</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_struct</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"a record array with fields </span><span class="si">{</span><span class="n">names</span><span class="si">}</span><span class="s2"> cannot become </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="n">fields</span> <span class="o">=</span> <span class="n">_struct_fields</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span>
+    <span class="n">unexpected_keys</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">names</span><span class="p">)</span> <span class="o">-</span> <span class="p">{</span><span class="n">field</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">fields</span><span class="p">})</span>
+    <span class="k">if</span> <span class="n">unexpected_keys</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"declared </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span><span class="si">}</span><span class="s2"> but the record array carries fields "</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">unexpected_keys</span><span class="si">}</span><span class="s2"> that no declared field has"</span>
+        <span class="p">)</span>
+    <span class="n">children</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">fields</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">field</span><span class="o">.</span><span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">names</span><span class="p">:</span>
+            <span class="n">children</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">nulls</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="nb">type</span><span class="o">=</span><span class="n">field</span><span class="o">.</span><span class="n">type</span><span class="p">))</span>
+            <span class="k">continue</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">children</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_convert</span><span class="p">(</span><span class="n">value</span><span class="p">[</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">],</span> <span class="n">field</span><span class="o">.</span><span class="n">type</span><span class="p">))</span>
+        <span class="k">except</span> <span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">ArrowException</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">OverflowError</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">renamed</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"field </span><span class="si">{</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+    <span class="k">return</span> <span class="n">_struct_column</span><span class="p">(</span><span class="n">children</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">),</span> <span class="n">fields</span><span class="o">=</span><span class="n">fields</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_convert</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Build one Arrow array from a UDF output value.</span>
+
+<span class="sd">    With a declared type the array is built as that type from the start</span>
+<span class="sd">    rather than inferred and cast afterwards: a string column declared</span>
+<span class="sd">    ``large_string`` is built as one, a list of dicts declared ``struct`` is</span>
+<span class="sd">    built field by field and its keys are checked at every depth, and a list</span>
+<span class="sd">    of dicts or of pairs declared ``map`` becomes a map, which no inferred</span>
+<span class="sd">    struct can be cast to. A ready-built Arrow array is cast to the declared</span>
+<span class="sd">    type only once its field names, at every depth, are found among the</span>
+<span class="sd">    declared ones, since a cast matches struct fields by name as well.</span>
+
+<span class="sd">    A numpy fixed-width unicode or bytes array handed straight to ``pa.array``</span>
+<span class="sd">    is read with C string semantics, so a value is cut at its first NUL:</span>
+<span class="sd">    ``"a\x00b"`` arrives as ``"a"`` and a leading NUL empties the value</span>
+<span class="sd">    outright. Going via ``tolist()`` hands Arrow real Python strings and</span>
+<span class="sd">    bytes, which carry NULs, at about 18% more time on a 200k-row column. A</span>
+<span class="sd">    trailing NUL is already gone before this point, dropped by numpy when the</span>
+<span class="sd">    array was built, which matches the adapter refusing one on the way in.</span>
+
+<span class="sd">    Without a declared type a unicode or bytes column is still named</span>
+<span class="sd">    ``string`` or ``binary`` rather than inferred, because ``pa.array([])``</span>
+<span class="sd">    infers ``null`` where the same column with rows infers ``string``: a UDF</span>
+<span class="sd">    that filters a whole batch away would yield a schema its other batches do</span>
+<span class="sd">    not share, and Spark's writer refuses the second schema it sees.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">ChunkedArray</span><span class="p">):</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">combine_chunks</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">arrow_type</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">value</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="n">arrow_type</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">value</span>
+        <span class="n">unexpected</span> <span class="o">=</span> <span class="n">_unexpected_fields</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">unexpected</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"declared </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span><span class="si">}</span><span class="s2"> but the array is </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2">, whose "</span>
+                <span class="sa">f</span><span class="s2">"fields </span><span class="si">{</span><span class="n">unexpected</span><span class="si">}</span><span class="s2"> no declared field has; a cast matches struct fields by exact "</span>
+                <span class="sa">f</span><span class="s2">"name and fills a missing one with null"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">value</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="ow">and</span> <span class="n">value</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">kind</span> <span class="o">!=</span> <span class="s2">"O"</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_ndarray_to_arrow</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">)</span>
+    <span class="c1"># An object array, a list, a tuple, a pandas Series or any other iterable</span>
+    <span class="c1"># of Python objects.</span>
+    <span class="k">if</span> <span class="n">arrow_type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">_carries_keys</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="s2">"__len__"</span><span class="p">):</span>
+            <span class="c1"># A generator would be consumed by the check, so it is read once.</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="n">_check_keys</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">arrow_type</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ndarray_to_arrow</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""An ndarray of a non-object dtype as an Arrow array; see ``_convert``."""</span>
+    <span class="k">if</span> <span class="n">value</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">names</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_record_to_struct</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">)</span>
+    <span class="n">kind</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">kind</span>
+    <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">"U"</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="nb">type</span><span class="o">=</span><span class="n">arrow_type</span> <span class="ow">or</span> <span class="n">pa</span><span class="o">.</span><span class="n">string</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">"S"</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="nb">type</span><span class="o">=</span><span class="n">arrow_type</span> <span class="ow">or</span> <span class="n">pa</span><span class="o">.</span><span class="n">binary</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">value</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"datetime64[D]"</span><span class="p">)</span> <span class="ow">and</span> <span class="n">arrow_type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># Under a declared timestamp or int32 ``pa.array`` reads a day-unit</span>
+        <span class="c1"># array's 8-byte values as the 4-byte days of a date32, so every other</span>
+        <span class="c1"># row came back the epoch, or a zero. Inferred first the array is a</span>
+        <span class="c1"># date32, and the cast gives the day numbers under int32, midnights</span>
+        <span class="c1"># under a timestamp, and leaves pyarrow's own refusals in place.</span>
+        <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">arrow_type</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_split_pair</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The data and the bitmap of a :class:`Nullable`; any other shape carries no bitmap.</span>
+
+<span class="sd">    A bare tuple is not read as a pair: it goes to ``pa.array`` as the</span>
+<span class="sd">    sequence it is, since a 2-tuple was a two-row column before ``Nullable``</span>
+<span class="sd">    existed and any rule on a bare tuple would misread one shape or another.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">Nullable</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">value</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">value</span><span class="o">.</span><span class="n">bitmap</span>
+    <span class="k">return</span> <span class="n">value</span><span class="p">,</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_with_validity</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">bitmap</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The same array with *bitmap*, a packed validity bitmap, folded in.</span>
+
+<span class="sd">    The bitmap has the layout ``bitmap_dict`` hands out and</span>
+<span class="sd">    :func:`~numbarrow.core.is_null.is_null` reads: one bit per row, LSB first,</span>
+<span class="sd">    set for a valid row, ``(rows + 7) // 8`` bytes of uint8. A fixed-width or</span>
+<span class="sd">    string array with no nulls yet takes the bitmap as its validity buffer</span>
+<span class="sd">    and keeps its data buffer, so neither side is copied when the bitmap is</span>
+<span class="sd">    contiguous, which is the case for every bitmap ``bitmap_dict`` hands out.</span>
+<span class="sd">    Any other array, one that already carries nulls, a sliced Arrow array or</span>
+<span class="sd">    a nested type, is masked through ``if_else``, which keeps the nulls it</span>
+<span class="sd">    had. The bitmap carries no row count of its own: the length check here is</span>
+<span class="sd">    per byte, eight rows to a byte, and the caller checks a bitmap the batch</span>
+<span class="sd">    handed out against the count it was handed out for. A bitmap that is not</span>
+<span class="sd">    an ndarray at all is refused before any attribute of it is read, since the</span>
+<span class="sd">    AttributeError that reading one raises is outside the classes the caller</span>
+<span class="sd">    catches and would escape naming neither the column nor the layout.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">bitmap</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"the bitmap of a (data, bitmap) pair must be the packed uint8 array bitmap_dict "</span>
+            <span class="sa">f</span><span class="s2">"hands out, or None, not a </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">bitmap</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">bitmap</span><span class="o">.</span><span class="n">dtype</span> <span class="o">!=</span> <span class="n">np</span><span class="o">.</span><span class="n">uint8</span> <span class="ow">or</span> <span class="n">bitmap</span><span class="o">.</span><span class="n">ndim</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"the bitmap of a (data, bitmap) pair must be the packed uint8 array bitmap_dict "</span>
+            <span class="sa">f</span><span class="s2">"hands out, or None, not a </span><span class="si">{</span><span class="n">bitmap</span><span class="o">.</span><span class="n">ndim</span><span class="si">}</span><span class="s2">-dimensional </span><span class="si">{</span><span class="n">bitmap</span><span class="o">.</span><span class="n">dtype</span><span class="si">}</span><span class="s2"> array"</span>
+        <span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">array</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">bitmap</span><span class="p">)</span> <span class="o">!=</span> <span class="p">(</span><span class="n">rows</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"the bitmap has </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">bitmap</span><span class="p">)</span><span class="si">}</span><span class="s2"> bytes, which covers </span><span class="si">{</span><span class="mi">8</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">bitmap</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows, but the "</span>
+            <span class="sa">f</span><span class="s2">"column has </span><span class="si">{</span><span class="n">rows</span><span class="si">}</span><span class="s2"> rows"</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">rows</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">array</span>
+    <span class="n">flat</span> <span class="o">=</span> <span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">null_count</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">array</span><span class="o">.</span><span class="n">offset</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">array</span><span class="o">.</span><span class="n">type</span><span class="o">.</span><span class="n">num_fields</span> <span class="o">==</span> <span class="mi">0</span>
+            <span class="ow">and</span> <span class="ow">not</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_dictionary</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_null</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">type</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">flat</span><span class="p">:</span>
+        <span class="n">buffers</span> <span class="o">=</span> <span class="p">[</span><span class="n">pa</span><span class="o">.</span><span class="n">py_buffer</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ascontiguousarray</span><span class="p">(</span><span class="n">bitmap</span><span class="p">))]</span> <span class="o">+</span> <span class="nb">list</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">1</span><span class="p">:])</span>
+        <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span><span class="o">.</span><span class="n">from_buffers</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="n">buffers</span><span class="p">)</span>
+    <span class="n">valid</span> <span class="o">=</span> <span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">unpackbits</span><span class="p">(</span><span class="n">bitmap</span><span class="p">,</span> <span class="n">bitorder</span><span class="o">=</span><span class="s2">"little"</span><span class="p">)[:</span><span class="n">rows</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">pc</span><span class="o">.</span><span class="n">if_else</span><span class="p">(</span><span class="n">valid</span><span class="p">,</span> <span class="n">array</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">scalar</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">array</span><span class="o">.</span><span class="n">type</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_to_arrow</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">arrow_type</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">handed</span><span class="o">=</span><span class="n">MappingProxyType</span><span class="p">({})):</span>
+<span class="w">    </span><span class="sd">"""Convert one UDF output column to an Arrow array, naming the column on any failure.</span>
+
+<span class="sd">    A :class:`Nullable` is built from its data and then given its bitmap as</span>
+<span class="sd">    validity. A bitmap the batch handed out is right only for a column of the</span>
+<span class="sd">    count it was handed out for, which is the batch's rows for a column's own</span>
+<span class="sd">    bitmap and the flattened elements for a struct field's, and a packed</span>
+<span class="sd">    bitmap cannot tell one row count from another inside the same byte, so</span>
+<span class="sd">    that case is refused here by identity rather than left to the byte check.</span>
+<span class="sd">    ``pa.array`` iterates a Mapping, so a dict of arrays returned under one</span>
+<span class="sd">    key silently became a string column of the dict's keys, with a different</span>
+<span class="sd">    row count and nothing raised; it is refused outright. Every other failure</span>
+<span class="sd">    on the output side named no column at all.</span>
+<span class="sd">    """</span>
+    <span class="n">value</span><span class="p">,</span> <span class="n">bitmap</span> <span class="o">=</span> <span class="n">_split_pair</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"output column </span><span class="si">{</span><span class="n">name</span><span class="si">!r}</span><span class="s2"> is a </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, which pa.array would read as "</span>
+            <span class="sa">f</span><span class="s2">"its keys; return an ndarray, a list or a pyarrow Array per column, and for a "</span>
+            <span class="sa">f</span><span class="s2">"struct column a list of dicts or a record array"</span>
+        <span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">array</span> <span class="o">=</span> <span class="n">_convert</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">arrow_type</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">bitmap</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">array</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">covers</span> <span class="o">=</span> <span class="n">handed</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="n">bitmap</span><span class="p">),</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">covers</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">array</span><span class="p">)</span> <span class="o">!=</span> <span class="n">covers</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"the bitmap is one this batch handed out for </span><span class="si">{</span><span class="n">covers</span><span class="si">}</span><span class="s2"> rows, but the column has "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">array</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows; a resized column needs a bitmap of its own"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">_with_validity</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="n">bitmap</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">ArrowException</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">OverflowError</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">renamed</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"output column </span><span class="si">{</span><span class="n">name</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_handed_bitmaps</span><span class="p">(</span><span class="n">data_dict</span><span class="p">,</span> <span class="n">bitmap_dict</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Each bitmap the batch hands out, by id, with the bitmap itself and the count of rows it covers.</span>
+
+<span class="sd">    A column's bitmap covers the batch's rows, a struct field's covers the</span>
+<span class="sd">    field's own elements, and for a list of structs those are the flattened</span>
+<span class="sd">    elements rather than the outer rows. The count therefore comes from the</span>
+<span class="sd">    data handed out beside the bitmap, never from the batch. The bitmap rides</span>
+<span class="sd">    along to stay alive for the batch: an id is reusable once its object is</span>
+<span class="sd">    freed, and a UDF that drops a bitmap from ``bitmap_dict`` frees it, after</span>
+<span class="sd">    which a bitmap of its own could land on that id and be refused as the</span>
+<span class="sd">    handed-out one.</span>
+<span class="sd">    """</span>
+    <span class="n">handed</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">bitmaps</span> <span class="ow">in</span> <span class="n">bitmap_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">datas</span> <span class="o">=</span> <span class="n">data_dict</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+        <span class="n">leaves</span> <span class="o">=</span> <span class="n">bitmaps</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">bitmaps</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="k">else</span> <span class="p">[(</span><span class="kc">None</span><span class="p">,</span> <span class="n">bitmaps</span><span class="p">)]</span>
+        <span class="k">for</span> <span class="n">field</span><span class="p">,</span> <span class="n">bitmap</span> <span class="ow">in</span> <span class="n">leaves</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">bitmap</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">handed</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">bitmap</span><span class="p">)]</span> <span class="o">=</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">datas</span> <span class="k">if</span> <span class="n">field</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">datas</span><span class="p">[</span><span class="n">field</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="n">handed</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_batch</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">output_schema</span><span class="p">,</span> <span class="n">handed</span><span class="o">=</span><span class="n">MappingProxyType</span><span class="p">({})):</span>
+<span class="w">    </span><span class="sd">"""The RecordBatch a UDF's result becomes, bound to ``output_schema`` when there is one.</span>
+
+<span class="sd">    ``handed`` maps the id of each bitmap the batch handed the UDF to that</span>
+<span class="sd">    bitmap and the row count it covers; see ``_to_arrow``.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"main_func must return a dict of column name to array, not "</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">output_schema</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">names</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">"output column </span><span class="si">{</span><span class="n">name</span><span class="si">!r}</span><span class="s2"> is a </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, not a str: the keys of the dict "</span>
+                    <span class="sa">f</span><span class="s2">"main_func returns are its column names"</span>
+                <span class="p">)</span>
+        <span class="n">arrays</span> <span class="o">=</span> <span class="p">[</span><span class="n">_to_arrow</span><span class="p">(</span><span class="n">outputs</span><span class="p">[</span><span class="n">name</span><span class="p">],</span> <span class="n">name</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">handed</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">names</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">extra</span> <span class="o">=</span> <span class="p">[</span><span class="n">name</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">outputs</span> <span class="k">if</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">output_schema</span><span class="o">.</span><span class="n">names</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">extra</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"main_func returned columns </span><span class="si">{</span><span class="n">extra</span><span class="si">}</span><span class="s2"> that output_schema does not name; "</span>
+                <span class="sa">f</span><span class="s2">"it names </span><span class="si">{</span><span class="n">output_schema</span><span class="o">.</span><span class="n">names</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="n">output_schema</span><span class="o">.</span><span class="n">names</span>
+        <span class="n">arrays</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">output_schema</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">field</span><span class="o">.</span><span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">outputs</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">MissingKeyError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">"output_schema names column </span><span class="si">{</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="si">!r}</span><span class="s2">, which main_func did not "</span>
+                    <span class="sa">f</span><span class="s2">"return; it returned </span><span class="si">{</span><span class="nb">list</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span>
+                <span class="p">)</span>
+            <span class="n">arrays</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_to_arrow</span><span class="p">(</span><span class="n">outputs</span><span class="p">[</span><span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">],</span> <span class="n">field</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">field</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">handed</span><span class="p">))</span>
+    <span class="n">lengths</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">array</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">array</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">names</span><span class="p">,</span> <span class="n">arrays</span><span class="p">)}</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">lengths</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="c1"># pyarrow's own refusal says "2 vs 3" and names neither column.</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"output columns differ in length: </span><span class="si">{</span><span class="n">lengths</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">output_schema</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">RecordBatch</span><span class="o">.</span><span class="n">from_arrays</span><span class="p">(</span><span class="n">arrays</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="n">names</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">RecordBatch</span><span class="o">.</span><span class="n">from_arrays</span><span class="p">(</span><span class="n">arrays</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">output_schema</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_fold_struct_validity</span><span class="p">(</span><span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">field_bitmap</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Combine a struct's own validity bits into one field's bits.</span>
+
+<span class="sd">    A row that is null as a whole leaves its fields' own bitmaps untouched, so</span>
+<span class="sd">    a field bitmap alone cannot see it. Arrow validity is 1 for valid, so the</span>
+<span class="sd">    two layers combine with a bitwise and.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">struct_bitmap</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">field_bitmap</span>
+    <span class="k">if</span> <span class="n">field_bitmap</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># Copied per field so that two fields do not share one array, where a</span>
+        <span class="c1"># caller writing through one would change the other.</span>
+        <span class="k">return</span> <span class="n">struct_bitmap</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">struct_bitmap</span> <span class="o">&amp;</span> <span class="n">field_bitmap</span>
+
+
+<div class="viewcode-block" id="make_mapinarrow_func">
+<a class="viewcode-back" href="../../../numbarrow.core.mapinarrow_factory.html#numbarrow.core.mapinarrow_factory.make_mapinarrow_func">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_mapinarrow_func</span><span class="p">(</span>
+    <span class="n">main_func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span>
+    <span class="n">input_columns</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">broadcasts</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">output_schema</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Schema</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Creates a function that can be given as an argument to `mapInArrow`</span>
+
+<span class="sd">    :param main_func: called once per :class:`pyarrow.RecordBatch` as</span>
+<span class="sd">        ``main_func(data_dict, bitmap_dict, broadcasts)``, returning a dict</span>
+<span class="sd">        that maps each output column's name to an ndarray, a list or a</span>
+<span class="sd">        :class:`pyarrow.Array`, from which a PyArrow ``RecordBatch`` is built.</span>
+<span class="sd">        A numpy record array becomes a struct column, one child per field.</span>
+<span class="sd">        A null comes out of a list, a tuple or an object array holding</span>
+<span class="sd">        ``None``, a :class:`pyarrow.Array`, a numpy masked array, and a</span>
+<span class="sd">        :class:`Nullable`, ``Nullable(data, bitmap)``, whose ``bitmap`` is a</span>
+<span class="sd">        packed uint8 validity bitmap in the layout ``bitmap_dict`` hands out,</span>
+<span class="sd">        ``(rows + 7) // 8`` bytes with a set bit for a valid row, or ``None``.</span>
+<span class="sd">        A bare array carries no nulls out: a row that came in null goes out</span>
+<span class="sd">        valid, holding whatever the UDF computed from the placeholder under</span>
+<span class="sd">        the null.  A result that is null exactly where one input column is</span>
+<span class="sd">        passes that column's bitmap through,</span>
+<span class="sd">        ``{"out": Nullable(result, bitmap_dict["value"])}``, or</span>
+<span class="sd">        ``bitmap_dict["column"]["field"]`` for a struct field, and any other</span>
+<span class="sd">        result builds its own in that layout, the one</span>
+<span class="sd">        :func:`~numbarrow.core.is_null.is_null` reads, for instance</span>
+<span class="sd">        ``np.packbits(valid, bitorder="little")`` from a boolean array.  A bitmap</span>
+<span class="sd">        that is not an ndarray, or is one of another length or dtype, raises</span>
+<span class="sd">        naming the column, and so does a bitmap the batch handed out on a</span>
+<span class="sd">        column whose row count is not the count that bitmap covers, the</span>
+<span class="sd">        batch's rows for a column's own bitmap and the flattened elements for</span>
+<span class="sd">        a struct field's, since a packed bitmap cannot tell row counts apart</span>
+<span class="sd">        inside one byte.</span>
+
+<span class="sd">        Spark binds the columns of that batch to the declared output schema by</span>
+<span class="sd">        POSITION, not by name, and checks nothing about their names: it reads</span>
+<span class="sd">        each Arrow vector through the accessor its declared type expects, so</span>
+<span class="sd">        an int64 column declared as a timestamp reads as a timestamp, and two</span>
+<span class="sd">        columns whose types share an accessor family swap silently when the</span>
+<span class="sd">        dict is built in the other order.  A column read through the accessor</span>
+<span class="sd">        of another family fails in the JVM with</span>
+<span class="sd">        ``java.lang.UnsupportedOperationException`` whatever its width, as</span>
+<span class="sd">        float64 under ``LongType`` and int64 under ``DoubleType`` do, both 64</span>
+<span class="sd">        bits wide, and so does a width mismatch inside one family, such as</span>
+<span class="sd">        int32 under ``LongType``.  Build the returned dict in the order the</span>
+<span class="sd">        output schema declares, or pass ``output_schema`` and let Arrow bind</span>
+<span class="sd">        it by name instead.</span>
+
+<span class="sd">        ``data_dict`` maps each selected column's name to its data.  A column</span>
+<span class="sd">        of a uniform type maps to one array.  A struct or list-of-struct</span>
+<span class="sd">        column maps to a dict of its fields, ``data_dict[column][field]``, so</span>
+<span class="sd">        a field never shares a namespace with another column or with another</span>
+<span class="sd">        struct's fields.</span>
+
+<span class="sd">        ``bitmap_dict`` has the same shape: a uint8 aligned array of bitmap</span>
+<span class="sd">        data, or ``None`` where the column carries no validity buffer, and for</span>
+<span class="sd">        a struct column a dict of those keyed by field.  Every key of</span>
+<span class="sd">        ``data_dict`` is present, so a null-free batch is indexable exactly</span>
+<span class="sd">        like a batch containing nulls.</span>
+
+<span class="sd">        For a ``StructArray`` column the struct-level validity is folded into</span>
+<span class="sd">        each field's bitmap, so one</span>
+<span class="sd">        :func:`~numbarrow.core.is_null.is_null` call per field sees both a null</span>
+<span class="sd">        field and a row that is null as a whole.</span>
+
+<span class="sd">        For a ``ListArray`` of structs the fold covers the flattened struct</span>
+<span class="sd">        elements, NOT the outer list rows.  A null outer row can be reported</span>
+<span class="sd">        nowhere, and because the adapter returns the flattened elements with</span>
+<span class="sd">        no offsets, such a row also shifts the element-to-row mapping, so a</span>
+<span class="sd">        list column whose ``null_count`` is non-zero raises</span>
+<span class="sd">        ``NotImplementedError``.</span>
+
+<span class="sd">    :param input_columns: optional list of column names that will be expected</span>
+<span class="sd">        to be needed for in `data_dict` for the calculation done by</span>
+<span class="sd">        `main_func`. When not given, all columns in the iterated over PySpark</span>
+<span class="sd">        DataFrame will be used.  Names are matched exactly; a name the batch</span>
+<span class="sd">        does not have raises :class:`KeyError` listing the batch's columns,</span>
+<span class="sd">        since Spark's case-insensitive projection may have spelled it</span>
+<span class="sd">        differently, and a name the batch carries more than once, as an</span>
+<span class="sd">        unaliased join produces, raises :class:`ValueError`.</span>
+<span class="sd">    :param broadcasts: optional dictionary of broadcast values</span>
+<span class="sd">    :param output_schema: optional :class:`pyarrow.Schema` for the batch that is</span>
+<span class="sd">        yielded.  When given, the dict returned by ``main_func`` is bound to it</span>
+<span class="sd">        BY NAME, so insertion order stops deciding, and every column is built</span>
+<span class="sd">        with its declared type rather than inferred and cast: a string column</span>
+<span class="sd">        declared ``large_string`` is built as one, a list of dicts declared</span>
+<span class="sd">        ``struct`` is built field by field, and a list of dicts or of pairs</span>
+<span class="sd">        declared ``map`` becomes a map, which no inferred type can be cast to.</span>
+<span class="sd">        A name the schema declares but the dict omits raises :class:`KeyError`,</span>
+<span class="sd">        a key the schema does not name raises :class:`ValueError`, and a dict</span>
+<span class="sd">        key that no declared struct field has raises :class:`ValueError` too,</span>
+<span class="sd">        since Arrow matches struct fields by exact name and would otherwise</span>
+<span class="sd">        fill the column with nulls.</span>
+
+<span class="sd">        What the declared type refuses is what ``pa.array`` refuses, and that</span>
+<span class="sd">        depends on the shape the column arrives in.  For an ndarray of a</span>
+<span class="sd">        numeric or datetime dtype, or a :class:`pyarrow.Array`, an integer</span>
+<span class="sd">        out of the declared type's range, a float with a fraction into an</span>
+<span class="sd">        integer type and a timestamp unit change that drops digits all raise</span>
+<span class="sd">        :class:`pyarrow.ArrowInvalid`.  A Python list, and any other sequence</span>
+<span class="sd">        of Python objects, an object-dtype ndarray included, goes through</span>
+<span class="sd">        ``pa.array``'s sequence converter instead: an integer out of the</span>
+<span class="sd">        declared type's range still raises :class:`pyarrow.ArrowInvalid` and</span>
+<span class="sd">        one beyond int64 altogether raises :class:`OverflowError`, but a</span>
+<span class="sd">        float's fraction and a timestamp's extra digits are dropped silently.</span>
+<span class="sd">        So the lossy conversions that pass without a word are a timestamp</span>
+<span class="sd">        into ``date32`` or ``date64``, which floors to the day, ``float64``</span>
+<span class="sd">        into ``float32``, which overflows to ``inf``, and, from a list alone,</span>
+<span class="sd">        a fraction into an integer type and a timestamp unit change that</span>
+<span class="sd">        drops digits.</span>
+
+<span class="sd">        Left as ``None`` the batch is built from the dict alone: insertion</span>
+<span class="sd">        order decides, and every type is inferred from the value, so a unicode</span>
+<span class="sd">        or bytes array comes back ``string`` or ``binary`` whatever type went</span>
+<span class="sd">        in, a ``datetime64`` array comes back a naive ``timestamp`` of its</span>
+<span class="sd">        unit, except a day-unit one, which comes back ``date32``, and an</span>
+<span class="sd">        object array holding only ``None`` comes back ``null``.</span>
+<span class="sd">    """</span>
+    <span class="n">broadcasts</span> <span class="o">=</span> <span class="n">broadcasts</span> <span class="k">if</span> <span class="n">broadcasts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">input_columns</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="c1"># A str is iterable, so "value" was read as the columns v, a, l, u, e.</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"input_columns must be a list of column names, not the string </span><span class="si">{</span><span class="n">input_columns</span><span class="si">!r}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">output_schema</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">output_schema</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">Schema</span><span class="p">):</span>
+        <span class="c1"># A PySpark StructType is the schema mapInArrow itself takes, and it</span>
+        <span class="c1"># carries .names too, so one handed here got as far as the first batch</span>
+        <span class="c1"># and died on a field's missing .type.</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"output_schema must be a pyarrow.Schema, not a </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">output_schema</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">iterator</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">iterator</span><span class="p">:</span>
+            <span class="n">data_dict</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">bitmap_dict</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">|</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="n">requested</span> <span class="o">=</span> <span class="n">input_columns</span> <span class="k">if</span> <span class="n">input_columns</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">batch</span><span class="o">.</span><span class="n">schema</span><span class="o">.</span><span class="n">names</span>
+            <span class="c1"># dict.fromkeys keeps first-seen order. Naming a column twice</span>
+            <span class="c1"># produces the same arrays twice, so it stays harmless.</span>
+            <span class="n">input_columns_</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">requested</span><span class="p">))</span>
+            <span class="n">names</span> <span class="o">=</span> <span class="n">batch</span><span class="o">.</span><span class="n">schema</span><span class="o">.</span><span class="n">names</span>
+            <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">input_columns_</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">col</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">names</span><span class="p">:</span>
+                    <span class="c1"># Spark's projection is case-insensitive and may have</span>
+                    <span class="c1"># rewritten the name it was given; the batch's own names</span>
+                    <span class="c1"># make that visible.</span>
+                    <span class="k">raise</span> <span class="n">MissingKeyError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"column </span><span class="si">{</span><span class="n">col</span><span class="si">!r}</span><span class="s2"> is not in this batch, whose columns are </span><span class="si">{</span><span class="n">names</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">names</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">col</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="c1"># An unaliased join produces this shape, and batch.column</span>
+                    <span class="c1"># dies on pyarrow's own KeyError, which names no remedy.</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">"column </span><span class="si">{</span><span class="n">col</span><span class="si">!r}</span><span class="s2"> appears </span><span class="si">{</span><span class="n">names</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">col</span><span class="p">)</span><span class="si">}</span><span class="s2"> times in this batch; alias one of "</span>
+                        <span class="sa">f</span><span class="s2">"them in the projection that feeds mapInArrow"</span>
+                    <span class="p">)</span>
+                <span class="n">col_pa</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">batch</span><span class="o">.</span><span class="n">column</span><span class="p">(</span><span class="n">col</span><span class="p">)</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">adapted</span> <span class="o">=</span> <span class="n">arrow_array_adapter</span><span class="p">(</span><span class="n">col_pa</span><span class="p">)</span>
+                <span class="k">except</span> <span class="p">(</span><span class="ne">NotImplementedError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">ArrowException</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">renamed</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"column </span><span class="si">{</span><span class="n">col</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">adapted</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+                    <span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">field_bitmaps</span><span class="p">,</span> <span class="n">field_datas</span> <span class="o">=</span> <span class="n">adapted</span>
+                    <span class="c1"># The struct-level bitmap is folded into each field rather</span>
+                    <span class="c1"># than published on its own: one is_null call per field</span>
+                    <span class="c1"># then sees both a null field and a row that is null as a</span>
+                    <span class="c1"># whole, and for a list-of-struct column a bitmap of its</span>
+                    <span class="c1"># own would suggest it covers the outer list rows, which</span>
+                    <span class="c1"># it does not.</span>
+                    <span class="n">data_dict</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">field_datas</span>
+                    <span class="n">bitmap_dict</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                        <span class="n">name</span><span class="p">:</span> <span class="n">_fold_struct_validity</span><span class="p">(</span><span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">field_bitmap</span><span class="p">)</span>
+                        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">field_bitmap</span> <span class="ow">in</span> <span class="n">field_bitmaps</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                    <span class="p">}</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">bitmap_dict</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">data_dict</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">adapted</span>
+            <span class="n">handed</span> <span class="o">=</span> <span class="n">_handed_bitmaps</span><span class="p">(</span><span class="n">data_dict</span><span class="p">,</span> <span class="n">bitmap_dict</span><span class="p">)</span>
+            <span class="k">yield</span> <span class="n">_build_batch</span><span class="p">(</span><span class="n">main_func</span><span class="p">(</span><span class="n">data_dict</span><span class="p">,</span> <span class="n">bitmap_dict</span><span class="p">,</span> <span class="n">broadcasts</span><span class="p">),</span> <span class="n">output_schema</span><span class="p">,</span> <span class="n">handed</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
