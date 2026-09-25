@@ -189,3 +189,15 @@ def test_a_scalar_string_output_is_refused_rather_than_spread():
         fn = make_mapinarrow_func(lambda d, b, br, value=value: {"country": value})
         with pytest.raises(TypeError, match="'country'"):
             list(fn(iter([batch])))
+
+
+def test_a_union_field_under_a_struct_is_refused_before_flatten():
+    # flatten() hands the struct's validity to each child, and a union carries
+    # none, so Arrow's C++ layer aborted the process under a struct with a null
+    # row where the typed refusal was due.
+    types = pa.array([0, 1, 0], type=pa.int8())
+    union = pa.UnionArray.from_sparse(types, [pa.array([1, 2, 3]), pa.array(["a", "b", "c"])])
+    for mask in (None, pa.array([False, True, False])):
+        struct = pa.StructArray.from_arrays([pa.array([1, 2, 3]), union], names=["ok", "u"], mask=mask)
+        with pytest.raises(NotImplementedError, match=r"struct field 'u'.*union"):
+            arrow_array_adapter(struct)

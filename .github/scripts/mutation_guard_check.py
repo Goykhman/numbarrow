@@ -538,6 +538,12 @@ MUTATIONS = [
         '    if False:\n'
         '        # The flat test below',
     ),
+    (
+        'a union child stops being refused before flatten',
+        'numbarrow/utils/arrow_array_utils.py',
+        '        if _is_union_layout(raw_child.type):',
+        '        if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

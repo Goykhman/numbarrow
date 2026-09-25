@@ -240,6 +240,12 @@ def create_str_array(pa_str_array: pa.StringArray | pa.LargeStringArray) -> tupl
 # design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
 
 
+def _is_union_layout(arrow_type):
+    while isinstance(arrow_type, pa.BaseExtensionType):
+        arrow_type = arrow_type.storage_type
+    return pa.types.is_union(arrow_type)
+
+
 def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
     np.ndarray | None, dict[str, np.ndarray | None], dict[str, np.ndarray]
 ]:
@@ -291,6 +297,18 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
     # `is_null_struct` takes both, so folding the struct layer into the field
     # bitmap here would collapse a distinction the caller needs.
     raw_children = [struct_array.field(i) for i in range(len(data_type))]
+    for field_ind, raw_child in enumerate(raw_children):
+        if _is_union_layout(raw_child.type):
+            # flatten() hands the struct's validity to each child, and a union
+            # carries no validity buffer of its own, so Arrow's C++ layer
+            # aborted the process on one under a struct with a null row, where
+            # the dispatcher's typed refusal was due. Refused before anything
+            # is flattened, null row or not.
+            raise NotImplementedError(
+                f"struct field {data_type[field_ind].name!r}: Not implemented for an array of "
+                f"{len(raw_child)} elements of type {type_repr(raw_child.type)}, a union layout, which "
+                f"cannot take the struct's validity"
+            )
     masked = list(struct_array.flatten()) if struct_array.null_count else raw_children
     for field_ind in range(len(data_type)):
         field: pa.Field = data_type[field_ind]
