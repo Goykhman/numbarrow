@@ -429,6 +429,18 @@ MUTATIONS = [
         '    if unit in ("h", "m") or (family == "timedelta64" and unit in ("W", "D")):\n        target = "s"',
         '    if False:\n        target = "s"',
     ),
+    (
+        'a str output stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if isinstance(value, (str, bytes)):\n        raise TypeError(',
+        '    if False:\n        raise TypeError(',
+    ),
+    (
+        'a 0-d or 2-d array output stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if value.ndim != 1:',
+        '    if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

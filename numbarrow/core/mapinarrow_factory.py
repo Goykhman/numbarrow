@@ -290,6 +290,11 @@ def _at_arrow_unit(value):
 
 def _ndarray_to_arrow(value, arrow_type):
     """An ndarray of a non-object dtype as an Arrow array; see ``_convert``."""
+    if value.ndim != 1:
+        # A 0-d unicode or bytes array's tolist() is a bare scalar, which
+        # pa.array spreads one character per row, defeating the refusal it
+        # gives the array itself; every other dtype it refuses on its own.
+        raise TypeError(f"a {value.ndim}-dimensional {value.dtype} array; an output column is one-dimensional")
     if value.dtype.names is not None:
         return _record_to_struct(value, arrow_type)
     kind = value.dtype.kind
@@ -377,8 +382,11 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
     that case is refused here by identity rather than left to the byte check.
     ``pa.array`` iterates a Mapping, so a dict of arrays returned under one
     key silently became a string column of the dict's keys, with a different
-    row count and nothing raised; it is refused outright. Every other failure
-    on the output side named no column at all.
+    row count and nothing raised; it is refused outright. A str or bytes
+    returned as a column is refused the same way: ``pa.array`` spreads it one
+    character per row, so ``{"country": "US"}`` over a two-row batch was the
+    rows ``U`` and ``S``. Every other failure on the output side named no
+    column at all.
     """
     value, bitmap = _split_pair(value)
     if isinstance(value, Mapping):
@@ -386,6 +394,11 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
             f"output column {name!r} is a {type(value).__name__}, which pa.array would read as "
             f"its keys; return an ndarray, a list or a pyarrow Array per column, and for a "
             f"struct column a list of dicts or a record array"
+        )
+    if isinstance(value, (str, bytes)):
+        raise TypeError(
+            f"output column {name!r} is a {type(value).__name__}, which pa.array would spread one "
+            f"character per row; a constant column is np.full(rows, value)"
         )
     try:
         array = _convert(value, arrow_type)

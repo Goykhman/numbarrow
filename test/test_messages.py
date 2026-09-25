@@ -178,3 +178,14 @@ def test_an_exception_that_cannot_be_rebuilt_from_a_message_is_renamed_as_a_valu
     wrapped = renamed(UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"), "column 'x'")
     assert type(wrapped) is ValueError
     assert str(wrapped).startswith("column 'x': ")
+
+
+def test_a_scalar_string_output_is_refused_rather_than_spread():
+    # {"country": "US"} over a two-row batch came back as the rows "U" and "S",
+    # and a 0-d unicode array's tolist() is that scalar, which defeated
+    # pa.array's own refusal of a 0-d array.
+    batch = _batch(v=[1, 2])
+    for value in ("US", b"US", np.str_("US"), np.array("US"), np.array([["a", "b"]])):
+        fn = make_mapinarrow_func(lambda d, b, br, value=value: {"country": value})
+        with pytest.raises(TypeError, match="'country'"):
+            list(fn(iter([batch])))
