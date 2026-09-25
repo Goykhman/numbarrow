@@ -881,3 +881,11 @@ def test_a_coarse_time_unit_becomes_seconds_or_days_and_a_finer_one_is_refused()
         run_outputs({"t": np.array([1, 2], dtype="datetime64[ps]")})
     with pytest.raises(TypeError, match=r"'e'.*no fixed length"):
         run_outputs({"e": np.array([1, 2], dtype="timedelta64[M]")})
+
+
+def test_a_nullable_inside_a_nullable_is_refused():
+    # A helper that returned a Nullable, wrapped once more with the input's
+    # bitmap, went to pa.array as the 2-tuple it is and came back as two rows.
+    inner = Nullable(np.arange(2, dtype=np.int64), None)
+    with pytest.raises(TypeError, match=r"'out'.*Nullable inside a Nullable"):
+        run_outputs({"out": Nullable(inner, None)})

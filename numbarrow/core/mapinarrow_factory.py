@@ -389,6 +389,13 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
     column at all.
     """
     value, bitmap = _split_pair(value)
+    if isinstance(value, Nullable):
+        # A helper's Nullable wrapped once more went to pa.array as the 2-tuple
+        # it is: two rows, the data as one and the bitmap's bytes as the other.
+        raise TypeError(
+            f"output column {name!r} is a Nullable inside a Nullable, which pa.array would read as "
+            f"a two-row column of its data and its bitmap; wrap the data once"
+        )
     if isinstance(value, Mapping):
         raise TypeError(
             f"output column {name!r} is a {type(value).__name__}, which pa.array would read as "

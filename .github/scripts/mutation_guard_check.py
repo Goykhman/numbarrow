@@ -441,6 +441,12 @@ MUTATIONS = [
         '    if value.ndim != 1:',
         '    if False:',
     ),
+    (
+        'a Nullable inside a Nullable stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        "    if isinstance(value, Nullable):\n        # A helper's Nullable",
+        "    if False:\n        # A helper's Nullable",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
