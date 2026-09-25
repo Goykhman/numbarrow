@@ -405,6 +405,12 @@ MUTATIONS = [
         '            raise renamed(exc, f"field {field.name!r}") from exc',
         '            raise',
     ),
+    (
+        "a record array converted as inferred stops naming a failing field",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        children = [_record_field(value, name, None) for name in names]",
+        "        children = [_convert(value[name], None) for name in names]",
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

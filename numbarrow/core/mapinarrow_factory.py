@@ -159,20 +159,29 @@ def _struct_column(children, rows, **layout):
     return pa.StructArray.from_arrays(children, **layout)
 
 
+def _record_field(value, name, arrow_type):
+    """One field of a record array as an Arrow array; a failure names the field."""
+    try:
+        return _convert(value[name], arrow_type)
+    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
+        raise renamed(exc, f"field {name!r}") from exc
+
+
 def _record_to_struct(value, arrow_type):
     """A numpy record array as a struct column, one child per field.
 
     A record array is what an ``@njit`` function returns for a numba record
     type, and the one ndarray shape that means struct, but ``pa.array``
     refuses it with "Unsupported numpy type". Each field goes through the
-    same conversion as a column of its own, so a unicode field keeps its NULs
-    and a declared child type is honoured. A record array with no fields
+    same conversion as a column of its own, so a unicode field keeps its NULs,
+    a declared child type is honoured, and a field that fails to convert is
+    named whether or not a type was declared. A record array with no fields
     becomes that many empty structs: a struct array with no children has no
     length of its own.
     """
     names = list(value.dtype.names)
     if arrow_type is None:
-        children = [_convert(value[name], None) for name in names]
+        children = [_record_field(value, name, None) for name in names]
         return _struct_column(children, len(value), names=names)
     if not pa.types.is_struct(arrow_type):
         raise TypeError(f"a record array with fields {names} cannot become {type_repr(arrow_type)}")
@@ -188,10 +197,7 @@ def _record_to_struct(value, arrow_type):
         if field.name not in names:
             children.append(pa.nulls(len(value), type=field.type))
             continue
-        try:
-            children.append(_convert(value[field.name], field.type))
-        except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
-            raise renamed(exc, f"field {field.name!r}") from exc
+        children.append(_record_field(value, field.name, field.type))
     return _struct_column(children, len(value), fields=fields)
 
 

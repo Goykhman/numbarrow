@@ -558,6 +558,17 @@ def test_a_record_array_becomes_a_struct_column():
         run_outputs({"r": wide}, pa.schema([("r", pa.struct([("i", pa.int32())]))]))
 
 
+def test_a_record_array_field_that_fails_is_named_without_a_declared_type():
+    # Only the declared path wrapped a child's failure with its field name; a
+    # record array converted as inferred failed naming the output column alone.
+    records = np.zeros(2, dtype=[("ok", "i8"), ("bad", "c16")])
+    with pytest.raises(pa.ArrowException, match=r"'r'.*field 'bad'"):
+        run_outputs({"r": records})
+    declared = pa.schema([("r", pa.struct([("ok", pa.int64()), ("bad", pa.float64())]))])
+    with pytest.raises(pa.ArrowException, match=r"'r'.*field 'bad'"):
+        run_outputs({"r": records}, declared)
+
+
 def test_a_record_array_with_no_fields_keeps_its_rows():
     # pa.StructArray.from_arrays([], names=[]) has no child to take a length
     # from, so the column came back with no rows and, as the only output
