@@ -670,6 +670,12 @@ MUTATIONS = [
         '    for row in (value if isinstance(value, (list, tuple)) else ()):\n'
         '        if _is_pandas(row, "Series", "DataFrame"):',
     ),
+    (
+        'the remedy for a pandas Series row under a struct stops naming to_dict',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            remedy = "row.to_dict()" if under_struct else "row.to_numpy() or list(row)"',
+        '            remedy = "row.to_numpy() or list(row)"',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

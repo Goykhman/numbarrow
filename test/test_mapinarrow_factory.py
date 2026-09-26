@@ -995,6 +995,20 @@ def test_a_pandas_series_row_inside_an_object_array_is_refused_too():
         run_outputs({"s": rows})
 
 
+def test_a_pandas_series_row_under_a_struct_names_to_dict_as_the_remedy():
+    # The refusal named row.to_numpy() and list(row) as the way over, and
+    # under a declared struct pa.array refuses both of those in turn; a Series
+    # keyed by field name goes over as row.to_dict().
+    pd = pytest.importorskip("pandas")
+    schema = pa.schema([("p", pa.struct([("lat", pa.float64()), ("lon", pa.float64())]))])
+    rows = [pd.Series({"lat": 50.0, "lon": 10.0}), pd.Series({"lat": 1.0, "lon": 2.0})]
+    with pytest.raises(TypeError, match=r"'p'.*Series.*row\.to_dict\(\)") as excinfo:
+        run_outputs({"p": rows}, schema)
+    assert "to_numpy" not in str(excinfo.value)
+    got = run_outputs({"p": [row.to_dict() for row in rows]}, schema).column("p")
+    assert got.to_pylist() == [{"lat": 50.0, "lon": 10.0}, {"lat": 1.0, "lon": 2.0}]
+
+
 def test_a_key_error_from_pa_array_names_the_column_and_the_field():
     # pa.array reads a UserDict row by index, and the KeyError it raised was
     # outside the classes the output side renamed, so it escaped as "0".

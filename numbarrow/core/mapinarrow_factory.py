@@ -333,7 +333,7 @@ def _convert(value, arrow_type):
     if not hasattr(value, "__len__"):
         # A generator would be consumed by the checks, so it is read once.
         value = list(value)
-    _refuse_pandas_rows(value)
+    _refuse_pandas_rows(value, arrow_type)
     if arrow_type is not None and _carries_keys(arrow_type):
         _check_keys(value, arrow_type)
     array = pa.array(value, type=arrow_type)
@@ -414,20 +414,24 @@ def _ndarray_to_arrow(value, arrow_type):
     return pa.array(value, type=arrow_type)
 
 
-def _refuse_pandas_rows(value):
+def _refuse_pandas_rows(value, arrow_type):
     """Refuse a pandas Series or DataFrame among the rows of a list, tuple or object array column.
 
     ``pa.array`` reads a Series row by its index labels, so a sorted or
     filtered one came back reordered, and one whose labels were not 0..n-1
     died on a bare KeyError. A row inside an object array is read the same
     way, and the check looked only inside a list or a tuple, so every shape
-    of column that reaches here is looked through.
+    of column that reaches here is looked through. The remedy depends on the
+    declared type: under a struct ``pa.array`` refuses an ndarray and a list
+    in turn, and a Series keyed by field name goes over as ``row.to_dict()``.
     """
     for row in value:
         if _is_pandas(row, "Series", "DataFrame"):
+            under_struct = arrow_type is not None and pa.types.is_struct(_storage(arrow_type))
+            remedy = "row.to_dict()" if under_struct else "row.to_numpy() or list(row)"
             raise TypeError(
                 f"a row is a pandas {type(row).__name__}, which pa.array reads by its labels "
-                f"rather than in order; hand it over as row.to_numpy() or list(row)"
+                f"rather than in order; hand it over as {remedy}"
             )
 
 
