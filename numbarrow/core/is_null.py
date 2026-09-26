@@ -23,11 +23,12 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
     ``index_`` must satisfy ``0 <= index_ < 8 * len(bitmap)``. Compiled without
     bounds checking, which is numba's default, an index past the bitmap reads
     memory that is not the bitmap's; ``NUMBARROW_JIT_OPTIONS='{"boundscheck":
-    true}'`` turns that into ``IndexError``. A negative index reads from the
-    bitmap's end like any numpy index, which is the wrong bit and in bounds,
-    so bounds checking does not catch it.
+    true}'`` turns that into ``IndexError``. A negative index down to
+    ``-8 * len(bitmap)`` reads from the bitmap's end like any numpy index,
+    which is the wrong bit and in bounds, so bounds checking does not catch
+    it; below that the read is out of bounds, and bounds checking does.
 
-    :param index_: zero-based element index
+    :param index\\_: zero-based element index
     :param bitmap: uint8 array containing the packed validity bitmap
     :returns: True if the element is null (bit is 0), False if valid (bit is 1)
     """
@@ -81,7 +82,7 @@ def is_null_struct(index_, struct_bitmap, field_bitmap):
     counting the entries in the index it just read, so a second entry is
     something two processes warming a cold cache can disagree about.
 
-    :param index_: zero-based element index, converted to ``int64``
+    :param index\\_: zero-based element index, converted to ``int64``
     :param struct_bitmap: uint8 packed bitmap for struct-level validity, or None
     :param field_bitmap: uint8 packed bitmap for field-level validity, or None
     :returns: True if null at either layer

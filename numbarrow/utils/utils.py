@@ -44,7 +44,7 @@ def numpy_array_from_ptr_factory(dtype_):
     read-only arrays tied to the Arrow array they view; this is the primitive
     it is built on.
 
-    :param dtype_: NumPy dtype for the resulting array (e.g. ``np.int32``)
+    :param dtype\\_: NumPy dtype for the resulting array (e.g. ``np.int32``)
     :returns: JIT-compiled function ``(int, int) -> np.ndarray``
     """
     def viewer(ptr_as_int: int, sz: int):

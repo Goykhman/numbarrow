@@ -92,7 +92,11 @@ caller does not own and cannot be made writable, which is also why pyarrow's
 own `to_numpy(zero_copy_only=True)` refuses to hand out a writable one; the
 copies, booleans, `date32` and strings, start read-only as well, so the
 contract does not depend on the type, though a caller who flips the flag on a
-copy writes into memory that is their own. Declare numba signatures that receive them with
+copy writes into memory that is their own. A slice or reshape of a view that
+an `@njit` function returns is a new array whose flag can be flipped, since
+numba exports every buffer it boxes as writable, and a store through it
+reaches the source; pyarrow's own view has the same route, and the whole
+argument returned unchanged does not. Declare numba signatures that receive them with
 `readonly=True`, which accepts writable arrays as well, or leave the function
 lazily typed and numba will infer it. Returned bitmaps own their memory and are
 writable.

@@ -444,9 +444,11 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, 
     Returns the validity bitmap, which owns its memory, and a zero-copy numpy
     view over the array's data buffer. The view is read-only and cannot be made
     writable: Arrow buffers are immutable by contract, and this is what
-    pyarrow's own ``Array.to_numpy(zero_copy_only=True)`` returns. Declare numba
-    signatures that receive it with ``readonly=True``, which accepts writable
-    arrays too.
+    pyarrow's own ``Array.to_numpy(zero_copy_only=True)`` returns. A slice or
+    reshape of it that an ``@njit`` function returns is a new array numba
+    boxes as writable, and its flag can be flipped, as pyarrow's own view's
+    can by the same route. Declare numba signatures that receive it with
+    ``readonly=True``, which accepts writable arrays too.
     """
     data_arrow_ty = pa_array.type
     data_np_ty = arrow_to_numpy_dtypes.get(data_arrow_ty, None)
