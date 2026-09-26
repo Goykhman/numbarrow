@@ -596,6 +596,21 @@ def _build_batch(outputs, output_schema, handed=MappingProxyType({})):
     return pa.RecordBatch.from_arrays(arrays, schema=output_schema)
 
 
+def _repeated_names(fields):
+    """Names declared more than once among *fields* or inside any of their types, at any depth."""
+    names = [field.name for field in fields]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    for field in fields:
+        arrow_type = _storage(field.type)
+        if pa.types.is_struct(arrow_type):
+            repeated.extend(_repeated_names(_struct_fields(arrow_type)))
+        elif _is_list_like(arrow_type):
+            repeated.extend(_repeated_names([arrow_type.value_field]))
+        elif pa.types.is_map(arrow_type):
+            repeated.extend(_repeated_names([arrow_type.key_field, arrow_type.item_field]))
+    return repeated
+
+
 def _schema_drift(first, later):
     """Why a batch built by inference differs from the partition's first, naming the column."""
     remedy = ("Spark's writer refuses a batch whose schema differs from the first it wrote, so return the "
@@ -772,6 +787,15 @@ def make_mapinarrow_func(
         raise TypeError(
             f"output_schema must be a pyarrow.Schema, not a {type(output_schema).__name__}"
         )
+    if output_schema is not None:
+        repeated = _repeated_names(list(output_schema))
+        if repeated:
+            # A dict holds one value per name, so every copy was filled from it
+            # and Spark died in the JVM naming neither the column nor the copy.
+            raise ValueError(
+                f"output_schema names {repeated} more than once; the dict main_func returns holds one value "
+                f"per name, so alias one of them"
+            )
 
     def _(iterator):
         inferred = None

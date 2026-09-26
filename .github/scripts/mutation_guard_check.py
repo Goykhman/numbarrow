@@ -588,6 +588,14 @@ MUTATIONS = [
         '    if not isinstance(arrow_type, pa.DataType):',
         '    if arrow_type is None:',
     ),
+    (
+        'a repeated name in output_schema stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        repeated = _repeated_names(list(output_schema))\n'
+        '        if repeated:',
+        '        repeated = _repeated_names(list(output_schema))\n'
+        '        if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

@@ -227,3 +227,14 @@ def test_the_dispatcher_describes_a_scalar_and_leaks_no_type_column():
     with pytest.raises(NotImplementedError, match="DataFrame, which is not a pyarrow Array") as excinfo:
         arrow_array_adapter(frame)
     assert "secret" not in str(excinfo.value)
+
+
+def test_an_output_schema_naming_a_field_twice_is_refused_at_factory_time():
+    # One dict entry filled every copy, and Spark died in the JVM with "not
+    # all nodes and buffers were consumed", naming neither the column nor the
+    # repeated name.
+    with pytest.raises(ValueError, match=r"\['price'\] more than once"):
+        make_mapinarrow_func(lambda d, b, br: {}, output_schema=pa.schema([("price", pa.float64()), ("price", pa.int32())]))
+    nested = pa.schema([("s", pa.list_(pa.struct([("x", pa.int64()), ("x", pa.float64())])))])
+    with pytest.raises(ValueError, match=r"\['x'\] more than once"):
+        make_mapinarrow_func(lambda d, b, br: {}, output_schema=nested)
