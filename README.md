@@ -14,7 +14,7 @@ Optional dependencies for PySpark and pandas support:
 
 ```bash
 pip install numbarrow[test]       # adds pyspark and everything the tests need
-pip install numbarrow[mapinarrow] # adds pandas, which pyspark's mapInArrow requires
+pip install numbarrow[mapinarrow] # adds pandas and setuptools, which pyspark's mapInArrow requires
 ```
 
 The adapters themselves need only numba, numpy and pyarrow.
@@ -201,16 +201,21 @@ columns and struct fields by name.
 | Python | 3.12+ |
 | numba | 0.60.0 – 0.67.0 |
 | pyarrow | 14.0 – 25.0 |
-| pyspark | 3.4 – 3.x (optional) |
-| pandas | 2.2.2+ (optional, required by pyspark's `mapInArrow`) |
+| pyspark | 3.4 – 3.x (optional; 3.5+ on Python 3.13, and for a struct output column) |
+| pandas | 2.2.2+ (optional, required by pyspark's `mapInArrow`, with setuptools for its `distutils` import on 3.12+) |
 
 `pyproject.toml` is authoritative. CI runs the newest numba the cap admits,
 with pandas 2.3.2 and pyspark 3.5.7, on Linux, Linux ARM and Windows, and both
 ends of the pyarrow row in a job of their own; the pandas and pyspark rows are
 not swept. The pyspark floor is 3.4.0 because pyspark 3.3
 bundles cloudpickle 2.0.0, which predates the `co_qualname` argument Python
-3.11 added to `code()`, so on the declared Python every UDF dies in the worker
-with `TypeError: code() argument 13 must be str, not int`. The pandas floor is
+3.11 added to `code()` and indexes `co_names` with the raw `LOAD_GLOBAL`
+argument, so on the declared Python the function `make_mapinarrow_func`
+returns fails on the driver while cloudpickle serialises it, with
+`PicklingError: Could not serialize object: IndexError: tuple index out of
+range`, and a trivial UDF dies in the worker with `TypeError: code() argument
+13 must be str, not int`. pyspark 3.4 refuses a struct output column and does
+not import on Python 3.13, so those need 3.5. The pandas floor is
 2.2.2 in both extras: no pandas below 2.1.1 publishes a Python 3.12 wheel, and
 2.1.1 installs next to numpy 2 but fails to import with `numpy.dtype size
 changed`; 2.2.2 is the first release built against numpy 2. The package also
