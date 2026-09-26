@@ -527,7 +527,7 @@ def _handed_bitmaps(data_dict, bitmap_dict):
     field's own elements, and for a list of structs those are the flattened
     elements rather than the outer rows. The count therefore comes from the
     data handed out beside the bitmap, never from the batch. The bitmap rides
-    along to stay alive for the batch: an id is reusable once its object is
+    along to stay alive for the batch, and no longer: an id is reusable once its object is
     freed, and a UDF that drops a bitmap from ``bitmap_dict`` frees it, after
     which a bitmap of its own could land on that id and be refused as the
     handed-out one.
@@ -814,5 +814,13 @@ def make_mapinarrow_func(
                     inferred = built.schema
                 elif built.schema != inferred:
                     raise ValueError(_schema_drift(inferred, built.schema))
+            # Nothing of this batch is held across the yield: the adapted
+            # arrays, the views and the handed-out bitmaps stayed bound in the
+            # frame while the consumer wrote the batch out and the next one
+            # was adapted, so a string column's |U copy was live twice at the
+            # peak and a handed-out bitmap outlived its batch.
+            data_dict = bitmap_dict = handed = col_pa = adapted = None
+            struct_bitmap = field_bitmaps = field_datas = None
             yield built
+            built = None
     return _

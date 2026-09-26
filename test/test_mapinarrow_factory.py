@@ -1,5 +1,6 @@
 import collections
 import datetime
+import gc
 import weakref
 
 import numpy as np
@@ -1037,3 +1038,35 @@ def test_a_nullable_extension_column_is_masked_through_its_storage():
         column = pa.ExtensionArray.from_storage(labels, storage)
         got = run_outputs({"out": Nullable(column, bitmap)}).column("out")
         assert got.type == labels and got.storage.to_pylist() == ["a", None, "c"]
+
+
+def test_nothing_of_a_batch_is_held_while_the_next_one_is_read():
+    # The adapted arrays and the handed-out bitmaps stayed bound in the
+    # generator's frame across the yield, so a string column's |U copy was
+    # live twice while the next batch was adapted.
+    seen = []
+
+    def main(data_dict, bitmap_dict, broadcasts):
+        seen.append(weakref.ref(data_dict["s"]))
+        return {"n": np.zeros(len(data_dict["s"]), dtype=np.int64)}
+
+    alive_when_the_next_is_read = []
+
+    class Batches:
+        def __init__(self):
+            self.batches = [pa.RecordBatch.from_pydict({"s": ["a", "b"]}), pa.RecordBatch.from_pydict({"s": ["c"]})]
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if seen:
+                gc.collect()
+                alive_when_the_next_is_read.append(seen[-1]() is not None)
+            if not self.batches:
+                raise StopIteration
+            return self.batches.pop(0)
+
+    for _ in make_mapinarrow_func(main)(Batches()):
+        pass
+    assert alive_when_the_next_is_read == [False, False]

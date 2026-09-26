@@ -550,6 +550,12 @@ MUTATIONS = [
         '        pa.py_buffer(memoryview(data_buf).toreadonly()),',
         '        memoryview(data_buf).toreadonly(),',
     ),
+    (
+        "a batch's arrays stay bound across the yield",
+        'numbarrow/core/mapinarrow_factory.py',
+        '            data_dict = bitmap_dict = handed = col_pa = adapted = None',
+        '            pass',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
