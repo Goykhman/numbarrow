@@ -556,6 +556,12 @@ MUTATIONS = [
         '            data_dict = bitmap_dict = handed = col_pa = adapted = None',
         '            pass',
     ),
+    (
+        'structured dtypes stop getting viewers of their own',
+        'numbarrow/utils/utils.py',
+        '    if dtype_.fields is not None:',
+        '    if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

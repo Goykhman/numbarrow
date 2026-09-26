@@ -6,6 +6,8 @@ Provides Numba-compatible functions that reinterpret a raw memory address
 ``@njit`` code to read Arrow buffer data directly without copying.
 """
 
+import hashlib
+
 import numpy as np
 from numba import carray, from_dtype, int64, intp, njit
 from numba.core.types import Array, voidptr
@@ -57,7 +59,14 @@ def numpy_array_from_ptr_factory(dtype_):
     # NRT_adapt_ndarray_to_python. A qualname per dtype gives each viewer its
     # own index and data files, and one entry per index leaves nothing for two
     # writers to disagree about.
-    name = f"view_{np.dtype(dtype_).name}"
+    dtype_ = np.dtype(dtype_)
+    name = f"view_{dtype_.name}"
+    if dtype_.fields is not None:
+        # numpy names every structured dtype of one itemsize void<bits>, so
+        # two of them shared one index, and a process loading both from the
+        # cache ran the first one's code for the second; the description
+        # tells them apart.
+        name += "_" + hashlib.sha1(repr(dtype_.descr).encode()).hexdigest()[:12]
     viewer.__name__ = name
     viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"
     return njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)(viewer)
