@@ -245,9 +245,16 @@ def test_the_function_names_the_shape_it_takes_when_handed_a_batch_or_a_table():
     # the first one, and mapInPandas's frames died the same way.
     fn = make_mapinarrow_func(lambda d, b, br: {"out": d["a"]})
     batch = pa.RecordBatch.from_pydict({"a": [1, 2, 3]})
-    for handed in (batch, pa.Table.from_batches([batch]), [batch.to_pandas()]):
+    handed = [batch, pa.Table.from_batches([batch])]
+    try:
+        import pandas  # noqa: F401
+        handed.append([batch.to_pandas()])
+    except ImportError:
+        # The pyarrow-range cells install no pandas.
+        pass
+    for shape in handed:
         with pytest.raises(TypeError, match="iterator of pyarrow.RecordBatch"):
-            list(fn(handed))
+            list(fn(shape))
     assert list(fn([batch]))[0].column("out").to_pylist() == [1, 2, 3]
 
 
