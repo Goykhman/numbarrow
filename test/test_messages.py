@@ -108,6 +108,18 @@ def test_input_columns_as_a_string_is_refused():
         make_mapinarrow_func(lambda d, b, br: {}, input_columns="value")
 
 
+def test_an_empty_input_columns_is_refused():
+    # A generator already used up, or a filter that matched nothing, named no
+    # column: a main_func reading data_dict["x"] died on a bare KeyError, and
+    # one doubling whatever arrived returned a batch of no rows and no columns
+    # without a word.
+    used_up = (name for name in ["x"])
+    list(used_up)
+    for empty in ([], used_up, filter(lambda name: name.startswith("feat_"), ["x", "y"])):
+        with pytest.raises(ValueError, match="input_columns names no column"):
+            make_mapinarrow_func(lambda d, b, br: {}, input_columns=empty)
+
+
 def test_an_output_schema_that_is_not_a_pyarrow_schema_is_refused():
     # A PySpark StructType is what the README's own example calls
     # output_schema, and it carries .names too, so it got as far as the first

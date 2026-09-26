@@ -653,6 +653,20 @@ def _refuse_repeated_names(output_schema):
         )
 
 
+def _refuse_empty_selection(named):
+    """Refuse an input_columns that names no column, such as a generator already used up.
+
+    An empty selection handed main_func no columns: a filter that matched
+    nothing, or a generator already used up, gave a batch of no rows and no
+    columns without a word, or a bare KeyError inside main_func.
+    """
+    if named == []:
+        raise ValueError(
+            "input_columns names no column, so main_func would be handed none; pass None for every column, "
+            "and check for a generator already used up or a filter that matched nothing"
+        )
+
+
 def _held_schema(output_schema, inferred, built):
     """The schema held for the partition when types are inferred: the first batch's, once *built* agrees.
 
@@ -788,7 +802,9 @@ def make_mapinarrow_func(
         differently, and a name the batch carries more than once, as an
         unaliased join produces, raises :class:`ValueError`.  The names are
         read once, when the function is made, so a one-shot iterable such as
-        a generator serves as well as a list.
+        a generator serves as well as a list, and an empty one, such as a
+        generator already used up, is refused rather than handing ``main_func``
+        no columns.
     :param broadcasts: optional dictionary of broadcast values
     :param output_schema: optional :class:`pyarrow.Schema` for the batch that is
         yielded.  When given, the dict returned by ``main_func`` is bound to it
@@ -849,6 +865,7 @@ def make_mapinarrow_func(
     # batch loop, a generator, map() or filter() handed in was used up by the
     # first batch, and every later batch then saw no columns at all.
     named = None if input_columns is None else list(dict.fromkeys(input_columns))
+    _refuse_empty_selection(named)
     if output_schema is not None and not isinstance(output_schema, pa.Schema):
         # A PySpark StructType is the schema mapInArrow itself takes, and it
         # carries .names too, so one handed here got as far as the first batch

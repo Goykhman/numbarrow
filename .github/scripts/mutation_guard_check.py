@@ -651,6 +651,12 @@ MUTATIONS = [
         '    return cast_64bit_date_arrow_to_numpy_array(pa_array, np.dtype(f"datetime64[{timestamp_unit}]"))',
         '    return cast_64bit_date_arrow_to_numpy_array(pa_array, np.dtype("datetime64[us]"))',
     ),
+    (
+        'an empty input_columns stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if named == []:',
+        '    if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
