@@ -88,7 +88,7 @@ def _is_view(array):
     """True when the result views an Arrow buffer rather than owning fresh memory."""
     node = array
     for _ in range(8):
-        if isinstance(node, memoryview):
+        if isinstance(node, (memoryview, pa.Buffer)):
             return True
         node = getattr(node, "base", None)
         if node is None:

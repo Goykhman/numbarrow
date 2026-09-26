@@ -496,8 +496,15 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, 
     # changed the source Arrow array. numpy refuses to set WRITEABLE on an
     # array whose base is read-only, which is also what makes pyarrow's own
     # to_numpy(zero_copy_only=True) refuse the flip.
+    # The read-only memoryview is wrapped in a foreign pyarrow buffer, and that
+    # is what the result keeps as its base. Handed the memoryview itself,
+    # np.frombuffer kept only a wrapper of it as .base, and that wrapper's
+    # release() dropped the memoryview's hold on the source, so a caller who
+    # released it, dropped the array and read the view read freed memory. A
+    # pa.Buffer has no release(), holds the memoryview and through it the
+    # source buffer, and exports read-only, so the flip stays refused.
     data = np.frombuffer(
-        memoryview(data_buf).toreadonly(),
+        pa.py_buffer(memoryview(data_buf).toreadonly()),
         dtype=data_np_ty,
         count=data_len,
         offset=pa_array.offset * data_item_byte_size

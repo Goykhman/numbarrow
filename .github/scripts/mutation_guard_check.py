@@ -544,6 +544,12 @@ MUTATIONS = [
         '        if _is_union_layout(raw_child.type):',
         '        if False:',
     ),
+    (
+        "a view's base stops being a buffer that cannot be released",
+        'numbarrow/utils/arrow_array_utils.py',
+        '        pa.py_buffer(memoryview(data_buf).toreadonly()),',
+        '        memoryview(data_buf).toreadonly(),',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
