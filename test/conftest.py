@@ -2,7 +2,27 @@ import os
 import shutil
 import sys
 
+import pyarrow as pa
 import pytest
+
+
+class Wrapped(pa.ExtensionType):
+    """An extension type over any storage, for the tests that look through one.
+
+    ``pa.opaque`` would do from pyarrow 17; this exists on every pyarrow the
+    matrix runs, so the guards that unwrap an extension type are exercised on
+    each of them.
+    """
+
+    def __init__(self, storage_type):
+        super().__init__(storage_type, "test.wrapped")
+
+    def __arrow_ext_serialize__(self):
+        return b""
+
+    @classmethod
+    def __arrow_ext_deserialize__(cls, storage_type, serialized):
+        return cls(storage_type)
 
 
 def spark_leg_required():

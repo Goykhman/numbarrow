@@ -21,6 +21,7 @@ import pytest
 from numbarrow.core.adapters import arrow_array_adapter
 from numbarrow.core.mapinarrow_factory import make_mapinarrow_func
 from numbarrow.utils.arrow_array_utils import TYPE_REPR_WIDTH, renamed, type_repr
+from test.conftest import Wrapped
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -250,6 +251,12 @@ def test_an_output_schema_naming_a_field_twice_is_refused_at_factory_time():
     nested = pa.schema([("s", pa.list_(pa.struct([("x", pa.int64()), ("x", pa.float64())])))])
     with pytest.raises(ValueError, match=r"\['x'\] more than once"):
         make_mapinarrow_func(lambda d, b, br: {}, output_schema=nested)
+    # The check looks inside a map's entries and through an extension type's
+    # storage as well, and only the struct and list paths were exercised.
+    twice = pa.struct([("a", pa.int64()), ("a", pa.int64())])
+    for shape in (pa.map_(pa.string(), twice), Wrapped(twice)):
+        with pytest.raises(ValueError, match=r"\['a'\] more than once"):
+            make_mapinarrow_func(lambda d, b, br: {}, output_schema=pa.schema([("s", shape)]))
 
 
 def test_the_function_names_the_shape_it_takes_when_handed_a_batch_or_a_table():
