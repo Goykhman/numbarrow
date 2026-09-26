@@ -214,6 +214,12 @@ def test_a_union_field_under_a_struct_is_refused_before_flatten():
         struct = pa.StructArray.from_arrays([pa.array([1, 2, 3]), union], names=["ok", "u"], mask=mask)
         with pytest.raises(NotImplementedError, match=r"struct field 'u'.*union"):
             arrow_array_adapter(struct)
+    # An extension type over the union shows no union of its own, so the
+    # check looks through it; nothing exercised that.
+    wrapped = pa.ExtensionArray.from_storage(Wrapped(union.type), union)
+    struct = pa.StructArray.from_arrays([pa.array([1, 2, 3]), wrapped], names=["ok", "u"])
+    with pytest.raises(NotImplementedError, match=r"struct field 'u'.*union"):
+        arrow_array_adapter(struct)
 
 
 def test_the_unexpected_keys_listing_is_cut_with_a_count():
