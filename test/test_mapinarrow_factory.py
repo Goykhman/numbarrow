@@ -941,6 +941,19 @@ def test_a_namedtuple_row_naming_the_fields_in_another_order_is_refused():
     assert got.to_pylist() == [{"x": 0, "y": 100}, {"x": 1, "y": 200}]
 
 
+def test_a_namedtuple_row_naming_other_fields_is_refused_rather_than_bound_by_position():
+    # The order check compared the two sets of names, so Point(lon=10,
+    # latitude=50) under struct<lat, lon>, one field misnamed, passed it and
+    # pa.array put the lon value in lat and the latitude value in lon.
+    Point = collections.namedtuple("Point", ["lon", "latitude"])
+    schema = pa.schema([("p", pa.struct([("lat", pa.float64()), ("lon", pa.float64())]))])
+    with pytest.raises(ValueError, match=r"'p'.*\['lon', 'latitude'\].*not the declared fields.*position"):
+        run_outputs({"p": [Point(lon=10.0, latitude=50.0)]}, schema)
+    Extra = collections.namedtuple("Extra", ["lat", "lon", "alt"])
+    with pytest.raises(ValueError, match=r"'p'.*\['lat', 'lon', 'alt'\].*not the declared fields"):
+        run_outputs({"p": [Extra(50.0, 10.0, 0.0)]}, schema)
+
+
 def test_pyarrow_scalar_rows_are_left_to_pa_array():
     # From pyarrow 21 a MapScalar is a Mapping whose values is an array, so the
     # key check died calling it; pa.array checks a scalar row itself.

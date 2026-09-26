@@ -454,8 +454,14 @@ MUTATIONS = [
     (
         'a namedtuple naming the fields in another order stops being refused',
         'numbarrow/core/mapinarrow_factory.py',
-        '        if given is not None and set(given) == set(names) and list(given) != names:',
-        '        if False:',
+        '        if given is None or list(given) == names:\n            continue',
+        '        if True:\n            continue',
+    ),
+    (
+        'a namedtuple naming fields the declared type does not have stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        if given is None or list(given) == names:',
+        '        if given is None or set(given) != set(names):',
     ),
     (
         'iterability stops being tested with iter',

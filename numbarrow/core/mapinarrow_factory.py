@@ -146,18 +146,22 @@ def _iterable_rows(rows):
 
 
 def _refuse_permuted_fields(tuples, names, arrow_type, where):
-    """Refuse a namedtuple or pyspark Row naming the declared fields in another order.
+    """Refuse a namedtuple or pyspark Row whose field names are not the declared ones in the declared order.
 
-    ``pa.array`` binds a tuple's fields by position, so such a row swaps every
-    same-typed field without a word.
+    ``pa.array`` binds a tuple's fields by position, so a row naming the
+    declared fields in another order swapped every same-typed field without a
+    word, and a row naming a field the declared type does not have, a typo or
+    an older name, put that value into whichever field sat at its position.
     """
     for row in tuples:
         given = getattr(row, "_fields", None) or getattr(row, "__fields__", None)
-        if given is not None and set(given) == set(names) and list(given) != names:
-            raise ValueError(
-                f"{where}declared {type_repr(arrow_type)} but a row names its fields {list(given)}; a "
-                f"tuple's fields bind by position, so build it in the declared order or return dicts"
-            )
+        if given is None or list(given) == names:
+            continue
+        how = "in another order" if set(given) == set(names) else "which are not the declared fields"
+        raise ValueError(
+            f"{where}declared {type_repr(arrow_type)} but a row names its fields {list(given)}, {how}; a "
+            f"tuple's fields bind by position, so name them as declared, in the declared order, or return dicts"
+        )
 
 
 def _check_keys(rows, arrow_type, where=""):
@@ -171,7 +175,8 @@ def _check_keys(rows, arrow_type, where=""):
     another struct. A row given as a tuple, a namedtuple or a pyspark Row
     binds by position, so its elements are checked against the fields in
     declared order, and one that names the declared fields in another order,
-    which would swap every same-typed field without a word, is refused.
+    which would swap every same-typed field without a word, or names a field
+    the declared type does not have, is refused.
     """
     arrow_type = _storage(arrow_type)
     if pa.types.is_struct(arrow_type):
