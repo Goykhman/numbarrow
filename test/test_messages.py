@@ -238,3 +238,14 @@ def test_an_output_schema_naming_a_field_twice_is_refused_at_factory_time():
     nested = pa.schema([("s", pa.list_(pa.struct([("x", pa.int64()), ("x", pa.float64())])))])
     with pytest.raises(ValueError, match=r"\['x'\] more than once"):
         make_mapinarrow_func(lambda d, b, br: {}, output_schema=nested)
+
+
+def test_the_function_names_the_shape_it_takes_when_handed_a_batch_or_a_table():
+    # udf(batch) and udf(table) walked the columns and died on an attribute of
+    # the first one, and mapInPandas's frames died the same way.
+    fn = make_mapinarrow_func(lambda d, b, br: {"out": d["a"]})
+    batch = pa.record_batch({"a": pa.array([1, 2, 3])})
+    for handed in (batch, pa.Table.from_batches([batch]), [batch.to_pandas()]):
+        with pytest.raises(TypeError, match="iterator of pyarrow.RecordBatch"):
+            list(fn(handed))
+    assert list(fn([batch]))[0].column("out").to_pylist() == [1, 2, 3]

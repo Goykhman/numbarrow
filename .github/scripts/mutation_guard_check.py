@@ -596,6 +596,12 @@ MUTATIONS = [
         '        repeated = _repeated_names(list(output_schema))\n'
         '        if False:',
     ),
+    (
+        'an item that is not a RecordBatch stops being refused by name',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            if not isinstance(batch, pa.RecordBatch):',
+        '            if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

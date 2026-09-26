@@ -800,6 +800,14 @@ def make_mapinarrow_func(
     def _(iterator):
         inferred = None
         for batch in iterator:
+            if not isinstance(batch, pa.RecordBatch):
+                # Handed a RecordBatch or a Table instead of an iterator of
+                # them, the loop walked the columns and died on an attribute
+                # of the first one; mapInPandas hands over pandas frames.
+                raise TypeError(
+                    f"pass an iterator of pyarrow.RecordBatch, as mapInArrow does, such as [batch] or "
+                    f"table.to_batches(), not one yielding a {type(batch).__name__}"
+                )
             data_dict: dict[str, np.ndarray | dict[str, np.ndarray]] = {}
             bitmap_dict: dict[str, np.ndarray | None | dict[str, np.ndarray | None]] = {}
             names = batch.schema.names
