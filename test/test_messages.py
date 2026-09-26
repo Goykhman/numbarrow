@@ -201,3 +201,15 @@ def test_a_union_field_under_a_struct_is_refused_before_flatten():
         struct = pa.StructArray.from_arrays([pa.array([1, 2, 3]), union], names=["ok", "u"], mask=mask)
         with pytest.raises(NotImplementedError, match=r"struct field 'u'.*union"):
             arrow_array_adapter(struct)
+
+
+def test_the_unexpected_keys_listing_is_cut_with_a_count():
+    # A UDF keying a dict by a row value put every key of the batch into the
+    # exception, 1.5 MB for 100,000 rows, and twice into the executor logs.
+    rows = [{f"user_{i:06d}": 1} for i in range(1000)]
+    fn = make_mapinarrow_func(lambda d, b, br: {"counts": rows},
+                              output_schema=pa.schema([("counts", pa.struct([("total", pa.int64())]))]))
+    with pytest.raises(ValueError) as excinfo:
+        list(fn(iter([_batch(v=list(range(1000)))])))
+    message = str(excinfo.value)
+    assert "'user_000000'" in message and "and 990 more" in message and len(message) < 600

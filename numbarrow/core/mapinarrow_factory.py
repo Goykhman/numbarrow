@@ -34,6 +34,13 @@ class Nullable(NamedTuple):
     bitmap: np.ndarray | None
 
 
+# How many of the keys no declared field has a refusal lists. The listing is
+# sized by the data, not the schema: a UDF keying a dict by a row value put
+# every key of a 100,000-row batch, 1.5 MB, into the exception and twice into
+# the executor logs.
+KEYS_SHOWN = 10
+
+
 def _struct_fields(struct_type):
     return [struct_type[i] for i in range(struct_type.num_fields)]
 
@@ -162,8 +169,10 @@ def _check_keys(rows, arrow_type):
             seen.update(row)
         unexpected_keys = sorted(str(key) for key in seen - set(fields))
         if unexpected_keys:
+            shown = unexpected_keys[:KEYS_SHOWN]
+            more = f" and {len(unexpected_keys) - KEYS_SHOWN} more" if len(unexpected_keys) > KEYS_SHOWN else ""
             raise ValueError(
-                f"declared {type_repr(arrow_type)} but the dicts carry keys {unexpected_keys} "
+                f"declared {type_repr(arrow_type)} but the dicts carry keys {shown}{more} "
                 f"that no declared field has; Arrow matches struct fields by exact name and "
                 f"fills a missing one with null"
             )

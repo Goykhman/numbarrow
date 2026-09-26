@@ -570,6 +570,12 @@ MUTATIONS = [
         '    if False:\n'
         '        # The cast of a zero-length array drops its validity buffer, and a',
     ),
+    (
+        'the unexpected-keys listing stops being cut',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            shown = unexpected_keys[:KEYS_SHOWN]',
+        '            shown = unexpected_keys',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
