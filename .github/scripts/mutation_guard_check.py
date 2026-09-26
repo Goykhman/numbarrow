@@ -676,6 +676,12 @@ MUTATIONS = [
         '            remedy = "row.to_dict()" if under_struct else "row.to_numpy() or list(row)"',
         '            remedy = "row.to_numpy() or list(row)"',
     ),
+    (
+        'a coarse time unit under a declared non-temporal type stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if target != unit and arrow_type is not None and not pa.types.is_temporal(_storage(arrow_type)):',
+        '    if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

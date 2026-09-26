@@ -386,6 +386,24 @@ def test_a_declared_type_keeps_the_other_datetime64_conversions():
         run_outputs({"t": np.array([1, 2], dtype="timedelta64[M]")})
 
 
+def test_a_coarse_time_unit_under_a_declared_non_temporal_type_is_refused_rather_than_rescaled():
+    # Taking a day or hour unit to seconds happened before the declared type
+    # was applied, so counts of [1, 2] days declared int64 came back as
+    # [86400, 172800], where pa.array had refused the unit.
+    for dtype in ("timedelta64[D]", "timedelta64[h]", "datetime64[h]"):
+        counts = np.array([1, 2], dtype=dtype)
+        for declared in (pa.int64(), pa.string()):
+            with pytest.raises(TypeError, match=r"'n'.*would change them"):
+                run_outputs({"n": counts}, pa.schema([("n", declared)]))
+    # A multiplier still folds, since pa.array reads the count as one of the
+    # base unit, and a temporal declared type still takes the coarse unit.
+    bins = np.array([1, 2], dtype="timedelta64[5s]")
+    assert run_outputs({"n": bins}, pa.schema([("n", pa.int64())])).column("n").to_pylist() == [5, 10]
+    hours = np.array([1, 2], dtype="datetime64[h]")
+    dated = run_outputs({"n": hours}, pa.schema([("n", pa.date32())])).column("n")
+    assert dated.to_pylist() == [datetime.date(1970, 1, 1), datetime.date(1970, 1, 1)]
+
+
 def test_output_schema_refuses_a_struct_key_no_field_has():
     # Arrow matches struct fields by exact name and nulls a missing one, so a
     # list of dicts keyed Amount/Label against amount/label used to come back

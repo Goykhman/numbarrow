@@ -344,7 +344,7 @@ def _convert(value, arrow_type):
     return array
 
 
-def _at_arrow_unit(value):
+def _at_arrow_unit(value, arrow_type):
     """A datetime64 or timedelta64 array at a unit pyarrow models, with any multiplier folded in.
 
     ``pa.array`` reads numpy's base unit and ignores a multiplier, so a
@@ -355,7 +355,11 @@ def _at_arrow_unit(value):
     becomes seconds and a week, month or year unit becomes days, exactly too,
     where ``pa.array`` refused them outright. A unit finer than a nanosecond,
     and a month or year timedelta, which has no fixed length, would not
-    convert exactly and are refused instead.
+    convert exactly and are refused instead. Under a declared type that is
+    not temporal, an integer or a string, the rescaled counts would go over
+    as the values, two days as 172800, so a coarse unit is refused there as
+    ``pa.array`` refused it; a multiplier still folds, since the count would
+    otherwise be read as one of the base unit.
     """
     family = "datetime64" if value.dtype.kind == "M" else "timedelta64"
     unit, count = np.datetime_data(value.dtype)
@@ -375,6 +379,12 @@ def _at_arrow_unit(value):
         target = "D"
     else:
         target = unit
+    if target != unit and arrow_type is not None and not pa.types.is_temporal(_storage(arrow_type)):
+        raise TypeError(
+            f"a {value.dtype} array under {type_repr(arrow_type)}: pyarrow has no such unit, and taking the "
+            f"counts to {family}[{target}] would change them; convert the array to the values you mean, or "
+            f"declare a temporal type"
+        )
     if target == unit and count == 1:
         return value
     return value.astype(f"{family}[{target}]")
@@ -403,7 +413,7 @@ def _ndarray_to_arrow(value, arrow_type):
             return pa.array(value, type=arrow_type)
         return pa.array(value.tolist(), type=arrow_type or pa.binary())
     if kind in ("M", "m"):
-        value = _at_arrow_unit(value)
+        value = _at_arrow_unit(value, arrow_type)
     if value.dtype == np.dtype("datetime64[D]") and arrow_type is not None:
         # Under a declared timestamp or int32 ``pa.array`` reads a day-unit
         # array's 8-byte values as the 4-byte days of a date32, so every other
@@ -833,7 +843,11 @@ def make_mapinarrow_func(
         numeric or datetime dtype, or a :class:`pyarrow.Array`, an integer
         out of the declared type's range, a float with a fraction into an
         integer type and a timestamp unit change that drops digits all raise
-        :class:`pyarrow.ArrowInvalid`.  A Python list, and any other sequence
+        :class:`pyarrow.ArrowInvalid`.  A ``datetime64`` or ``timedelta64``
+        array at a unit pyarrow does not model, an hour, minute, week, month
+        or year, or a day-unit ``timedelta64``, is taken to seconds or days
+        under a temporal type and refused under any other, since its counts
+        would go over rescaled.  A Python list, and any other sequence
         of Python objects, an object-dtype ndarray included, goes through
         ``pa.array``'s sequence converter instead: an integer out of the
         declared type's range still raises :class:`pyarrow.ArrowInvalid`, a
