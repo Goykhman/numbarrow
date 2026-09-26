@@ -682,6 +682,12 @@ MUTATIONS = [
         '    if target != unit and arrow_type is not None and not pa.types.is_temporal(_storage(arrow_type)):',
         '    if False:',
     ),
+    (
+        'the 64-bit date view stops refusing a time64 or duration array',
+        'numbarrow/core/adapters.py',
+        '    elif pa.types.is_timestamp(pa_array.type):\n        unit = pa_array.type.unit',
+        '    elif hasattr(pa_array.type, "unit"):\n        unit = pa_array.type.unit',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

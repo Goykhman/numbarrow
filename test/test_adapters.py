@@ -182,6 +182,12 @@ def test_the_64bit_date_view_refuses_a_unit_that_is_not_the_arrays_own():
         cast_64bit_date_arrow_to_numpy_array(stamps, np.dtype("datetime64[s]"))
     with pytest.raises(ValueError, match="not a date64 or timestamp"):
         cast_64bit_date_arrow_to_numpy_array(pa.array([1], type=pa.int64()), np.dtype("datetime64[s]"))
+    # A time64 and a duration carry a unit as well, and the refusal tested
+    # only for one, so an hour of the day and a ninety-second span were
+    # viewed as instants on 1970-01-01.
+    for clocked in (pa.array([3_600_000_000], type=pa.time64("us")), pa.array([90_000], type=pa.duration("ms"))):
+        with pytest.raises(ValueError, match="not a date64 or timestamp"):
+            cast_64bit_date_arrow_to_numpy_array(clocked, np.dtype(f"datetime64[{clocked.type.unit}]"))
 
 
 def test_a_timestamp_is_read_at_its_own_unit():

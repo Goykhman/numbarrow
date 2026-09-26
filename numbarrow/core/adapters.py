@@ -30,11 +30,17 @@ def cast_64bit_date_arrow_to_numpy_array(pa_array: pa.Array, np_dtype: np.dtype)
     ``ms`` for a date64, and a timestamp's own unit. Any other unit is
     refused, since a view cannot rescale and read every value at the wrong
     instant, ``timestamp[ms]`` viewed as ``datetime64[s]`` landing in the
-    year 51971. The associated bitmap (if any) is also returned.
+    year 51971. The associated bitmap (if any) is also returned. A time64 or
+    a duration array carries a unit too, and read as instants a time of day or
+    an elapsed span landed on 1970-01-01, so the type family is checked, not
+    the unit's presence.
     """
     np_dtype = np.dtype(np_dtype)
-    unit = "ms" if pa.types.is_date64(pa_array.type) else getattr(pa_array.type, "unit", None)
-    if unit is None:
+    if pa.types.is_date64(pa_array.type):
+        unit = "ms"
+    elif pa.types.is_timestamp(pa_array.type):
+        unit = pa_array.type.unit
+    else:
         raise ValueError(f"{type_repr(pa_array.type)} is not a date64 or timestamp type")
     if np_dtype != np.dtype(f"datetime64[{unit}]"):
         raise ValueError(
