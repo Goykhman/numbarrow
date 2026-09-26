@@ -23,15 +23,23 @@ from numbarrow.utils.utils import arrays_viewers
 
 
 def cast_64bit_date_arrow_to_numpy_array(pa_array: pa.Array, np_dtype: np.dtype):
-    """ Can be used to cast PyArrow arrays of date types that are represented by
-    64-bit integers to numpy arrays of various date types (np.datetime64[...],
-    which are always represented  by 64-bit integers whose meaning is determined
-    by the precision, such as, 's', 'ms', 'us').
+    """View a date64 or timestamp array as the ``datetime64`` of the same unit, without a copy.
 
-    Since underlying data layout of both arrays in int64, a copy is avoided,
-
-    The associated bitmap (if any) is also returned.
+    Both hold one int64 per value, so the Arrow buffer is viewed rather than
+    converted, and *np_dtype* must be ``datetime64`` at the array's own unit:
+    ``ms`` for a date64, and a timestamp's own unit. Any other unit is
+    refused, since a view cannot rescale and read every value at the wrong
+    instant, ``timestamp[ms]`` viewed as ``datetime64[s]`` landing in the
+    year 51971. The associated bitmap (if any) is also returned.
     """
+    np_dtype = np.dtype(np_dtype)
+    unit = "ms" if pa.types.is_date64(pa_array.type) else getattr(pa_array.type, "unit", None)
+    if unit is None:
+        raise ValueError(f"{type_repr(pa_array.type)} is not a date64 or timestamp type")
+    if np_dtype != np.dtype(f"datetime64[{unit}]"):
+        raise ValueError(
+            f"{type_repr(pa_array.type)} holds {unit} instants, which view as datetime64[{unit}], not as {np_dtype}"
+        )
     int64_array = pa_array.cast(pa.int64())
     # A zero-length array's buffers are not required to survive a cast, and
     # nothing has been copied when there is nothing to copy.

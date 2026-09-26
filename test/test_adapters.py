@@ -169,3 +169,16 @@ def test_a_zero_length_temporal_column_keeps_its_bitmap_presence():
         assert source.buffers()[0] is not None
         bitmap, data = arrow_array_adapter(source)
         assert bitmap is not None and bitmap.dtype == np.uint8 and len(bitmap) == 0 and len(data) == 0
+
+
+def test_the_64bit_date_view_refuses_a_unit_that_is_not_the_arrays_own():
+    # The docstring promised a cast to any unit and the body reinterpreted the
+    # int64 payload, so timestamp[ms] viewed as datetime64[s] landed in 51971.
+    from numbarrow.core.adapters import cast_64bit_date_arrow_to_numpy_array
+    stamps = pa.array([datetime(2020, 1, 1, 12)], type=pa.timestamp("ms"))
+    _, data = cast_64bit_date_arrow_to_numpy_array(stamps, np.dtype("datetime64[ms]"))
+    assert data.tolist() == [datetime(2020, 1, 1, 12)]
+    with pytest.raises(ValueError, match=r"ms instants.*not as datetime64\[s\]"):
+        cast_64bit_date_arrow_to_numpy_array(stamps, np.dtype("datetime64[s]"))
+    with pytest.raises(ValueError, match="not a date64 or timestamp"):
+        cast_64bit_date_arrow_to_numpy_array(pa.array([1], type=pa.int64()), np.dtype("datetime64[s]"))

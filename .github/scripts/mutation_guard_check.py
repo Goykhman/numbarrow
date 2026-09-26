@@ -608,6 +608,12 @@ MUTATIONS = [
         '            f"{invalid_jit_options_err}; {as_str!r} is valid JSON but a {type(as_json).__name__}, not an object"',
         '            invalid_jit_options_err',
     ),
+    (
+        'the 64-bit date view stops refusing another unit',
+        'numbarrow/core/adapters.py',
+        '    if np_dtype != np.dtype(f"datetime64[{unit}]"):',
+        '    if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
