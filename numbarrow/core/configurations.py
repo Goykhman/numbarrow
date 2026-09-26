@@ -6,7 +6,9 @@ import os
 import json
 
 
-invalid_jit_options_err = """Must be valid JSON, e.g., export NUMBARROW_JIT_OPTIONS='{"cache": false}'"""
+invalid_jit_options_err = (
+    """NUMBARROW_JIT_OPTIONS must be a JSON object, e.g., export NUMBARROW_JIT_OPTIONS='{"cache": false}'"""
+)
 
 
 def get_jit_options():
@@ -32,10 +34,14 @@ def get_jit_options():
         return {"cache": True}
     try:
         as_json = json.loads(as_str)
-    except json.JSONDecodeError:
-        raise ValueError(invalid_jit_options_err)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{invalid_jit_options_err}; {as_str!r} is not valid JSON: {error}") from None
     if not isinstance(as_json, dict):
-        raise ValueError(invalid_jit_options_err)
+        # One message for both failures told a value that was valid JSON that
+        # it must be valid JSON, and showed neither the value nor the rule.
+        raise ValueError(
+            f"{invalid_jit_options_err}; {as_str!r} is valid JSON but a {type(as_json).__name__}, not an object"
+        )
     if "cache" in as_json and not isinstance(as_json["cache"], bool):
         raise ValueError(
             f'NUMBARROW_JIT_OPTIONS "cache" must be true or false, not {as_json["cache"]!r}: numba reads any '

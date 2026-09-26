@@ -602,6 +602,12 @@ MUTATIONS = [
         '            if not isinstance(batch, pa.RecordBatch):',
         '            if False:',
     ),
+    (
+        'the options refusal stops showing the value',
+        'numbarrow/core/configurations.py',
+        '            f"{invalid_jit_options_err}; {as_str!r} is valid JSON but a {type(as_json).__name__}, not an object"',
+        '            invalid_jit_options_err',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
