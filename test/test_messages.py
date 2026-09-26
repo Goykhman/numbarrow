@@ -244,7 +244,7 @@ def test_the_function_names_the_shape_it_takes_when_handed_a_batch_or_a_table():
     # udf(batch) and udf(table) walked the columns and died on an attribute of
     # the first one, and mapInPandas's frames died the same way.
     fn = make_mapinarrow_func(lambda d, b, br: {"out": d["a"]})
-    batch = pa.record_batch({"a": pa.array([1, 2, 3])})
+    batch = pa.RecordBatch.from_pydict({"a": [1, 2, 3]})
     for handed in (batch, pa.Table.from_batches([batch]), [batch.to_pandas()]):
         with pytest.raises(TypeError, match="iterator of pyarrow.RecordBatch"):
             list(fn(handed))
