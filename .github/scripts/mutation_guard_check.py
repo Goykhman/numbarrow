@@ -688,6 +688,12 @@ MUTATIONS = [
         '    elif pa.types.is_timestamp(pa_array.type):\n        unit = pa_array.type.unit',
         '    elif hasattr(pa_array.type, "unit"):\n        unit = pa_array.type.unit',
     ),
+    (
+        'a structured dtype with out-of-order fields stops getting a viewer',
+        'numbarrow/utils/utils.py',
+        '        name += "_" + hashlib.sha1(repr(dtype_).encode()).hexdigest()[:12]',
+        '        name += "_" + hashlib.sha1(repr(dtype_.descr).encode()).hexdigest()[:12]',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

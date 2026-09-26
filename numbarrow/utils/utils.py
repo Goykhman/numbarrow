@@ -64,9 +64,11 @@ def numpy_array_from_ptr_factory(dtype_):
     if dtype_.fields is not None:
         # numpy names every structured dtype of one itemsize void<bits>, so
         # two of them shared one index, and a process loading both from the
-        # cache ran the first one's code for the second; the description
-        # tells them apart.
-        name += "_" + hashlib.sha1(repr(dtype_.descr).encode()).hexdigest()[:12]
+        # cache ran the first one's code for the second; the repr tells them
+        # apart. The repr rather than descr, which numpy refuses to build for
+        # a dtype with out-of-order or overlapping fields, the very dtype its
+        # own multi-field indexing, rec[["b", "a"]], hands back.
+        name += "_" + hashlib.sha1(repr(dtype_).encode()).hexdigest()[:12]
     viewer.__name__ = name
     viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"
     return jit_with_options(Array(from_dtype(dtype_), 1, "C")(intp, int64))(viewer)

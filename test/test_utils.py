@@ -34,3 +34,16 @@ def test_structured_dtypes_of_one_itemsize_get_viewers_of_their_own():
     floats = np.array([(1.5,), (-2.5,)], dtype=[("b", "<f4")])
     assert first(ints.ctypes.data, 2).tolist() == [(7,), (-3,)]
     assert second(floats.ctypes.data, 2).tolist() == [(1.5,), (-2.5,)]
+
+
+def test_a_structured_dtype_with_out_of_order_fields_gets_a_viewer():
+    # The name suffix hashed dtype.descr, which numpy refuses to build for the
+    # dtype its own multi-field indexing hands back, rec[["b", "a"]], so the
+    # factory raised ValueError where it had built a viewer before.
+    rec = np.zeros(2, dtype=[("a", "<f4"), ("b", "<i4")])
+    rec["a"] = [1.5, 2.5]
+    rec["b"] = [7, 8]
+    reordered = rec[["b", "a"]]
+    viewer = numpy_array_from_ptr_factory(reordered.dtype)
+    assert viewer(reordered.ctypes.data, 2).tolist() == [(1.5, 7), (2.5, 8)]
+    assert viewer.__qualname__ != numpy_array_from_ptr_factory(rec.dtype).__qualname__
