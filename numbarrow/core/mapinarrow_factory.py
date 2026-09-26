@@ -145,6 +145,21 @@ def _iterable_rows(rows):
     return kept
 
 
+def _refuse_permuted_fields(tuples, names, arrow_type, where):
+    """Refuse a namedtuple or pyspark Row naming the declared fields in another order.
+
+    ``pa.array`` binds a tuple's fields by position, so such a row swaps every
+    same-typed field without a word.
+    """
+    for row in tuples:
+        given = getattr(row, "_fields", None) or getattr(row, "__fields__", None)
+        if given is not None and set(given) == set(names) and list(given) != names:
+            raise ValueError(
+                f"{where}declared {type_repr(arrow_type)} but a row names its fields {list(given)}; a "
+                f"tuple's fields bind by position, so build it in the declared order or return dicts"
+            )
+
+
 def _check_keys(rows, arrow_type, where=""):
     """Refuse, at any depth, a dict key that no declared struct field has, naming the path to it.
 
@@ -176,13 +191,7 @@ def _check_keys(rows, arrow_type, where=""):
                 f"that no declared field has; Arrow matches struct fields by exact name and "
                 f"fills a missing one with null"
             )
-        for row in tuples:
-            given = getattr(row, "_fields", None) or getattr(row, "__fields__", None)
-            if given is not None and set(given) == set(names) and list(given) != names:
-                raise ValueError(
-                    f"{where}declared {type_repr(arrow_type)} but a row names its fields {list(given)}; a "
-                    f"tuple's fields bind by position, so build it in the declared order or return dicts"
-                )
+        _refuse_permuted_fields(tuples, names, arrow_type, where)
         for index, (name, child_type) in enumerate(fields.items()):
             if _carries_keys(child_type):
                 children = [row[name] for row in dicts if name in row]
@@ -319,16 +328,7 @@ def _convert(value, arrow_type):
     if not hasattr(value, "__len__"):
         # A generator would be consumed by the checks, so it is read once.
         value = list(value)
-    if isinstance(value, (list, tuple)):
-        for row in value:
-            if _is_pandas(row, "Series", "DataFrame"):
-                # pa.array reads a Series row by its index labels, so a sorted
-                # or filtered one came back reordered, and one whose labels
-                # were not 0..n-1 died on a bare KeyError.
-                raise TypeError(
-                    f"a row is a pandas {type(row).__name__}, which pa.array reads by its labels "
-                    f"rather than in order; hand it over as row.to_numpy() or list(row)"
-                )
+    _refuse_pandas_rows(value)
     if arrow_type is not None and _carries_keys(arrow_type):
         _check_keys(value, arrow_type)
     array = pa.array(value, type=arrow_type)
@@ -407,6 +407,23 @@ def _ndarray_to_arrow(value, arrow_type):
         # under a timestamp, and leaves pyarrow's own refusals in place.
         return pa.array(value).cast(arrow_type)
     return pa.array(value, type=arrow_type)
+
+
+def _refuse_pandas_rows(value):
+    """Refuse a pandas Series or DataFrame among the rows of a list or tuple column.
+
+    ``pa.array`` reads a Series row by its index labels, so a sorted or
+    filtered one came back reordered, and one whose labels were not 0..n-1
+    died on a bare KeyError.
+    """
+    if not isinstance(value, (list, tuple)):
+        return
+    for row in value:
+        if _is_pandas(row, "Series", "DataFrame"):
+            raise TypeError(
+                f"a row is a pandas {type(row).__name__}, which pa.array reads by its labels "
+                f"rather than in order; hand it over as row.to_numpy() or list(row)"
+            )
 
 
 def _is_pandas(value, *names):
@@ -620,6 +637,37 @@ def _repeated_names(fields):
     return repeated
 
 
+def _refuse_repeated_names(output_schema):
+    """Refuse an output_schema that names a column or a field twice, at any depth.
+
+    A dict holds one value per name, so every copy was filled from it and
+    Spark died in the JVM naming neither the column nor the copy.
+    """
+    if output_schema is None:
+        return
+    repeated = _repeated_names(list(output_schema))
+    if repeated:
+        raise ValueError(
+            f"output_schema names {repeated} more than once; the dict main_func returns holds one value "
+            f"per name, so alias one of them"
+        )
+
+
+def _held_schema(output_schema, inferred, built):
+    """The schema held for the partition when types are inferred: the first batch's, once *built* agrees.
+
+    An all-None list beside one holding values, or ints beside floats,
+    inferred a second schema, and Spark's writer refused it naming nothing.
+    """
+    if output_schema is not None:
+        return None
+    if inferred is None:
+        return built.schema
+    if built.schema != inferred:
+        raise ValueError(_schema_drift(inferred, built.schema))
+    return inferred
+
+
 def _schema_drift(first, later):
     """Why a batch built by inference differs from the partition's first, naming the column."""
     remedy = ("Spark's writer refuses a batch whose schema differs from the first it wrote, so return the "
@@ -808,15 +856,7 @@ def make_mapinarrow_func(
         raise TypeError(
             f"output_schema must be a pyarrow.Schema, not a {type(output_schema).__name__}"
         )
-    if output_schema is not None:
-        repeated = _repeated_names(list(output_schema))
-        if repeated:
-            # A dict holds one value per name, so every copy was filled from it
-            # and Spark died in the JVM naming neither the column nor the copy.
-            raise ValueError(
-                f"output_schema names {repeated} more than once; the dict main_func returns holds one value "
-                f"per name, so alias one of them"
-            )
+    _refuse_repeated_names(output_schema)
 
     def _(iterator):
         inferred = None
@@ -868,14 +908,7 @@ def make_mapinarrow_func(
                     bitmap_dict[col], data_dict[col] = adapted
             handed = _handed_bitmaps(data_dict, bitmap_dict)
             built = _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema, handed)
-            if output_schema is None:
-                # An all-None list beside one holding values, or ints beside
-                # floats, inferred a second schema, and Spark's writer refused
-                # it naming nothing.
-                if inferred is None:
-                    inferred = built.schema
-                elif built.schema != inferred:
-                    raise ValueError(_schema_drift(inferred, built.schema))
+            inferred = _held_schema(output_schema, inferred, built)
             # Nothing of this batch is held across the yield: the adapted
             # arrays, the views and the handed-out bitmaps stayed bound in the
             # frame while the consumer wrote the batch out and the next one

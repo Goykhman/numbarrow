@@ -456,8 +456,8 @@ MUTATIONS = [
     (
         'a namedtuple naming the fields in another order stops being refused',
         'numbarrow/core/mapinarrow_factory.py',
-        '            if given is not None and set(given) == set(names) and list(given) != names:',
-        '            if False:',
+        '        if given is not None and set(given) == set(names) and list(given) != names:',
+        '        if False:',
     ),
     (
         'iterability stops being tested with iter',
@@ -480,8 +480,8 @@ MUTATIONS = [
     (
         'a pandas Series row stops being refused',
         'numbarrow/core/mapinarrow_factory.py',
-        '            if _is_pandas(row, "Series", "DataFrame"):',
-        '            if False:',
+        '        if _is_pandas(row, "Series", "DataFrame"):',
+        '        if False:',
     ),
     (
         'a KeyError from pa.array stops naming the column',
@@ -527,8 +527,8 @@ MUTATIONS = [
     (
         "a later batch's inferred schema stops being compared with the first's",
         'numbarrow/core/mapinarrow_factory.py',
-        '                elif built.schema != inferred:',
-        '                elif False:',
+        '    if built.schema != inferred:',
+        '    if False:',
     ),
     (
         'an extension column stops being masked through its storage',
@@ -591,10 +591,10 @@ MUTATIONS = [
     (
         'a repeated name in output_schema stops being refused',
         'numbarrow/core/mapinarrow_factory.py',
-        '        repeated = _repeated_names(list(output_schema))\n'
-        '        if repeated:',
-        '        repeated = _repeated_names(list(output_schema))\n'
-        '        if False:',
+        '    repeated = _repeated_names(list(output_schema))\n'
+        '    if repeated:',
+        '    repeated = _repeated_names(list(output_schema))\n'
+        '    if False:',
     ),
     (
         'an item that is not a RecordBatch stops being refused by name',
