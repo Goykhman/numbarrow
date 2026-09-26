@@ -16,6 +16,7 @@ Run:  python .github/scripts/extras_sufficiency_check.py [--repo DIR] [--extra N
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -82,6 +83,20 @@ def check(repo: Path, extra: str, probe: str, python: str) -> str | None:
     return None
 
 
+def floor_interpreter(requires_python):
+    """The interpreter name for the floor of a requires-python specifier set, such as python3.12.
+
+    The floor is the ``>=`` clause, or the ``~=`` compatible-release clause,
+    which names its floor the same way; a set with neither names no
+    interpreter to test on, and the gate says so and stops, as it does for an
+    extra with no probe.
+    """
+    floor = re.search(r"(?:>=|~=)\s*(\d+\.\d+)", requires_python)
+    if floor is None:
+        raise SystemExit(f"requires-python {requires_python!r} names no >= or ~= floor to test the extras on")
+    return "python" + floor.group(1)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
@@ -97,8 +112,10 @@ def main(argv=None):
     declared = set(meta.get("optional-dependencies", {}))
     # The floor is what matters: distutils is present below 3.12 and absent at
     # and above it, so testing a newer interpreter would hide the failure and
-    # testing the floor exposes it.
-    python = args.python or "python" + meta["requires-python"].lstrip(">=~^ ")
+    # testing the floor exposes it. requires-python is a specifier set, so the
+    # floor is the >= clause, wherever it sits: stripping leading characters
+    # turned ">=3.12,<3.14" into the executable name "python3.12,<3.14".
+    python = args.python or floor_interpreter(meta["requires-python"])
 
     unprobed = declared - set(PROBES) - SKIP
     if unprobed:

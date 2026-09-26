@@ -6,12 +6,14 @@ Provides Numba-compatible functions that reinterpret a raw memory address
 ``@njit`` code to read Arrow buffer data directly without copying.
 """
 
+import hashlib
+
 import numpy as np
-from numba import carray, from_dtype, int64, intp, njit
+from numba import carray, from_dtype, int64, intp
 from numba.core.types import Array, voidptr
 from numba.extending import intrinsic
 
-from numbarrow.core.configurations import jit_options
+from numbarrow.core.configurations import jit_with_options
 
 
 @intrinsic
@@ -42,7 +44,7 @@ def numpy_array_from_ptr_factory(dtype_):
     read-only arrays tied to the Arrow array they view; this is the primitive
     it is built on.
 
-    :param dtype_: NumPy dtype for the resulting array (e.g. ``np.int32``)
+    :param dtype\\_: NumPy dtype for the resulting array (e.g. ``np.int32``)
     :returns: JIT-compiled function ``(int, int) -> np.ndarray``
     """
     def viewer(ptr_as_int: int, sz: int):
@@ -57,10 +59,17 @@ def numpy_array_from_ptr_factory(dtype_):
     # NRT_adapt_ndarray_to_python. A qualname per dtype gives each viewer its
     # own index and data files, and one entry per index leaves nothing for two
     # writers to disagree about.
-    name = f"view_{np.dtype(dtype_).name}"
+    dtype_ = np.dtype(dtype_)
+    name = f"view_{dtype_.name}"
+    if dtype_.fields is not None:
+        # numpy names every structured dtype of one itemsize void<bits>, so
+        # two of them shared one index, and a process loading both from the
+        # cache ran the first one's code for the second; the description
+        # tells them apart.
+        name += "_" + hashlib.sha1(repr(dtype_.descr).encode()).hexdigest()[:12]
     viewer.__name__ = name
     viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"
-    return njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)(viewer)
+    return jit_with_options(Array(from_dtype(dtype_), 1, "C")(intp, int64))(viewer)
 
 
 class _Viewers(dict):

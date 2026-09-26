@@ -70,3 +70,14 @@ def test_importing_with_an_empty_value_uses_the_default():
     out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == {"cache": True}
+
+
+def test_the_refusal_names_the_requirement_and_shows_the_value(monkeypatch):
+    # One message for both failures told a value that was valid JSON that it
+    # must be valid JSON, and showed neither the value nor the rule.
+    monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", "[1, 2]")
+    with pytest.raises(ValueError, match=r"JSON object.*'\[1, 2\]' is valid JSON but a list"):
+        get_jit_options()
+    monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", "{cache: false}")
+    with pytest.raises(ValueError, match=r"'\{cache: false\}' is not valid JSON"):
+        get_jit_options()

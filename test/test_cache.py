@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -171,3 +172,49 @@ def test_a_cold_cache_survives_a_concurrent_first_import_of_is_null_struct(tmp_p
     assert not failed, failed[0]
     out = _run(CHECK_EVERY_STRUCT_SHAPE, env, tmp_path)
     assert out.returncode == 0, out.stderr
+
+
+def test_an_import_from_an_archive_compiles_uncached_with_a_warning_naming_the_remedy(tmp_path):
+    # numba's cache locators need the source file on disk, so an import from
+    # an .egg, .whl or .pyz archive, which Spark's --py-files ships, raised
+    # RuntimeError at decoration, naming neither NUMBA_CACHE_DIR nor the
+    # option that turns caching off.
+    archive = tmp_path / "numbarrow-0.0.0-py3.12.egg"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        for path in sorted((REPO / "numbarrow").rglob("*.py")):
+            zipped.write(path, str(path.relative_to(REPO)))
+    env = dict(os.environ, PYTHONPATH=str(archive), NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+    env.pop("NUMBARROW_JIT_OPTIONS", None)
+    probe = "import numbarrow.core.adapters as a; print(a.__file__)"
+    run = subprocess.run([sys.executable, "-W", "always", "-c", probe],
+                         capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
+    assert "NUMBA_CACHE_DIR" in run.stderr and "compiles without a cache" in run.stderr
+    quiet = subprocess.run([sys.executable, "-W", "error", "-c", probe], capture_output=True, text=True,
+                           env=dict(env, NUMBARROW_JIT_OPTIONS='{"cache": false}'), cwd=str(tmp_path))
+    assert quiet.returncode == 0, quiet.stderr
+
+
+CHECK_BOUNDS = (
+    "import numpy as np\n"
+    "from numbarrow.core.is_null import is_null, unpack_booleans\n"
+    "bitmap = np.zeros(1, dtype=np.uint8)\n"
+    "outcomes = []\n"
+    "for call in (lambda: is_null(100000, bitmap), lambda: unpack_booleans(0, 100000, bitmap)):\n"
+    "    try:\n"
+    "        call()\n"
+    "        outcomes.append('returned')\n"
+    "    except IndexError:\n"
+    "        outcomes.append('IndexError')\n"
+    "print(' '.join(outcomes))\n"
+)
+
+
+def test_jit_options_reach_the_is_null_decorators(tmp_path):
+    # The options test imported only the viewers, so hard-coding the options
+    # on is_null.py's three decorators kept the suite green, and the documented
+    # boundscheck contract had no test at all.
+    checked = _run(CHECK_BOUNDS, _env(tmp_path / "checked", {"cache": False, "boundscheck": True}), tmp_path)
+    assert checked.returncode == 0 and checked.stdout.split() == ["IndexError", "IndexError"], checked.stderr
+    unchecked = _run(CHECK_BOUNDS, _env(tmp_path / "unchecked", {"cache": False}), tmp_path)
+    assert unchecked.returncode == 0 and unchecked.stdout.split() == ["returned", "returned"], unchecked.stderr

@@ -14,7 +14,7 @@ Optional dependencies for PySpark and pandas support:
 
 ```bash
 pip install numbarrow[test]       # adds pyspark and everything the tests need
-pip install numbarrow[mapinarrow] # adds pandas, which pyspark's mapInArrow requires
+pip install numbarrow[mapinarrow] # adds pandas and setuptools, which pyspark's mapInArrow requires
 ```
 
 The adapters themselves need only numba, numpy and pyarrow.
@@ -72,10 +72,11 @@ and a naive `timestamp[us]` holding the same int64 adapt to the same
 `datetime64[us]`, exactly as pyarrow's `to_numpy` does, so a UDF's calendar
 arithmetic runs on UTC instants and can disagree with Spark's own `to_date` by
 the session offset. On the way back out of `make_mapinarrow_func` a
-`datetime64` output becomes a naive timestamp of its unit, except
-`datetime64[D]`, which becomes `date32`, and a `date64` input passed through
-comes back `timestamp[ms]`; pass `output_schema` to restore a zone or a date
-type.
+`datetime64` output becomes a naive timestamp of its unit, with a multiplier
+such as `datetime64[5s]` folded in and an hour or minute unit taken to
+seconds; a day, week, month or year unit becomes `date32`, a unit finer than a
+nanosecond is refused, and a `date64` input passed through comes back
+`timestamp[ms]`; pass `output_schema` to restore a zone or a date type.
 
 A `ListArray` of structs flattens its elements and returns no offsets, so a null
 outer row can be neither reported nor accounted for in the element-to-row
@@ -91,7 +92,11 @@ caller does not own and cannot be made writable, which is also why pyarrow's
 own `to_numpy(zero_copy_only=True)` refuses to hand out a writable one; the
 copies, booleans, `date32` and strings, start read-only as well, so the
 contract does not depend on the type, though a caller who flips the flag on a
-copy writes into memory that is their own. Declare numba signatures that receive them with
+copy writes into memory that is their own. A slice or reshape of a view that
+an `@njit` function returns is a new array whose flag can be flipped, since
+numba exports every buffer it boxes as writable, and a store through it
+reaches the source; pyarrow's own view has the same route, and the whole
+argument returned unchanged does not. Declare numba signatures that receive them with
 `readonly=True`, which accepts writable arrays as well, or leave the function
 lazily typed and numba will infer it. Returned bitmaps own their memory and are
 writable.
@@ -124,6 +129,21 @@ to a 3-tuple: the struct-level bitmap, then two dicts keyed by field name. The
 struct-level bitmap is the only record of a row that is null as a whole, since
 the fields of such a row carry no validity bits of their own; pass both layers
 to `is_null_struct`.
+
+## Compilation and the cache
+
+numbarrow compiles its adapters with numba on first import, under the options
+`NUMBARROW_JIT_OPTIONS` gives as a JSON object; unset, that is `{"cache":
+true}`, so the compiled code is written to numba's on-disk cache, next to the
+package or under `NUMBA_CACHE_DIR`. Where no cache location can be written, a
+read-only install or an import from an `.egg`, `.whl` or `.pyz` archive such
+as `spark-submit --py-files` ships, the functions compile without a cache and
+a warning names the two remedies: point `NUMBA_CACHE_DIR` at a writable
+directory, or set `NUMBARROW_JIT_OPTIONS='{"cache": false}'`. numba's cache
+index does not record the options a function was compiled with, so point
+`NUMBA_CACHE_DIR` at a fresh directory when an option changes. Both variables
+are read when numbarrow is first imported, so set them before it: one set
+afterwards from inside Python changes nothing.
 
 ## PySpark Integration
 
@@ -168,6 +188,14 @@ a numpy masked array carry nulls out as well.
 
 See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complete runnable example.
 
+Spark binds the batch's columns, and a struct column's fields, to the schema
+given to `mapInArrow` by position, never by name: two columns or two fields
+whose types share an accessor family swap silently when the dict or the record
+dtype is built in the other order. Build them in the declared order, or pass
+`output_schema` derived from the Spark schema,
+`pyspark.sql.pandas.types.to_arrow_schema(spark_schema)`, and let Arrow bind
+columns and struct fields by name.
+
 ## Compatibility
 
 | Dependency | Versions |
@@ -175,16 +203,21 @@ See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complet
 | Python | 3.12+ |
 | numba | 0.60.0 – 0.67.0 |
 | pyarrow | 14.0 – 25.0 |
-| pyspark | 3.4 – 3.x (optional) |
-| pandas | 2.2.2+ (optional, required by pyspark's `mapInArrow`) |
+| pyspark | 3.4 – 3.x (optional; 3.5+ on Python 3.13, and for a struct output column) |
+| pandas | 2.2.2+ (optional, required by pyspark's `mapInArrow`, with setuptools for its `distutils` import on 3.12+) |
 
 `pyproject.toml` is authoritative. CI runs the newest numba the cap admits,
 with pandas 2.3.2 and pyspark 3.5.7, on Linux, Linux ARM and Windows, and both
 ends of the pyarrow row in a job of their own; the pandas and pyspark rows are
 not swept. The pyspark floor is 3.4.0 because pyspark 3.3
 bundles cloudpickle 2.0.0, which predates the `co_qualname` argument Python
-3.11 added to `code()`, so on the declared Python every UDF dies in the worker
-with `TypeError: code() argument 13 must be str, not int`. The pandas floor is
+3.11 added to `code()` and indexes `co_names` with the raw `LOAD_GLOBAL`
+argument, so on the declared Python the function `make_mapinarrow_func`
+returns fails on the driver while cloudpickle serialises it, with
+`PicklingError: Could not serialize object: IndexError: tuple index out of
+range`, and a trivial UDF dies in the worker with `TypeError: code() argument
+13 must be str, not int`. pyspark 3.4 refuses a struct output column and does
+not import on Python 3.13, so those need 3.5. The pandas floor is
 2.2.2 in both extras: no pandas below 2.1.1 publishes a Python 3.12 wheel, and
 2.1.1 installs next to numpy 2 but fails to import with `numpy.dtype size
 changed`; 2.2.2 is the first release built against numpy 2. The package also

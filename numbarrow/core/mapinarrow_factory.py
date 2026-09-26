@@ -34,16 +34,39 @@ class Nullable(NamedTuple):
     bitmap: np.ndarray | None
 
 
+# How many of the keys no declared field has a refusal lists. The listing is
+# sized by the data, not the schema: a UDF keying a dict by a row value put
+# every key of a 100,000-row batch, 1.5 MB, into the exception and twice into
+# the executor logs.
+KEYS_SHOWN = 10
+
+
 def _struct_fields(struct_type):
     return [struct_type[i] for i in range(struct_type.num_fields)]
 
 
+def _storage(arrow_type):
+    """The type under any extension wrapping: a cast and a key check work on the storage."""
+    while isinstance(arrow_type, pa.BaseExtensionType):
+        arrow_type = arrow_type.storage_type
+    return arrow_type
+
+
+def _is_list_view(arrow_type):
+    # The view layouts arrived in pyarrow 16; on an older one nothing is a view.
+    is_view = getattr(pa.types, "is_list_view", None)
+    is_large_view = getattr(pa.types, "is_large_list_view", None)
+    return bool(is_view and is_view(arrow_type)) or bool(is_large_view and is_large_view(arrow_type))
+
+
 def _is_list_like(arrow_type):
-    return pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type) or pa.types.is_fixed_size_list(arrow_type)
+    return (pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type)
+            or pa.types.is_fixed_size_list(arrow_type) or _is_list_view(arrow_type))
 
 
 def _carries_keys(arrow_type):
     """Whether a value of this type is built from dicts somewhere inside it."""
+    arrow_type = _storage(arrow_type)
     if pa.types.is_struct(arrow_type):
         return True
     if _is_list_like(arrow_type):
@@ -54,7 +77,21 @@ def _carries_keys(arrow_type):
 
 
 def _unexpected_fields(source_type, declared_type):
-    """Field names the source type carries, at any depth, that the declared type does not."""
+    """Field names the source type carries, at any depth, that the declared type does not.
+
+    The kinds are paired through their layouts: an extension type through its
+    storage, and a map with a declared list of key/value structs through its
+    entries struct, since a cast matches those by name too and filled the
+    value struct with nulls behind either wrapping.
+    """
+    source_type = _storage(source_type)
+    declared_type = _storage(declared_type)
+    if pa.types.is_map(source_type) and _is_list_like(declared_type):
+        entries = pa.struct([source_type.key_field, source_type.item_field])
+        return _unexpected_fields(entries, declared_type.value_type)
+    if _is_list_like(source_type) and pa.types.is_map(declared_type):
+        entries = pa.struct([declared_type.key_field, declared_type.item_field])
+        return _unexpected_fields(source_type.value_type, entries)
     if pa.types.is_dictionary(source_type) and pa.types.is_dictionary(declared_type):
         # A dictionary is a layout: the cast decodes it and matches the value
         # structs by name, and filled a whole column with nulls the same way.
@@ -88,49 +125,86 @@ def _iterable_rows(rows):
     they are passed over too: ``pa.array`` refuses such a row at its first
     element, where spreading it into a list here first took seconds and
     hundreds of megabytes for a long one.
+
+    Iterability is tested with ``iter`` rather than by the ``__iter__``
+    attribute: a sequence by ``__getitem__`` alone has no such attribute and
+    iterates all the same, and ``pa.array`` reads it item by item. A pyarrow
+    scalar row is passed over as well: ``pa.array`` checks one against the
+    declared type itself, and from pyarrow 21 a MapScalar is a Mapping whose
+    ``values`` is an array rather than a method.
     """
-    return [
-        row for row in rows
-        if hasattr(row, "__iter__")
-        and not isinstance(row, (str, bytes))
-        and not (isinstance(row, np.ndarray) and row.dtype.kind != "O")
-    ]
+    kept = []
+    for row in rows:
+        if isinstance(row, (str, bytes, pa.Scalar)) or (isinstance(row, np.ndarray) and row.dtype.kind != "O"):
+            continue
+        try:
+            iter(row)
+        except TypeError:
+            continue
+        kept.append(row)
+    return kept
 
 
-def _check_keys(rows, arrow_type):
-    """Refuse, at any depth, a dict key that no declared struct field has.
+def _refuse_permuted_fields(tuples, names, arrow_type, where):
+    """Refuse a namedtuple or pyspark Row naming the declared fields in another order.
+
+    ``pa.array`` binds a tuple's fields by position, so such a row swaps every
+    same-typed field without a word.
+    """
+    for row in tuples:
+        given = getattr(row, "_fields", None) or getattr(row, "__fields__", None)
+        if given is not None and set(given) == set(names) and list(given) != names:
+            raise ValueError(
+                f"{where}declared {type_repr(arrow_type)} but a row names its fields {list(given)}; a "
+                f"tuple's fields bind by position, so build it in the declared order or return dicts"
+            )
+
+
+def _check_keys(rows, arrow_type, where=""):
+    """Refuse, at any depth, a dict key that no declared struct field has, naming the path to it.
 
     Arrow matches struct fields by exact name and fills a missing one with
     null, so a list of dicts keyed ``Amount`` against a field called
     ``amount`` builds a whole column of nulls under an identical schema,
     without a word. The same typo on a top-level key raises; this makes the
     nested one raise too, however deep the struct sits inside a list, a map or
-    another struct.
+    another struct. A row given as a tuple, a namedtuple or a pyspark Row
+    binds by position, so its elements are checked against the fields in
+    declared order, and one that names the declared fields in another order,
+    which would swap every same-typed field without a word, is refused.
     """
+    arrow_type = _storage(arrow_type)
     if pa.types.is_struct(arrow_type):
         fields = {field.name: field.type for field in _struct_fields(arrow_type)}
-        dicts = [row for row in rows if isinstance(row, Mapping)]
+        names = list(fields)
+        dicts = [row for row in rows if isinstance(row, Mapping) and not isinstance(row, pa.Scalar)]
+        tuples = [row for row in rows if isinstance(row, tuple) and not isinstance(row, pa.Scalar)]
         seen = set()
         for row in dicts:
             seen.update(row)
         unexpected_keys = sorted(str(key) for key in seen - set(fields))
         if unexpected_keys:
+            shown = unexpected_keys[:KEYS_SHOWN]
+            more = f" and {len(unexpected_keys) - KEYS_SHOWN} more" if len(unexpected_keys) > KEYS_SHOWN else ""
             raise ValueError(
-                f"declared {type_repr(arrow_type)} but the dicts carry keys {unexpected_keys} "
+                f"{where}declared {type_repr(arrow_type)} but the dicts carry keys {shown}{more} "
                 f"that no declared field has; Arrow matches struct fields by exact name and "
                 f"fills a missing one with null"
             )
-        for name, child_type in fields.items():
+        _refuse_permuted_fields(tuples, names, arrow_type, where)
+        for index, (name, child_type) in enumerate(fields.items()):
             if _carries_keys(child_type):
-                _check_keys([row[name] for row in dicts if name in row], child_type)
+                children = [row[name] for row in dicts if name in row]
+                children.extend(row[index] for row in tuples if index < len(row))
+                _check_keys(children, child_type, f"{where}field {name!r}: ")
     elif _is_list_like(arrow_type):
-        _check_keys([item for row in _iterable_rows(rows) for item in row], arrow_type.value_type)
+        _check_keys([item for row in _iterable_rows(rows) for item in row], arrow_type.value_type, f"{where}list item: ")
     elif pa.types.is_map(arrow_type):
         keys, items = _map_entries(rows)
         if _carries_keys(arrow_type.key_type):
-            _check_keys(keys, arrow_type.key_type)
+            _check_keys(keys, arrow_type.key_type, f"{where}map key: ")
         if _carries_keys(arrow_type.item_type):
-            _check_keys(items, arrow_type.item_type)
+            _check_keys(items, arrow_type.item_type, f"{where}map value: ")
 
 
 def _map_entries(rows):
@@ -146,7 +220,12 @@ def _map_entries(rows):
             items.extend(row.values())
         else:
             for pair in row:
-                if isinstance(pair, (tuple, list)) and len(pair) == 2:
+                if isinstance(pair, Mapping) and set(pair) == {"key", "value"}:
+                    # The entry shape Spark's map_entries produces, which
+                    # pa.array reads as a pair.
+                    keys.append(pair["key"])
+                    items.append(pair["value"])
+                elif isinstance(pair, (tuple, list)) and len(pair) == 2:
                     keys.append(pair[0])
                     items.append(pair[1])
     return keys, items
@@ -159,20 +238,29 @@ def _struct_column(children, rows, **layout):
     return pa.StructArray.from_arrays(children, **layout)
 
 
+def _record_field(value, name, arrow_type):
+    """One field of a record array as an Arrow array; a failure names the field."""
+    try:
+        return _convert(value[name], arrow_type)
+    except (pa.ArrowException, TypeError, ValueError, OverflowError, KeyError) as exc:
+        raise renamed(exc, f"field {name!r}") from exc
+
+
 def _record_to_struct(value, arrow_type):
     """A numpy record array as a struct column, one child per field.
 
     A record array is what an ``@njit`` function returns for a numba record
     type, and the one ndarray shape that means struct, but ``pa.array``
     refuses it with "Unsupported numpy type". Each field goes through the
-    same conversion as a column of its own, so a unicode field keeps its NULs
-    and a declared child type is honoured. A record array with no fields
+    same conversion as a column of its own, so a unicode field keeps its NULs,
+    a declared child type is honoured, and a field that fails to convert is
+    named whether or not a type was declared. A record array with no fields
     becomes that many empty structs: a struct array with no children has no
     length of its own.
     """
     names = list(value.dtype.names)
     if arrow_type is None:
-        children = [_convert(value[name], None) for name in names]
+        children = [_record_field(value, name, None) for name in names]
         return _struct_column(children, len(value), names=names)
     if not pa.types.is_struct(arrow_type):
         raise TypeError(f"a record array with fields {names} cannot become {type_repr(arrow_type)}")
@@ -188,10 +276,7 @@ def _record_to_struct(value, arrow_type):
         if field.name not in names:
             children.append(pa.nulls(len(value), type=field.type))
             continue
-        try:
-            children.append(_convert(value[field.name], field.type))
-        except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
-            raise renamed(exc, f"field {field.name!r}") from exc
+        children.append(_record_field(value, field.name, field.type))
     return _struct_column(children, len(value), fields=fields)
 
 
@@ -212,8 +297,10 @@ def _convert(value, arrow_type):
     ``"a\x00b"`` arrives as ``"a"`` and a leading NUL empties the value
     outright. Going via ``tolist()`` hands Arrow real Python strings and
     bytes, which carry NULs, at about 18% more time on a 200k-row column. A
-    trailing NUL is already gone before this point, dropped by numpy when the
-    array was built, which matches the adapter refusing one on the way in.
+    trailing NUL is dropped by ``tolist()`` itself, as numpy's own element
+    access drops it, which matches the adapter refusing one on the way in;
+    under a declared fixed-size binary type the array goes to ``pa.array``
+    directly, which keeps every byte there.
 
     Without a declared type a unicode or bytes column is still named
     ``string`` or ``binary`` rather than inferred, because ``pa.array([])``
@@ -238,12 +325,54 @@ def _convert(value, arrow_type):
         return _ndarray_to_arrow(value, arrow_type)
     # An object array, a list, a tuple, a pandas Series or any other iterable
     # of Python objects.
+    if not hasattr(value, "__len__"):
+        # A generator would be consumed by the checks, so it is read once.
+        value = list(value)
+    _refuse_pandas_rows(value)
     if arrow_type is not None and _carries_keys(arrow_type):
-        if not hasattr(value, "__len__"):
-            # A generator would be consumed by the check, so it is read once.
-            value = list(value)
         _check_keys(value, arrow_type)
-    return pa.array(value, type=arrow_type)
+    array = pa.array(value, type=arrow_type)
+    if isinstance(array, pa.ChunkedArray):
+        # A pandas Series over a multi-chunk pyarrow array comes back as one,
+        # which RecordBatch.from_arrays refused naming no column.
+        array = array.combine_chunks()
+    return array
+
+
+def _at_arrow_unit(value):
+    """A datetime64 or timedelta64 array at a unit pyarrow models, with any multiplier folded in.
+
+    ``pa.array`` reads numpy's base unit and ignores a multiplier, so a
+    ``datetime64[5s]`` column of five-second bins came back at one-second
+    steps, 2020 read as 1980, and ``datetime64[2D]`` slipped past the day-unit
+    inference in ``_ndarray_to_arrow`` into the misread it exists to prevent.
+    A multiplier folds into its base unit exactly; an hour or minute unit
+    becomes seconds and a week, month or year unit becomes days, exactly too,
+    where ``pa.array`` refused them outright. A unit finer than a nanosecond,
+    and a month or year timedelta, which has no fixed length, would not
+    convert exactly and are refused instead.
+    """
+    family = "datetime64" if value.dtype.kind == "M" else "timedelta64"
+    unit, count = np.datetime_data(value.dtype)
+    if unit in ("ps", "fs", "as"):
+        raise TypeError(
+            f"a {value.dtype} array has no Arrow type: pyarrow models seconds down to nanoseconds; "
+            f"convert it to {family}[ns] first, which drops the finer digits"
+        )
+    if family == "timedelta64" and unit in ("M", "Y"):
+        raise TypeError(
+            f"a {value.dtype} array has no fixed length in seconds; convert it to {family}[D] or "
+            f"{family}[s] first"
+        )
+    if unit in ("h", "m") or (family == "timedelta64" and unit in ("W", "D")):
+        target = "s"
+    elif unit in ("W", "M", "Y"):
+        target = "D"
+    else:
+        target = unit
+    if target == unit and count == 1:
+        return value
+    return value.astype(f"{family}[{target}]")
 
 
 def _ndarray_to_arrow(value, arrow_type):
@@ -251,10 +380,25 @@ def _ndarray_to_arrow(value, arrow_type):
     if value.dtype.names is not None:
         return _record_to_struct(value, arrow_type)
     kind = value.dtype.kind
+    if kind in ("U", "S") and value.ndim != 1:
+        # A 0-d unicode or bytes array's tolist() is a bare scalar, which
+        # pa.array spreads one character per row, and a 2-d one's is nested
+        # lists; both defeat the one-dimensional refusal pa.array gives the
+        # array itself, which every other dtype still gets, naming the column.
+        raise TypeError(f"a {value.ndim}-dimensional {value.dtype} array; an output column is one-dimensional")
     if kind == "U":
         return pa.array(value.tolist(), type=arrow_type or pa.string())
     if kind == "S":
+        if arrow_type is not None and pa.types.is_fixed_size_binary(arrow_type):
+            # tolist() drops a trailing NUL, so a digest ending in 0x00 came
+            # back a byte short and was refused under its fixed width.
+            # pa.array keeps every byte of a fixed-width array under a
+            # fixed-width type, and only there; variable-width binary still
+            # cuts at the first NUL, so it keeps the tolist() route.
+            return pa.array(value, type=arrow_type)
         return pa.array(value.tolist(), type=arrow_type or pa.binary())
+    if kind in ("M", "m"):
+        value = _at_arrow_unit(value)
     if value.dtype == np.dtype("datetime64[D]") and arrow_type is not None:
         # Under a declared timestamp or int32 ``pa.array`` reads a day-unit
         # array's 8-byte values as the 4-byte days of a date32, so every other
@@ -263,6 +407,29 @@ def _ndarray_to_arrow(value, arrow_type):
         # under a timestamp, and leaves pyarrow's own refusals in place.
         return pa.array(value).cast(arrow_type)
     return pa.array(value, type=arrow_type)
+
+
+def _refuse_pandas_rows(value):
+    """Refuse a pandas Series or DataFrame among the rows of a list or tuple column.
+
+    ``pa.array`` reads a Series row by its index labels, so a sorted or
+    filtered one came back reordered, and one whose labels were not 0..n-1
+    died on a bare KeyError.
+    """
+    if not isinstance(value, (list, tuple)):
+        return
+    for row in value:
+        if _is_pandas(row, "Series", "DataFrame"):
+            raise TypeError(
+                f"a row is a pandas {type(row).__name__}, which pa.array reads by its labels "
+                f"rather than in order; hand it over as row.to_numpy() or list(row)"
+            )
+
+
+def _is_pandas(value, *names):
+    """Whether *value* is a pandas object of one of the given class names, without importing pandas."""
+    cls = type(value)
+    return cls.__name__ in names and cls.__module__.split(".")[0] == "pandas"
 
 
 def _split_pair(value):
@@ -288,7 +455,8 @@ def _with_validity(array, bitmap):
     contiguous, which is the case for every bitmap ``bitmap_dict`` hands out.
     Any other array, one that already carries nulls, a sliced Arrow array or
     a nested type, is masked through ``if_else``, which keeps the nulls it
-    had. The bitmap carries no row count of its own: the length check here is
+    had; an extension array is masked through its storage and rewrapped. The
+    bitmap carries no row count of its own: the length check here is
     per byte, eight rows to a byte, and the caller checks a bitmap the batch
     handed out against the count it was handed out for. A bitmap that is not
     an ndarray at all is refused before any attribute of it is read, since the
@@ -313,6 +481,13 @@ def _with_validity(array, bitmap):
         )
     if rows == 0:
         return array
+    if isinstance(array, pa.ExtensionArray):
+        # The flat test below reads the extension type, which reports no
+        # fields and no dictionary whatever its storage, so a dictionary
+        # storage took the from_buffers path and aborted the interpreter, and
+        # a null or a slice went to if_else, which has no extension kernel.
+        # The storage carries the layout; the result is rewrapped.
+        return pa.ExtensionArray.from_storage(array.type, _with_validity(array.storage, bitmap))
     flat = (array.null_count == 0 and array.offset == 0 and array.type.num_fields == 0
             and not pa.types.is_dictionary(array.type) and not pa.types.is_null(array.type))
     if flat:
@@ -333,15 +508,37 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
     that case is refused here by identity rather than left to the byte check.
     ``pa.array`` iterates a Mapping, so a dict of arrays returned under one
     key silently became a string column of the dict's keys, with a different
-    row count and nothing raised; it is refused outright. Every other failure
-    on the output side named no column at all.
+    row count and nothing raised; it is refused outright. A str or bytes
+    returned as a column is refused the same way: ``pa.array`` spreads it one
+    character per row, so ``{"country": "US"}`` over a two-row batch was the
+    rows ``U`` and ``S``. Every other failure on the output side named no
+    column at all.
     """
     value, bitmap = _split_pair(value)
+    if isinstance(value, Nullable):
+        # A helper's Nullable wrapped once more went to pa.array as the 2-tuple
+        # it is: two rows, the data as one and the bitmap's bytes as the other.
+        raise TypeError(
+            f"output column {name!r} is a Nullable inside a Nullable, which pa.array would read as "
+            f"a two-row column of its data and its bitmap; wrap the data once"
+        )
     if isinstance(value, Mapping):
         raise TypeError(
             f"output column {name!r} is a {type(value).__name__}, which pa.array would read as "
             f"its keys; return an ndarray, a list or a pyarrow Array per column, and for a "
             f"struct column a list of dicts or a record array"
+        )
+    if isinstance(value, (str, bytes)):
+        raise TypeError(
+            f"output column {name!r} is a {type(value).__name__}, which pa.array would spread one "
+            f"character per row; a constant column is np.full(rows, value)"
+        )
+    if _is_pandas(value, "DataFrame"):
+        # Read by its column labels: a one-column frame died on a bare
+        # KeyError(0), and one with integer labels came back transposed.
+        raise TypeError(
+            f"output column {name!r} is a DataFrame, which pa.array reads by its column labels; "
+            f"return one Series or ndarray per column"
         )
     try:
         array = _convert(value, arrow_type)
@@ -354,7 +551,7 @@ def _to_arrow(value, name, arrow_type=None, handed=MappingProxyType({})):
                 f"{len(array)} rows; a resized column needs a bitmap of its own"
             )
         return _with_validity(array, bitmap)
-    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
+    except (pa.ArrowException, TypeError, ValueError, OverflowError, KeyError) as exc:
         raise renamed(exc, f"output column {name!r}") from exc
 
 
@@ -365,7 +562,7 @@ def _handed_bitmaps(data_dict, bitmap_dict):
     field's own elements, and for a list of structs those are the flattened
     elements rather than the outer rows. The count therefore comes from the
     data handed out beside the bitmap, never from the batch. The bitmap rides
-    along to stay alive for the batch: an id is reusable once its object is
+    along to stay alive for the batch, and no longer: an id is reusable once its object is
     freed, and a UDF that drops a bitmap from ``bitmap_dict`` frees it, after
     which a bitmap of its own could land on that id and be refused as the
     handed-out one.
@@ -423,6 +620,80 @@ def _build_batch(outputs, output_schema, handed=MappingProxyType({})):
     if output_schema is None:
         return pa.RecordBatch.from_arrays(arrays, names=names)
     return pa.RecordBatch.from_arrays(arrays, schema=output_schema)
+
+
+def _repeated_names(fields):
+    """Names declared more than once among *fields* or inside any of their types, at any depth."""
+    names = [field.name for field in fields]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    for field in fields:
+        arrow_type = _storage(field.type)
+        if pa.types.is_struct(arrow_type):
+            repeated.extend(_repeated_names(_struct_fields(arrow_type)))
+        elif _is_list_like(arrow_type):
+            repeated.extend(_repeated_names([arrow_type.value_field]))
+        elif pa.types.is_map(arrow_type):
+            repeated.extend(_repeated_names([arrow_type.key_field, arrow_type.item_field]))
+    return repeated
+
+
+def _refuse_repeated_names(output_schema):
+    """Refuse an output_schema that names a column or a field twice, at any depth.
+
+    A dict holds one value per name, so every copy was filled from it and
+    Spark died in the JVM naming neither the column nor the copy.
+    """
+    if output_schema is None:
+        return
+    repeated = _repeated_names(list(output_schema))
+    if repeated:
+        raise ValueError(
+            f"output_schema names {repeated} more than once; the dict main_func returns holds one value "
+            f"per name, so alias one of them"
+        )
+
+
+def _refuse_empty_selection(named):
+    """Refuse an input_columns that names no column, such as a generator already used up.
+
+    An empty selection handed main_func no columns: a filter that matched
+    nothing, or a generator already used up, gave a batch of no rows and no
+    columns without a word, or a bare KeyError inside main_func.
+    """
+    if named == []:
+        raise ValueError(
+            "input_columns names no column, so main_func would be handed none; pass None for every column, "
+            "and check for a generator already used up or a filter that matched nothing"
+        )
+
+
+def _held_schema(output_schema, inferred, built):
+    """The schema held for the partition when types are inferred: the first batch's, once *built* agrees.
+
+    An all-None list beside one holding values, or ints beside floats,
+    inferred a second schema, and Spark's writer refused it naming nothing.
+    """
+    if output_schema is not None:
+        return None
+    if inferred is None:
+        return built.schema
+    if built.schema != inferred:
+        raise ValueError(_schema_drift(inferred, built.schema))
+    return inferred
+
+
+def _schema_drift(first, later):
+    """Why a batch built by inference differs from the partition's first, naming the column."""
+    remedy = ("Spark's writer refuses a batch whose schema differs from the first it wrote, so return the "
+              "same columns every batch and declare output_schema where a batch may be empty or all null")
+    if first.names != later.names:
+        return f"this batch built columns {later.names} where the first built {first.names}; {remedy}"
+    for name in first.names:
+        before, now = first.field(name).type, later.field(name).type
+        if before != now:
+            return (f"output column {name!r} was inferred as {type_repr(before)} from the first batch and "
+                    f"{type_repr(now)} from this one; {remedy}")
+    return f"this batch's schema differs from the first batch's; {remedy}"
 
 
 def _fold_struct_validity(struct_bitmap, field_bitmap):
@@ -486,9 +757,17 @@ def make_mapinarrow_func(
         ``java.lang.UnsupportedOperationException`` whatever its width, as
         float64 under ``LongType`` and int64 under ``DoubleType`` do, both 64
         bits wide, and so does a width mismatch inside one family, such as
-        int32 under ``LongType``.  Build the returned dict in the order the
-        output schema declares, or pass ``output_schema`` and let Arrow bind
-        it by name instead.
+        int32 under ``LongType``.  A struct column's fields are read by
+        position too: without ``output_schema`` a record array's dtype order
+        and a dict's key order decide where each field lands, batch by batch
+        when some rows leave a null field out, so ``{"lat": .., "lon": ..}``
+        under ``struct<lon, lat>`` swaps the two without a word.  Build the
+        returned dict, and any record dtype, in the order the output schema
+        declares, or pass ``output_schema`` and let Arrow bind columns and
+        struct fields by name; derive it from the Spark schema,
+        ``pyspark.sql.pandas.types.to_arrow_schema(spark_schema)``, so the
+        two orders cannot disagree, since this function never sees the schema
+        ``mapInArrow`` is given.
 
         ``data_dict`` maps each selected column's name to its data.  A column
         of a uniform type maps to one array.  A struct or list-of-struct
@@ -521,7 +800,11 @@ def make_mapinarrow_func(
         does not have raises :class:`KeyError` listing the batch's columns,
         since Spark's case-insensitive projection may have spelled it
         differently, and a name the batch carries more than once, as an
-        unaliased join produces, raises :class:`ValueError`.
+        unaliased join produces, raises :class:`ValueError`.  The names are
+        read once, when the function is made, so a one-shot iterable such as
+        a generator serves as well as a list, and an empty one, such as a
+        generator already used up, is refused rather than handing ``main_func``
+        no columns.
     :param broadcasts: optional dictionary of broadcast values
     :param output_schema: optional :class:`pyarrow.Schema` for the batch that is
         yielded.  When given, the dict returned by ``main_func`` is bound to it
@@ -544,21 +827,32 @@ def make_mapinarrow_func(
         :class:`pyarrow.ArrowInvalid`.  A Python list, and any other sequence
         of Python objects, an object-dtype ndarray included, goes through
         ``pa.array``'s sequence converter instead: an integer out of the
-        declared type's range still raises :class:`pyarrow.ArrowInvalid` and
-        one beyond int64 altogether raises :class:`OverflowError`, but a
-        float's fraction and a timestamp's extra digits are dropped silently.
-        So the lossy conversions that pass without a word are a timestamp
-        into ``date32`` or ``date64``, which floors to the day, ``float64``
-        into ``float32``, which overflows to ``inf``, and, from a list alone,
-        a fraction into an integer type and a timestamp unit change that
-        drops digits.
+        declared type's range still raises :class:`pyarrow.ArrowInvalid`, a
+        negative value under an unsigned type and a value beyond the type's
+        own ceiling raise :class:`OverflowError`, which ``except
+        pa.ArrowInvalid`` does not catch, but a float's fraction and a
+        timestamp's extra digits are dropped silently.  So the lossy
+        conversions that pass without a word are a timestamp into ``date32``
+        or ``date64``, which floors to the day, a timestamp into ``time32``
+        or ``time64``, which drops the date, a float into ``decimal``, which
+        rounds to the declared scale, a number into ``bool``, which is true
+        for anything but zero, a float into a narrower float, which overflows
+        to ``inf``, and, from a list alone, a fraction into an integer type
+        and a timestamp unit change that drops digits.
 
         Left as ``None`` the batch is built from the dict alone: insertion
         order decides, and every type is inferred from the value, so a unicode
         or bytes array comes back ``string`` or ``binary`` whatever type went
         in, a ``datetime64`` array comes back a naive ``timestamp`` of its
-        unit, except a day-unit one, which comes back ``date32``, and an
-        object array holding only ``None`` comes back ``null``.
+        unit, with a multiplier such as ``datetime64[5s]`` folded in and an
+        hour or minute unit taken to seconds; a day, week, month or year unit
+        comes back ``date32``, a unit finer than a nanosecond is refused, and
+        an object array holding only ``None`` comes back ``null``.  The
+        first batch's inferred schema is held for the partition, and a later
+        batch whose inferred types differ, an all-``None`` list beside one
+        holding values, or ints beside floats, is refused naming the column,
+        since Spark's writer would refuse it naming nothing; declare
+        ``output_schema`` where a batch may be empty or all null.
     """
     broadcasts = broadcasts if broadcasts is not None else {}
     if isinstance(input_columns, str):
@@ -566,6 +860,12 @@ def make_mapinarrow_func(
         raise TypeError(
             f"input_columns must be a list of column names, not the string {input_columns!r}"
         )
+    # dict.fromkeys keeps first-seen order. Naming a column twice produces the
+    # same arrays twice, so it stays harmless. Read once, here: read inside the
+    # batch loop, a generator, map() or filter() handed in was used up by the
+    # first batch, and every later batch then saw no columns at all.
+    named = None if input_columns is None else list(dict.fromkeys(input_columns))
+    _refuse_empty_selection(named)
     if output_schema is not None and not isinstance(output_schema, pa.Schema):
         # A PySpark StructType is the schema mapInArrow itself takes, and it
         # carries .names too, so one handed here got as far as the first batch
@@ -573,16 +873,23 @@ def make_mapinarrow_func(
         raise TypeError(
             f"output_schema must be a pyarrow.Schema, not a {type(output_schema).__name__}"
         )
+    _refuse_repeated_names(output_schema)
 
     def _(iterator):
+        inferred = None
         for batch in iterator:
+            if not isinstance(batch, pa.RecordBatch):
+                # Handed a RecordBatch or a Table instead of an iterator of
+                # them, the loop walked the columns and died on an attribute
+                # of the first one; mapInPandas hands over pandas frames.
+                raise TypeError(
+                    f"pass an iterator of pyarrow.RecordBatch, as mapInArrow does, such as [batch] or "
+                    f"table.to_batches(), not one yielding a {type(batch).__name__}"
+                )
             data_dict: dict[str, np.ndarray | dict[str, np.ndarray]] = {}
             bitmap_dict: dict[str, np.ndarray | None | dict[str, np.ndarray | None]] = {}
-            requested = input_columns if input_columns is not None else batch.schema.names
-            # dict.fromkeys keeps first-seen order. Naming a column twice
-            # produces the same arrays twice, so it stays harmless.
-            input_columns_ = list(dict.fromkeys(requested))
             names = batch.schema.names
+            input_columns_ = named if named is not None else list(dict.fromkeys(names))
             for col in input_columns_:
                 if col not in names:
                     # Spark's projection is case-insensitive and may have
@@ -617,5 +924,15 @@ def make_mapinarrow_func(
                 else:
                     bitmap_dict[col], data_dict[col] = adapted
             handed = _handed_bitmaps(data_dict, bitmap_dict)
-            yield _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema, handed)
+            built = _build_batch(main_func(data_dict, bitmap_dict, broadcasts), output_schema, handed)
+            inferred = _held_schema(output_schema, inferred, built)
+            # Nothing of this batch is held across the yield: the adapted
+            # arrays, the views and the handed-out bitmaps stayed bound in the
+            # frame while the consumer wrote the batch out and the next one
+            # was adapted, so a string column's |U copy was live twice at the
+            # peak and a handed-out bitmap outlived its batch.
+            data_dict = bitmap_dict = handed = col_pa = adapted = None
+            struct_bitmap = field_bitmaps = field_datas = None
+            yield built
+            built = None
     return _

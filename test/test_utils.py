@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.testing import assert_equal
-from numbarrow.utils.utils import arrays_viewers
+from numbarrow.utils.utils import arrays_viewers, numpy_array_from_ptr_factory
 
 
 def test_int32_array_from_ptr_as_int():
@@ -21,3 +21,16 @@ def test_a_viewer_is_built_when_first_asked_for_and_kept():
 
 if __name__ == "__main__":
     test_int32_array_from_ptr_as_int()
+
+
+def test_structured_dtypes_of_one_itemsize_get_viewers_of_their_own():
+    # numpy names both void32, so the two viewers shared one cache index and a
+    # process loading both from the cache ran the first one's code for the
+    # second.
+    first = numpy_array_from_ptr_factory(np.dtype([("a", "<i4")]))
+    second = numpy_array_from_ptr_factory(np.dtype([("b", "<f4")]))
+    assert first.__qualname__ != second.__qualname__
+    ints = np.array([(7,), (-3,)], dtype=[("a", "<i4")])
+    floats = np.array([(1.5,), (-2.5,)], dtype=[("b", "<f4")])
+    assert first(ints.ctypes.data, 2).tolist() == [(7,), (-3,)]
+    assert second(floats.ctypes.data, 2).tolist() == [(1.5,), (-2.5,)]

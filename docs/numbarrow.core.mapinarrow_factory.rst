@@ -28,6 +28,8 @@ Usage::
         return {"output_col": Nullable(result, bitmap_dict["input_col"])}
 
     udf = make_mapinarrow_func(my_func, broadcasts={"scale": 1.5})
+    df_in = ...           # caller-provided PySpark DataFrame
+    output_schema = ...   # caller-provided PySpark StructType
     df_out = df_in.mapInArrow(udf, output_schema)
 
 Every name in ``data_dict`` is also a key of ``bitmap_dict``, so a batch that

@@ -751,3 +751,25 @@ def test_a_ragged_map_raises_as_the_readme_says():
                        type=pa.map_(pa.string(), pa.int64()))
     _, _, datas = arrow_array_adapter(uniform)
     assert datas["value"].tolist() == [1, 2, 3, 4]
+
+
+def test_the_base_of_a_view_cannot_be_released_from_under_it():
+    # np.frombuffer kept only a wrapper of the memoryview it was handed as
+    # .base, and a caller who released it, dropped the source and read the
+    # view read freed memory.
+    n = 1 << 16
+
+    def view():
+        source = pa.array(np.arange(n) * 7 + 3)
+        return arrow_array_adapter(source)[1]
+
+    data = view()
+    before = data.copy()
+    assert not hasattr(data.base, "release")
+    with pytest.raises(ValueError, match="WRITEABLE"):
+        data.flags.writeable = True
+    gc.collect()
+    junk = [pa.allocate_buffer(n * 8) for _ in range(6)]
+    for buffer in junk:
+        np.frombuffer(buffer, dtype=np.uint8)[:] = 0xA5
+    assert np.array_equal(data, before)

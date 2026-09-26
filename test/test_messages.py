@@ -108,6 +108,18 @@ def test_input_columns_as_a_string_is_refused():
         make_mapinarrow_func(lambda d, b, br: {}, input_columns="value")
 
 
+def test_an_empty_input_columns_is_refused():
+    # A generator already used up, or a filter that matched nothing, named no
+    # column: a main_func reading data_dict["x"] died on a bare KeyError, and
+    # one doubling whatever arrived returned a batch of no rows and no columns
+    # without a word.
+    used_up = (name for name in ["x"])
+    list(used_up)
+    for empty in ([], used_up, filter(lambda name: name.startswith("feat_"), ["x", "y"])):
+        with pytest.raises(ValueError, match="input_columns names no column"):
+            make_mapinarrow_func(lambda d, b, br: {}, input_columns=empty)
+
+
 def test_an_output_schema_that_is_not_a_pyarrow_schema_is_refused():
     # A PySpark StructType is what the README's own example calls
     # output_schema, and it carries .names too, so it got as far as the first
@@ -178,3 +190,106 @@ def test_an_exception_that_cannot_be_rebuilt_from_a_message_is_renamed_as_a_valu
     wrapped = renamed(UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"), "column 'x'")
     assert type(wrapped) is ValueError
     assert str(wrapped).startswith("column 'x': ")
+
+
+def test_a_scalar_string_output_is_refused_rather_than_spread():
+    # {"country": "US"} over a two-row batch came back as the rows "U" and "S",
+    # and a 0-d unicode array's tolist() is that scalar, which defeated
+    # pa.array's own refusal of a 0-d array.
+    batch = _batch(v=[1, 2])
+    for value in ("US", b"US", np.str_("US"), np.array("US"), np.array([["a", "b"]])):
+        fn = make_mapinarrow_func(lambda d, b, br, value=value: {"country": value})
+        with pytest.raises(TypeError, match="'country'"):
+            list(fn(iter([batch])))
+
+
+def test_a_union_field_under_a_struct_is_refused_before_flatten():
+    # flatten() hands the struct's validity to each child, and a union carries
+    # none, so Arrow's C++ layer aborted the process under a struct with a null
+    # row where the typed refusal was due.
+    types = pa.array([0, 1, 0], type=pa.int8())
+    union = pa.UnionArray.from_sparse(types, [pa.array([1, 2, 3]), pa.array(["a", "b", "c"])])
+    for mask in (None, pa.array([False, True, False])):
+        struct = pa.StructArray.from_arrays([pa.array([1, 2, 3]), union], names=["ok", "u"], mask=mask)
+        with pytest.raises(NotImplementedError, match=r"struct field 'u'.*union"):
+            arrow_array_adapter(struct)
+
+
+def test_the_unexpected_keys_listing_is_cut_with_a_count():
+    # A UDF keying a dict by a row value put every key of the batch into the
+    # exception, 1.5 MB for 100,000 rows, and twice into the executor logs.
+    rows = [{f"user_{i:06d}": 1} for i in range(1000)]
+    fn = make_mapinarrow_func(lambda d, b, br: {"counts": rows},
+                              output_schema=pa.schema([("counts", pa.struct([("total", pa.int64())]))]))
+    with pytest.raises(ValueError) as excinfo:
+        list(fn(iter([_batch(v=list(range(1000)))])))
+    message = str(excinfo.value)
+    assert "'user_000000'" in message and "and 990 more" in message and len(message) < 600
+
+
+def test_the_dispatcher_describes_a_scalar_and_leaks_no_type_column():
+    # A null list scalar died on len(), a struct scalar of a supported column
+    # was described as an unsupported array of that type, and a frame with a
+    # column called type put that column's values into the message.
+    for scalar in (pa.array([None], type=pa.list_(pa.int64()))[0], pa.array([{"a": 1}])[0]):
+        with pytest.raises(NotImplementedError, match=r"Scalar of type .*: pass the Array"):
+            arrow_array_adapter(scalar)
+    pd = pytest.importorskip("pandas")
+    frame = pd.DataFrame({"type": [f"secret-{i}" for i in range(50)], "v": range(50)})
+    with pytest.raises(NotImplementedError, match="DataFrame, which is not a pyarrow Array") as excinfo:
+        arrow_array_adapter(frame)
+    assert "secret" not in str(excinfo.value)
+
+
+def test_an_output_schema_naming_a_field_twice_is_refused_at_factory_time():
+    # One dict entry filled every copy, and Spark died in the JVM with "not
+    # all nodes and buffers were consumed", naming neither the column nor the
+    # repeated name.
+    with pytest.raises(ValueError, match=r"\['price'\] more than once"):
+        make_mapinarrow_func(lambda d, b, br: {}, output_schema=pa.schema([("price", pa.float64()), ("price", pa.int32())]))
+    nested = pa.schema([("s", pa.list_(pa.struct([("x", pa.int64()), ("x", pa.float64())])))])
+    with pytest.raises(ValueError, match=r"\['x'\] more than once"):
+        make_mapinarrow_func(lambda d, b, br: {}, output_schema=nested)
+
+
+def test_the_function_names_the_shape_it_takes_when_handed_a_batch_or_a_table():
+    # udf(batch) and udf(table) walked the columns and died on an attribute of
+    # the first one, and mapInPandas's frames died the same way.
+    fn = make_mapinarrow_func(lambda d, b, br: {"out": d["a"]})
+    batch = pa.RecordBatch.from_pydict({"a": [1, 2, 3]})
+    handed = [batch, pa.Table.from_batches([batch])]
+    try:
+        import pandas  # noqa: F401
+        handed.append([batch.to_pandas()])
+    except ImportError:
+        # The pyarrow-range cells install no pandas.
+        pass
+    for shape in handed:
+        with pytest.raises(TypeError, match="iterator of pyarrow.RecordBatch"):
+            list(fn(shape))
+    assert list(fn([batch]))[0].column("out").to_pylist() == [1, 2, 3]
+
+
+def test_a_nested_key_refusal_names_the_path_to_the_field():
+    # Two same-typed sibling fields, a map's key and its value, and different
+    # depths all raised a byte-identical message naming the column alone.
+    inner = pa.struct([("amount", pa.int64())])
+    schema = pa.schema([("s", pa.struct([("a", inner), ("b", inner), ("m", pa.map_(pa.string(), inner))]))])
+    rows = [{"a": {"amount": 1}, "b": {"Amount": 2}, "m": [("k", {"amount": 3})]}]
+    fn = make_mapinarrow_func(lambda d, b, br: {"s": rows}, output_schema=schema)
+    with pytest.raises(ValueError, match=r"output column 's': field 'b': declared"):
+        list(fn(iter([_batch(v=[1])])))
+    rows = [{"a": {"amount": 1}, "b": {"amount": 2}, "m": [("k", {"Amount": 3})]}]
+    fn = make_mapinarrow_func(lambda d, b, br: {"s": rows}, output_schema=schema)
+    with pytest.raises(ValueError, match=r"output column 's': field 'm': map value: declared"):
+        list(fn(iter([_batch(v=[1])])))
+
+
+def test_the_dispatcher_cuts_a_wide_type_for_a_chunked_array():
+    # The wide-type test reached two of the twelve cut sites and none of the
+    # dispatcher's own: a Table column of a thousand-field struct put every
+    # field into the message under a mutant that spelled the type out.
+    column = pa.chunked_array([pa.array([{f"field_{i}": 1 for i in range(1000)}], type=_wide_struct(1000))])
+    with pytest.raises(NotImplementedError) as excinfo:
+        arrow_array_adapter(column)
+    assert "ChunkedArray" in str(excinfo.value) and len(str(excinfo.value)) < 400

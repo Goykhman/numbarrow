@@ -179,9 +179,12 @@ def test_null_magnitude_is_excluded_from_the_product(spark):
 
 
 def test_struct_null_row_survives_the_arrow_transport(spark):
-    # A struct-null row reaches the worker with no child validity buffer, so
-    # the field's own bitmap cannot see it. Spark's transport is an Arrow IPC
-    # round trip, which preserves that shape, and the folded bitmap catches it.
+    # Spark's own Arrow writer nulls the child of a null struct row, so the
+    # field's bitmap alone sees this row and the fold changes nothing here:
+    # this is the end-to-end check that a struct null reaches the UDF through
+    # the transport at all. The fold is pinned where the child carries no
+    # null of its own, by test_both_null_layers_are_folded_together and its
+    # siblings in test_mapinarrow_factory.py.
     schema = StructType([
         StructField("id", StringType()),
         StructField("point", StructType([StructField("v", LongType())])),

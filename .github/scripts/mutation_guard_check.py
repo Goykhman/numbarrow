@@ -87,10 +87,8 @@ MUTATIONS = [
     (
         "a struct dict key no field has stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
-        "        if unexpected_keys:\n            raise ValueError(\n"
-        "                f\"declared {type_repr(arrow_type)} but the dicts",
-        "        if False:\n            raise ValueError(\n"
-        "                f\"declared {type_repr(arrow_type)} but the dicts",
+        "        if unexpected_keys:\n            shown = unexpected_keys[:KEYS_SHOWN]",
+        "        if False:\n            shown = unexpected_keys[:KEYS_SHOWN]",
     ),
     (
         "a struct key inside a struct field stops being checked",
@@ -107,20 +105,20 @@ MUTATIONS = [
     (
         "the key check stops passing over a row it cannot look inside",
         "numbarrow/core/mapinarrow_factory.py",
-        '        if hasattr(row, "__iter__")\n',
-        "        if True\n",
+        "        try:\n            iter(row)\n        except TypeError:\n            continue\n",
+        "        try:\n            iter(row)\n        except TypeError:\n            pass\n",
     ),
     (
         "the key check spreads a str or bytes row again",
         "numbarrow/core/mapinarrow_factory.py",
-        "        and not isinstance(row, (str, bytes))\n",
-        "",
+        "        if isinstance(row, (str, bytes, pa.Scalar)) or",
+        "        if isinstance(row, (pa.Scalar,)) or",
     ),
     (
         "the key check spreads a numeric ndarray row again",
         "numbarrow/core/mapinarrow_factory.py",
-        '        and not (isinstance(row, np.ndarray) and row.dtype.kind != "O")\n',
-        "",
+        ' or (isinstance(row, np.ndarray) and row.dtype.kind != "O"):',
+        ' or False:',
     ),
     (
         "a struct key inside a map's keys stops being checked",
@@ -215,9 +213,9 @@ MUTATIONS = [
     (
         "is_null_struct stops being compiled with one signature",
         "numbarrow/core/is_null.py",
-        '@njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
-        '              Optional(Array(uint8, 1, "C", readonly=True))), **jit_options)',
-        "@njit(**jit_options)",
+        '@jit_with_options(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
+        '                          Optional(Array(uint8, 1, "C", readonly=True))))',
+        "@jit_with_options()",
     ),
     (
         "viewers stop getting a cache name of their own",
@@ -228,8 +226,8 @@ MUTATIONS = [
     (
         "uniform view stops being read-only at the buffer",
         "numbarrow/utils/arrow_array_utils.py",
-        "        memoryview(data_buf).toreadonly(),",
-        "        memoryview(data_buf),",
+        "        pa.py_buffer(memoryview(data_buf).toreadonly()),",
+        "        pa.py_buffer(memoryview(data_buf)),",
     ),
     (
         "empty string result stops being read-only",
@@ -255,8 +253,8 @@ MUTATIONS = [
     (
         "a Nullable stops being split into data and bitmap",
         "numbarrow/core/mapinarrow_factory.py",
-        "    if isinstance(value, Nullable):",
-        "    if False:",
+        "    if isinstance(value, Nullable):\n        return value.data, value.bitmap",
+        "    if False:\n        return value.data, value.bitmap",
     ),
     (
         "a Nullable's bitmap stops being folded in",
@@ -315,8 +313,8 @@ MUTATIONS = [
     (
         "a generator output stops being read into a list before the key check",
         "numbarrow/core/mapinarrow_factory.py",
-        '        if not hasattr(value, "__len__"):',
-        "        if False:",
+        '    if not hasattr(value, "__len__"):',
+        "    if False:",
     ),
     (
         "a record array with no fields stops keeping its rows",
@@ -396,14 +394,268 @@ MUTATIONS = [
     (
         "map entries stop checking a pair's shape",
         'numbarrow/core/mapinarrow_factory.py',
-        '                if isinstance(pair, (tuple, list)) and len(pair) == 2:',
-        '                if True:',
+        '                elif isinstance(pair, (tuple, list)) and len(pair) == 2:',
+        '                elif True:',
     ),
     (
         'a record array field failure stops naming the field',
         'numbarrow/core/mapinarrow_factory.py',
-        '            raise renamed(exc, f"field {field.name!r}") from exc',
+        '        raise renamed(exc, f"field {name!r}") from exc',
+        '        raise',
+    ),
+    (
+        "a record array converted as inferred stops naming a failing field",
+        "numbarrow/core/mapinarrow_factory.py",
+        "        children = [_record_field(value, name, None) for name in names]",
+        "        children = [_convert(value[name], None) for name in names]",
+    ),
+    (
+        "input_columns is read again on every batch",
+        "numbarrow/core/mapinarrow_factory.py",
+        "            input_columns_ = named if named is not None else list(dict.fromkeys(names))",
+        "            input_columns_ = list(dict.fromkeys(input_columns if input_columns is not None else names))",
+    ),
+    (
+        'a time unit multiplier stops being folded in',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if target == unit and count == 1:\n        return value',
+        '    if target == unit:\n        return value',
+    ),
+    (
+        'a coarse time unit stops being taken to seconds',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if unit in ("h", "m") or (family == "timedelta64" and unit in ("W", "D")):\n        target = "s"',
+        '    if False:\n        target = "s"',
+    ),
+    (
+        'a str output stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if isinstance(value, (str, bytes)):\n        raise TypeError(',
+        '    if False:\n        raise TypeError(',
+    ),
+    (
+        'a 0-d or 2-d array output stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if kind in ("U", "S") and value.ndim != 1:',
+        '    if False:',
+    ),
+    (
+        'a Nullable inside a Nullable stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        "    if isinstance(value, Nullable):\n        # A helper's Nullable",
+        "    if False:\n        # A helper's Nullable",
+    ),
+    (
+        'tuple rows stop being checked by position',
+        'numbarrow/core/mapinarrow_factory.py',
+        '                children.extend(row[index] for row in tuples if index < len(row))',
+        '                pass',
+    ),
+    (
+        'a namedtuple naming the fields in another order stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        if given is not None and set(given) == set(names) and list(given) != names:',
+        '        if False:',
+    ),
+    (
+        'iterability stops being tested with iter',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        try:\n            iter(row)\n        except TypeError:\n            continue\n        kept.append(row)',
+        '        if not hasattr(row, "__iter__"):\n            continue\n        kept.append(row)',
+    ),
+    (
+        'a key/value entry dict stops being read as a pair',
+        'numbarrow/core/mapinarrow_factory.py',
+        '                if isinstance(pair, Mapping) and set(pair) == {"key", "value"}:',
+        '                if False:',
+    ),
+    (
+        'pyarrow scalar rows stop being passed over by the key check',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        if isinstance(row, (str, bytes, pa.Scalar)) or',
+        '        if isinstance(row, (str, bytes)) or',
+    ),
+    (
+        'a pandas Series row stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        if _is_pandas(row, "Series", "DataFrame"):',
+        '        if False:',
+    ),
+    (
+        'a KeyError from pa.array stops naming the column',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    except (pa.ArrowException, TypeError, ValueError, OverflowError, KeyError) as exc:\n'
+        '        raise renamed(exc, f"output column {name!r}") from exc',
+        '    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:\n'
+        '        raise renamed(exc, f"output column {name!r}") from exc',
+    ),
+    (
+        'a KeyError from a record field stops naming the field',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    except (pa.ArrowException, TypeError, ValueError, OverflowError, KeyError) as exc:\n'
+        '        raise renamed(exc, f"field {name!r}") from exc',
+        '    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:\n'
+        '        raise renamed(exc, f"field {name!r}") from exc',
+    ),
+    (
+        'a chunked array from pa.array stops being combined',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if isinstance(array, pa.ChunkedArray):\n        # A pandas Series over a multi-chunk',
+        '    if False:\n        # A pandas Series over a multi-chunk',
+    ),
+    (
+        'the field guard stops seeing through an extension type',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    source_type = _storage(source_type)\n'
+        '    declared_type = _storage(declared_type)',
+        '    declared_type = _storage(declared_type)',
+    ),
+    (
+        'a map source stops being paired with a declared list of entries',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if pa.types.is_map(source_type) and _is_list_like(declared_type):',
+        '    if False:',
+    ),
+    (
+        'view layouts stop counting as list-like',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            or pa.types.is_fixed_size_list(arrow_type) or _is_list_view(arrow_type))',
+        '            or pa.types.is_fixed_size_list(arrow_type))',
+    ),
+    (
+        "a later batch's inferred schema stops being compared with the first's",
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if built.schema != inferred:',
+        '    if False:',
+    ),
+    (
+        'an extension column stops being masked through its storage',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if isinstance(array, pa.ExtensionArray):\n'
+        '        # The flat test below',
+        '    if False:\n'
+        '        # The flat test below',
+    ),
+    (
+        'a union child stops being refused before flatten',
+        'numbarrow/utils/arrow_array_utils.py',
+        '        if _is_union_layout(raw_child.type):',
+        '        if False:',
+    ),
+    (
+        "a view's base stops being a buffer that cannot be released",
+        'numbarrow/utils/arrow_array_utils.py',
+        '        pa.py_buffer(memoryview(data_buf).toreadonly()),',
+        '        memoryview(data_buf).toreadonly(),',
+    ),
+    (
+        "a batch's arrays stay bound across the yield",
+        'numbarrow/core/mapinarrow_factory.py',
+        '            data_dict = bitmap_dict = handed = col_pa = adapted = None',
+        '            pass',
+    ),
+    (
+        'structured dtypes stop getting viewers of their own',
+        'numbarrow/utils/utils.py',
+        '    if dtype_.fields is not None:',
+        '    if False:',
+    ),
+    (
+        'a zero-length temporal column stops keeping its bitmap presence',
+        'numbarrow/core/adapters.py',
+        '    if not len(pa_array):\n'
+        '        # The cast of a zero-length array drops its validity buffer, and a',
+        '    if False:\n'
+        '        # The cast of a zero-length array drops its validity buffer, and a',
+    ),
+    (
+        'the unexpected-keys listing stops being cut',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            shown = unexpected_keys[:KEYS_SHOWN]',
+        '            shown = unexpected_keys',
+    ),
+    (
+        'a scalar stops being described as one at the dispatcher',
+        'numbarrow/core/adapters.py',
+        '    if isinstance(pa_array, pa.Scalar):',
+        '    if False:',
+    ),
+    (
+        'a type attribute that is not a DataType stops being screened',
+        'numbarrow/core/adapters.py',
+        '    if not isinstance(arrow_type, pa.DataType):',
+        '    if arrow_type is None:',
+    ),
+    (
+        'a repeated name in output_schema stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    repeated = _repeated_names(list(output_schema))\n'
+        '    if repeated:',
+        '    repeated = _repeated_names(list(output_schema))\n'
+        '    if False:',
+    ),
+    (
+        'an item that is not a RecordBatch stops being refused by name',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            if not isinstance(batch, pa.RecordBatch):',
+        '            if False:',
+    ),
+    (
+        'the options refusal stops showing the value',
+        'numbarrow/core/configurations.py',
+        '            f"{invalid_jit_options_err}; {as_str!r} is valid JSON but a {type(as_json).__name__}, not an object"',
+        '            invalid_jit_options_err',
+    ),
+    (
+        'the 64-bit date view stops refusing another unit',
+        'numbarrow/core/adapters.py',
+        '    if np_dtype != np.dtype(f"datetime64[{unit}]"):',
+        '    if False:',
+    ),
+    (
+        'a fixed-width binary column stops going to pa.array directly',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        if arrow_type is not None and pa.types.is_fixed_size_binary(arrow_type):',
+        '        if False:',
+    ),
+    (
+        'a nested key refusal stops naming the field path',
+        'numbarrow/core/mapinarrow_factory.py',
+        '                _check_keys(children, child_type, f"{where}field {name!r}: ")',
+        '                _check_keys(children, child_type, where)',
+    ),
+    (
+        'a function that numba cannot cache stops compiling uncached',
+        'numbarrow/core/configurations.py',
+        '            if "no locator available" not in str(error) or not jit_options.get("cache"):\n'
+        '                raise',
         '            raise',
+    ),
+    (
+        'a bytes output stops naming its type',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        return pa.array(value.tolist(), type=arrow_type or pa.binary())',
+        '        return pa.array(value.tolist(), type=arrow_type)',
+    ),
+    (
+        "the dispatcher stops cutting a chunked array's type",
+        'numbarrow/core/adapters.py',
+        '            f"Not implemented for a ChunkedArray of {pa_array.num_chunks} chunks of type "\n'
+        '            f"{type_repr(pa_array.type)}: pass one chunk, or combine_chunks() first"',
+        '            f"Not implemented for a ChunkedArray of {pa_array.num_chunks} chunks of type "\n'
+        '            f"{pa_array.type}: pass one chunk, or combine_chunks() first"',
+    ),
+    (
+        'a timestamp stops being read at its own unit',
+        'numbarrow/core/adapters.py',
+        '    return cast_64bit_date_arrow_to_numpy_array(pa_array, np.dtype(f"datetime64[{timestamp_unit}]"))',
+        '    return cast_64bit_date_arrow_to_numpy_array(pa_array, np.dtype("datetime64[us]"))',
+    ),
+    (
+        'an empty input_columns stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    if named == []:',
+        '    if False:',
     ),
 ]
 

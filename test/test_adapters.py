@@ -157,3 +157,39 @@ if __name__ == "__main__":
     test_arrow_array_adapter_3()
     test_arrow_array_adapter_4()
     test_empty_str_array()
+
+
+def test_a_zero_length_temporal_column_keeps_its_bitmap_presence():
+    # The temporal handlers took the bitmap from the cast, and a zero-length
+    # cast drops the validity buffer, so the documented None-only-without-a-
+    # buffer rule broke for date32, date64 and timestamp columns.
+    for arrow_type, source_type in ((pa.date32(), pa.int32()), (pa.date64(), pa.int64()),
+                                    (pa.timestamp("us", "UTC"), pa.int64())):
+        source = pa.array([1, None], type=source_type).cast(arrow_type).slice(1, 0)
+        assert source.buffers()[0] is not None
+        bitmap, data = arrow_array_adapter(source)
+        assert bitmap is not None and bitmap.dtype == np.uint8 and len(bitmap) == 0 and len(data) == 0
+
+
+def test_the_64bit_date_view_refuses_a_unit_that_is_not_the_arrays_own():
+    # The docstring promised a cast to any unit and the body reinterpreted the
+    # int64 payload, so timestamp[ms] viewed as datetime64[s] landed in 51971.
+    from numbarrow.core.adapters import cast_64bit_date_arrow_to_numpy_array
+    stamps = pa.array([datetime(2020, 1, 1, 12)], type=pa.timestamp("ms"))
+    _, data = cast_64bit_date_arrow_to_numpy_array(stamps, np.dtype("datetime64[ms]"))
+    assert data.tolist() == [datetime(2020, 1, 1, 12)]
+    with pytest.raises(ValueError, match=r"ms instants.*not as datetime64\[s\]"):
+        cast_64bit_date_arrow_to_numpy_array(stamps, np.dtype("datetime64[s]"))
+    with pytest.raises(ValueError, match="not a date64 or timestamp"):
+        cast_64bit_date_arrow_to_numpy_array(pa.array([1], type=pa.int64()), np.dtype("datetime64[s]"))
+
+
+def test_a_timestamp_is_read_at_its_own_unit():
+    # Every test that read a timestamp value used microseconds, so adapting
+    # every unit as datetime64[us] passed the suite while a millisecond column
+    # read as 1970.
+    instant = datetime(2020, 9, 13, 12, 26, 40)
+    for unit in ("s", "ms", "us", "ns"):
+        _, data = arrow_array_adapter(pa.array([instant], type=pa.timestamp(unit)))
+        assert data.dtype == np.dtype(f"datetime64[{unit}]"), unit
+        assert data.astype("datetime64[us]").tolist() == [instant], unit

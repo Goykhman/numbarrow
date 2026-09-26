@@ -4,9 +4,14 @@ Default configuration options for Numba JIT compilation used throughout numbarro
 
 import os
 import json
+import warnings
+
+from numba import njit
 
 
-invalid_jit_options_err = """Must be valid JSON, e.g., export NUMBARROW_JIT_OPTIONS='{"cache": false}'"""
+invalid_jit_options_err = (
+    """NUMBARROW_JIT_OPTIONS must be a JSON object, e.g., export NUMBARROW_JIT_OPTIONS='{"cache": false}'"""
+)
 
 
 def get_jit_options():
@@ -32,10 +37,14 @@ def get_jit_options():
         return {"cache": True}
     try:
         as_json = json.loads(as_str)
-    except json.JSONDecodeError:
-        raise ValueError(invalid_jit_options_err)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{invalid_jit_options_err}; {as_str!r} is not valid JSON: {error}") from None
     if not isinstance(as_json, dict):
-        raise ValueError(invalid_jit_options_err)
+        # One message for both failures told a value that was valid JSON that
+        # it must be valid JSON, and showed neither the value nor the rule.
+        raise ValueError(
+            f"{invalid_jit_options_err}; {as_str!r} is valid JSON but a {type(as_json).__name__}, not an object"
+        )
     if "cache" in as_json and not isinstance(as_json["cache"], bool):
         raise ValueError(
             f'NUMBARROW_JIT_OPTIONS "cache" must be true or false, not {as_json["cache"]!r}: numba reads any '
@@ -51,3 +60,28 @@ def get_jit_options():
 
 
 jit_options = get_jit_options()
+
+
+def jit_with_options(*signature):
+    """``njit`` under the options ``NUMBARROW_JIT_OPTIONS`` gives, compiling uncached where no cache can be written.
+
+    numba sets a cached function up when it is decorated, and raises ``RuntimeError`` there when no cache
+    location can be written: a read-only install, an unwritable ``site-packages`` and user cache directory, or
+    an import from an ``.egg``, ``.whl`` or ``.pyz`` archive, which Spark's ``--py-files`` ships. Nothing then
+    named the way out. Such a function compiles without a cache, with a warning naming ``NUMBA_CACHE_DIR`` and
+    ``NUMBARROW_JIT_OPTIONS='{"cache": false}'``. A write that fails later, on a full disk, is numba's own error.
+    """
+    def decorate(func):
+        try:
+            return njit(*signature, **jit_options)(func)
+        except RuntimeError as error:
+            if "no locator available" not in str(error) or not jit_options.get("cache"):
+                raise
+            warnings.warn(
+                f"numba cannot cache {func.__qualname__} here ({error}); it compiles without a cache. Set "
+                f"NUMBA_CACHE_DIR to a writable directory, or NUMBARROW_JIT_OPTIONS='{{\"cache\": false}}' to "
+                f"turn caching off and silence this warning",
+                RuntimeWarning, stacklevel=2,
+            )
+            return njit(*signature, **{**jit_options, "cache": False})(func)
+    return decorate

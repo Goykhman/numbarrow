@@ -23,21 +23,33 @@ from numbarrow.utils.utils import arrays_viewers
 
 
 def cast_64bit_date_arrow_to_numpy_array(pa_array: pa.Array, np_dtype: np.dtype):
-    """ Can be used to cast PyArrow arrays of date types that are represented by
-    64-bit integers to numpy arrays of various date types (np.datetime64[...],
-    which are always represented  by 64-bit integers whose meaning is determined
-    by the precision, such as, 's', 'ms', 'us').
+    """View a date64 or timestamp array as the ``datetime64`` of the same unit, without a copy.
 
-    Since underlying data layout of both arrays in int64, a copy is avoided,
-
-    The associated bitmap (if any) is also returned.
+    Both hold one int64 per value, so the Arrow buffer is viewed rather than
+    converted, and *np_dtype* must be ``datetime64`` at the array's own unit:
+    ``ms`` for a date64, and a timestamp's own unit. Any other unit is
+    refused, since a view cannot rescale and read every value at the wrong
+    instant, ``timestamp[ms]`` viewed as ``datetime64[s]`` landing in the
+    year 51971. The associated bitmap (if any) is also returned.
     """
+    np_dtype = np.dtype(np_dtype)
+    unit = "ms" if pa.types.is_date64(pa_array.type) else getattr(pa_array.type, "unit", None)
+    if unit is None:
+        raise ValueError(f"{type_repr(pa_array.type)} is not a date64 or timestamp type")
+    if np_dtype != np.dtype(f"datetime64[{unit}]"):
+        raise ValueError(
+            f"{type_repr(pa_array.type)} holds {unit} instants, which view as datetime64[{unit}], not as {np_dtype}"
+        )
     int64_array = pa_array.cast(pa.int64())
     # A zero-length array's buffers are not required to survive a cast, and
     # nothing has been copied when there is nothing to copy.
     if len(pa_array):
         assert int64_array.buffers()[1].address == pa_array.buffers()[1].address, "got copied"
     bitmap, int64_data = uniform_arrow_array_adapter(int64_array)
+    if not len(pa_array):
+        # The cast of a zero-length array drops its validity buffer, and a
+        # bitmap is None only when the source carries none.
+        bitmap = create_bitmap(pa_array.buffers()[0], pa_array.offset, 0)
     data = int64_data.view(np_dtype)
     assert data.ctypes.data == int64_data.ctypes.data, "got copied"
     return bitmap, data
@@ -65,8 +77,18 @@ def arrow_array_adapter(pa_array: pa.Array):
             f"Not implemented for a ChunkedArray of {pa_array.num_chunks} chunks of type "
             f"{type_repr(pa_array.type)}: pass one chunk, or combine_chunks() first"
         )
+    if isinstance(pa_array, pa.Scalar):
+        # One row of a column, not the column: a null list scalar has no
+        # length to read, and a struct or map scalar of a supported column
+        # was described as an unsupported array of that type.
+        raise NotImplementedError(
+            f"Not implemented for a {type(pa_array).__name__} of type {type_repr(pa_array.type)}: "
+            f"pass the Array, not one of its rows"
+        )
     arrow_type = getattr(pa_array, "type", None)
-    if arrow_type is None:
+    if not isinstance(arrow_type, pa.DataType):
+        # A pandas frame or a record array with a column called type answers
+        # the attribute with that column, which then went into the message.
         described = f"{type(pa_array).__name__}, which is not a pyarrow Array"
     elif hasattr(pa_array, "__len__"):
         described = f"an array of {len(pa_array)} elements of type {type_repr(arrow_type)}"
@@ -123,6 +145,10 @@ def _(pa_array: pa.Date32Array):
     if len(pa_array):
         assert int32_array.buffers()[1].address == pa_array.buffers()[1].address, "got copied"
     bitmap, int32_data = uniform_arrow_array_adapter(int32_array)
+    if not len(pa_array):
+        # As in cast_64bit_date_arrow_to_numpy_array: the zero-length cast
+        # dropped the validity buffer the source still carries.
+        bitmap = create_bitmap(pa_array.buffers()[0], pa_array.offset, 0)
     data = int32_data.astype(np.dtype("datetime64[D]"))
     if len(pa_array):
         assert int32_data.ctypes.data != data.ctypes.data
