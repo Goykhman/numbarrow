@@ -87,10 +87,8 @@ MUTATIONS = [
     (
         "a struct dict key no field has stops being refused",
         "numbarrow/core/mapinarrow_factory.py",
-        "        if unexpected_keys:\n            raise ValueError(\n"
-        "                f\"declared {type_repr(arrow_type)} but the dicts",
-        "        if False:\n            raise ValueError(\n"
-        "                f\"declared {type_repr(arrow_type)} but the dicts",
+        "        if unexpected_keys:\n            shown = unexpected_keys[:KEYS_SHOWN]",
+        "        if False:\n            shown = unexpected_keys[:KEYS_SHOWN]",
     ),
     (
         "a struct key inside a struct field stops being checked",
@@ -107,20 +105,20 @@ MUTATIONS = [
     (
         "the key check stops passing over a row it cannot look inside",
         "numbarrow/core/mapinarrow_factory.py",
-        '        if hasattr(row, "__iter__")\n',
-        "        if True\n",
+        "        try:\n            iter(row)\n        except TypeError:\n            continue\n",
+        "        try:\n            iter(row)\n        except TypeError:\n            pass\n",
     ),
     (
         "the key check spreads a str or bytes row again",
         "numbarrow/core/mapinarrow_factory.py",
-        "        and not isinstance(row, (str, bytes))\n",
-        "",
+        "        if isinstance(row, (str, bytes, pa.Scalar)) or",
+        "        if isinstance(row, (pa.Scalar,)) or",
     ),
     (
         "the key check spreads a numeric ndarray row again",
         "numbarrow/core/mapinarrow_factory.py",
-        '        and not (isinstance(row, np.ndarray) and row.dtype.kind != "O")\n',
-        "",
+        ' or (isinstance(row, np.ndarray) and row.dtype.kind != "O"):',
+        ' or False:',
     ),
     (
         "a struct key inside a map's keys stops being checked",
@@ -228,8 +226,8 @@ MUTATIONS = [
     (
         "uniform view stops being read-only at the buffer",
         "numbarrow/utils/arrow_array_utils.py",
-        "        memoryview(data_buf).toreadonly(),",
-        "        memoryview(data_buf),",
+        "        pa.py_buffer(memoryview(data_buf).toreadonly()),",
+        "        pa.py_buffer(memoryview(data_buf)),",
     ),
     (
         "empty string result stops being read-only",
@@ -255,8 +253,8 @@ MUTATIONS = [
     (
         "a Nullable stops being split into data and bitmap",
         "numbarrow/core/mapinarrow_factory.py",
-        "    if isinstance(value, Nullable):",
-        "    if False:",
+        "    if isinstance(value, Nullable):\n        return value.data, value.bitmap",
+        "    if False:\n        return value.data, value.bitmap",
     ),
     (
         "a Nullable's bitmap stops being folded in",
@@ -315,8 +313,8 @@ MUTATIONS = [
     (
         "a generator output stops being read into a list before the key check",
         "numbarrow/core/mapinarrow_factory.py",
-        '        if not hasattr(value, "__len__"):',
-        "        if False:",
+        '    if not hasattr(value, "__len__"):',
+        "    if False:",
     ),
     (
         "a record array with no fields stops keeping its rows",
@@ -396,8 +394,8 @@ MUTATIONS = [
     (
         "map entries stop checking a pair's shape",
         'numbarrow/core/mapinarrow_factory.py',
-        '                if isinstance(pair, (tuple, list)) and len(pair) == 2:',
-        '                if True:',
+        '                elif isinstance(pair, (tuple, list)) and len(pair) == 2:',
+        '                elif True:',
     ),
     (
         'a record array field failure stops naming the field',
