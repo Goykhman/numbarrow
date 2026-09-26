@@ -141,9 +141,12 @@ as `spark-submit --py-files` ships, the functions compile without a cache and
 a warning names the two remedies: point `NUMBA_CACHE_DIR` at a writable
 directory, or set `NUMBARROW_JIT_OPTIONS='{"cache": false}'`. numba's cache
 index does not record the options a function was compiled with, so point
-`NUMBA_CACHE_DIR` at a fresh directory when an option changes. Both variables
-are read when numbarrow is first imported, so set them before it: one set
-afterwards from inside Python changes nothing.
+`NUMBA_CACHE_DIR` at a fresh directory when an option changes. Both are read
+at import: `NUMBARROW_JIT_OPTIONS` when numbarrow is first imported and
+`NUMBA_CACHE_DIR` when numba is, which another library may have done earlier,
+so set both before either. numba re-reads its environment only when it
+compiles something, so a directory set after its import misses at least the
+first function numbarrow compiles, and all of them when the old cache is warm.
 
 ## PySpark Integration
 

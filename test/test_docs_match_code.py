@@ -8,7 +8,10 @@ these fail the build the next time any of it drifts, which is the only thing
 that stops it recurring.
 """
 import datetime
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -185,6 +188,28 @@ def test_the_readme_names_the_pandas_floor_the_extras_declare():
     row = re.search(r"\| pandas \| ([\d.]+)\+", README.read_text()).group(1)
     assert floors == {row}, (floors, row)
     assert "1.5.0" not in README_TEXT
+
+
+def test_the_cache_dir_is_read_at_numbas_import_as_the_readme_says(tmp_path):
+    # The README said both variables are read when numbarrow is first
+    # imported. NUMBA_CACHE_DIR is numba's, read when numba is imported and
+    # again only when it compiles something, so a directory set between the
+    # two imports missed the first function numbarrow compiles, and all of
+    # them when the old cache was warm.
+    assert "`NUMBA_CACHE_DIR` when numba is" in README_TEXT
+    assert "misses at least the first function numbarrow compiles" in README_TEXT
+    first, late = tmp_path / "first", tmp_path / "late"
+    src = (f"import os; os.environ['NUMBA_CACHE_DIR'] = {str(first)!r}\n"
+           "import numba\n"
+           f"os.environ['NUMBA_CACHE_DIR'] = {str(late)!r}\n"
+           "import numbarrow.core.is_null\n")
+    env = {key: value for key, value in os.environ.items() if key not in ("NUMBA_CACHE_DIR", "NUMBARROW_JIT_OPTIONS")}
+    env["PYTHONPATH"] = str(README.parent)
+    run = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert run.returncode == 0, run.stderr
+    indexed = {where: sorted(path.name.split(".")[1].split("-")[0] for path in (tmp_path / where).rglob("*.nbi"))
+               for where in ("first", "late")}
+    assert "is_null" in indexed["first"] and "is_null" not in indexed["late"], indexed
 
 
 def _output_column(value):
