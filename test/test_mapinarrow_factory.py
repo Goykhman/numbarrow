@@ -10,6 +10,7 @@ import pytest
 
 from numbarrow.core.is_null import is_null
 from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
+from test.conftest import Wrapped
 
 
 def run_batch(batch, input_columns=None):
@@ -462,6 +463,9 @@ def test_a_struct_key_no_field_has_is_refused_at_any_depth():
         "map of structs": (pa.map_(pa.string(), inner), [{"k": {"Amount": 1}}]),
         "map of structs from pairs": (pa.map_(pa.string(), inner), [[("k", {"Amount": 1})]]),
         "struct-keyed map": (pa.map_(inner, pa.int64()), [[({"Amount": 1}, 5)]]),
+        # An extension type carries its storage's fields, and the check looks
+        # through it on both of its questions; nothing exercised either.
+        "extension over struct": (Wrapped(inner), [{"Amount": 1}]),
     }
     for label, (declared_type, value) in cases.items():
         with pytest.raises(ValueError, match="Amount"):
