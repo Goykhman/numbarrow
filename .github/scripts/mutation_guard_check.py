@@ -633,6 +633,26 @@ MUTATIONS = [
         '                raise',
         '            raise',
     ),
+    (
+        'a bytes output stops naming its type',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        return pa.array(value.tolist(), type=arrow_type or pa.binary())',
+        '        return pa.array(value.tolist(), type=arrow_type)',
+    ),
+    (
+        "the dispatcher stops cutting a chunked array's type",
+        'numbarrow/core/adapters.py',
+        '            f"Not implemented for a ChunkedArray of {pa_array.num_chunks} chunks of type "\n'
+        '            f"{type_repr(pa_array.type)}: pass one chunk, or combine_chunks() first"',
+        '            f"Not implemented for a ChunkedArray of {pa_array.num_chunks} chunks of type "\n'
+        '            f"{pa_array.type}: pass one chunk, or combine_chunks() first"',
+    ),
+    (
+        'a timestamp stops being read at its own unit',
+        'numbarrow/core/adapters.py',
+        '    return cast_64bit_date_arrow_to_numpy_array(pa_array, np.dtype(f"datetime64[{timestamp_unit}]"))',
+        '    return cast_64bit_date_arrow_to_numpy_array(pa_array, np.dtype("datetime64[us]"))',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

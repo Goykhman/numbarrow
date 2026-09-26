@@ -264,3 +264,13 @@ def test_a_nested_key_refusal_names_the_path_to_the_field():
     fn = make_mapinarrow_func(lambda d, b, br: {"s": rows}, output_schema=schema)
     with pytest.raises(ValueError, match=r"output column 's': field 'm': map value: declared"):
         list(fn(iter([_batch(v=[1])])))
+
+
+def test_the_dispatcher_cuts_a_wide_type_for_a_chunked_array():
+    # The wide-type test reached two of the twelve cut sites and none of the
+    # dispatcher's own: a Table column of a thousand-field struct put every
+    # field into the message under a mutant that spelled the type out.
+    column = pa.chunked_array([pa.array([{f"field_{i}": 1 for i in range(1000)}], type=_wide_struct(1000))])
+    with pytest.raises(NotImplementedError) as excinfo:
+        arrow_array_adapter(column)
+    assert "ChunkedArray" in str(excinfo.value) and len(str(excinfo.value)) < 400

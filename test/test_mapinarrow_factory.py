@@ -1081,3 +1081,41 @@ def test_a_fixed_width_binary_column_keeps_a_trailing_nul_under_its_declared_typ
     got = run_outputs({"d": digests}, declared).column("d")
     assert got.type == pa.binary(16)
     assert got.to_pylist() == [b"0123456789abcde\x00", b"\x00fedcba987654321", b"0123456789abcdef"]
+
+
+def test_the_key_check_covers_the_list_layouts_a_missing_field_and_a_none_row():
+    # large_list and fixed_size_list, a row lacking a nested field and a None
+    # row in a struct column were terms of the check no test reached: dropping
+    # any of them left the suite green.
+    inner = pa.struct([("amount", pa.int64())])
+    for layout in (pa.large_list(inner), pa.list_(inner, 1)):
+        with pytest.raises(ValueError, match=r"'s'.*'Amount'"):
+            run_outputs({"s": [[{"Amount": 1}], [{"amount": 2}]]}, pa.schema([("s", layout)]))
+    nested = pa.schema([("s", pa.struct([("id", pa.int64()), ("inner", inner)]))])
+    got = run_outputs({"s": [{"id": 1, "inner": {"amount": 5}}, {"id": 2}]}, nested).column("s")
+    assert got.to_pylist() == [{"id": 1, "inner": {"amount": 5}}, {"id": 2, "inner": None}]
+    got = run_outputs({"s": [{"amount": 1}, None]}, pa.schema([("s", inner)])).column("s")
+    assert got.to_pylist() == [{"amount": 1}, None]
+
+
+def test_an_empty_bytes_column_keeps_its_type():
+    # The unicode half of the empty-batch pin had a test and the bytes half
+    # did not: an empty |S column inferred null with the default dropped.
+    got = run_outputs({"b": np.empty(0, dtype="S5"), "n": np.empty(0, dtype=np.int64)})
+    assert [field.type for field in got.schema] == [pa.binary(), pa.int64()]
+
+
+def test_every_refusal_class_of_a_record_field_names_the_field():
+    # Only the pyarrow member of the field's except tuple was pinned; narrowed
+    # to it, a dict key no field has, a nested record declared as a list and
+    # an int beyond int64 all stopped naming the field.
+    inner = pa.struct([("amount", pa.int64())])
+    with_dict = np.array([({"Amount": 1},)], dtype=[("meta", "O")])
+    with pytest.raises(ValueError, match=r"'r': field 'meta': declared"):
+        run_outputs({"r": with_dict}, pa.schema([("r", pa.struct([("meta", inner)]))]))
+    nested = np.array([((1, 2),)], dtype=[("pair", [("c", "i8"), ("d", "i8")])])
+    with pytest.raises(TypeError, match=r"'r': field 'pair': a record array"):
+        run_outputs({"r": nested}, pa.schema([("r", pa.struct([("pair", pa.list_(pa.int64()))]))]))
+    big = np.array([(2 ** 70,)], dtype=[("big", "O")])
+    with pytest.raises(OverflowError, match=r"'r': field 'big'"):
+        run_outputs({"r": big}, pa.schema([("r", pa.struct([("big", pa.int64())]))]))

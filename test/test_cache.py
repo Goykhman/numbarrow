@@ -193,3 +193,28 @@ def test_an_import_from_an_archive_compiles_uncached_with_a_warning_naming_the_r
     quiet = subprocess.run([sys.executable, "-W", "error", "-c", probe], capture_output=True, text=True,
                            env=dict(env, NUMBARROW_JIT_OPTIONS='{"cache": false}'), cwd=str(tmp_path))
     assert quiet.returncode == 0, quiet.stderr
+
+
+CHECK_BOUNDS = (
+    "import numpy as np\n"
+    "from numbarrow.core.is_null import is_null, unpack_booleans\n"
+    "bitmap = np.zeros(1, dtype=np.uint8)\n"
+    "outcomes = []\n"
+    "for call in (lambda: is_null(100000, bitmap), lambda: unpack_booleans(0, 100000, bitmap)):\n"
+    "    try:\n"
+    "        call()\n"
+    "        outcomes.append('returned')\n"
+    "    except IndexError:\n"
+    "        outcomes.append('IndexError')\n"
+    "print(' '.join(outcomes))\n"
+)
+
+
+def test_jit_options_reach_the_is_null_decorators(tmp_path):
+    # The options test imported only the viewers, so hard-coding the options
+    # on is_null.py's three decorators kept the suite green, and the documented
+    # boundscheck contract had no test at all.
+    checked = _run(CHECK_BOUNDS, _env(tmp_path / "checked", {"cache": False, "boundscheck": True}), tmp_path)
+    assert checked.returncode == 0 and checked.stdout.split() == ["IndexError", "IndexError"], checked.stderr
+    unchecked = _run(CHECK_BOUNDS, _env(tmp_path / "unchecked", {"cache": False}), tmp_path)
+    assert unchecked.returncode == 0 and unchecked.stdout.split() == ["returned", "returned"], unchecked.stderr

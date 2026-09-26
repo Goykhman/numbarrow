@@ -182,3 +182,14 @@ def test_the_64bit_date_view_refuses_a_unit_that_is_not_the_arrays_own():
         cast_64bit_date_arrow_to_numpy_array(stamps, np.dtype("datetime64[s]"))
     with pytest.raises(ValueError, match="not a date64 or timestamp"):
         cast_64bit_date_arrow_to_numpy_array(pa.array([1], type=pa.int64()), np.dtype("datetime64[s]"))
+
+
+def test_a_timestamp_is_read_at_its_own_unit():
+    # Every test that read a timestamp value used microseconds, so adapting
+    # every unit as datetime64[us] passed the suite while a millisecond column
+    # read as 1970.
+    instant = datetime(2020, 9, 13, 12, 26, 40)
+    for unit in ("s", "ms", "us", "ns"):
+        _, data = arrow_array_adapter(pa.array([instant], type=pa.timestamp(unit)))
+        assert data.dtype == np.dtype(f"datetime64[{unit}]"), unit
+        assert data.astype("datetime64[us]").tolist() == [instant], unit
