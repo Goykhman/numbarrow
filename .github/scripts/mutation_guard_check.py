@@ -562,6 +562,14 @@ MUTATIONS = [
         '    if dtype_.fields is not None:',
         '    if False:',
     ),
+    (
+        'a zero-length temporal column stops keeping its bitmap presence',
+        'numbarrow/core/adapters.py',
+        '    if not len(pa_array):\n'
+        '        # The cast of a zero-length array drops its validity buffer, and a',
+        '    if False:\n'
+        '        # The cast of a zero-length array drops its validity buffer, and a',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

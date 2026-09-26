@@ -157,3 +157,15 @@ if __name__ == "__main__":
     test_arrow_array_adapter_3()
     test_arrow_array_adapter_4()
     test_empty_str_array()
+
+
+def test_a_zero_length_temporal_column_keeps_its_bitmap_presence():
+    # The temporal handlers took the bitmap from the cast, and a zero-length
+    # cast drops the validity buffer, so the documented None-only-without-a-
+    # buffer rule broke for date32, date64 and timestamp columns.
+    for arrow_type, source_type in ((pa.date32(), pa.int32()), (pa.date64(), pa.int64()),
+                                    (pa.timestamp("us", "UTC"), pa.int64())):
+        source = pa.array([1, None], type=source_type).cast(arrow_type).slice(1, 0)
+        assert source.buffers()[0] is not None
+        bitmap, data = arrow_array_adapter(source)
+        assert bitmap is not None and bitmap.dtype == np.uint8 and len(bitmap) == 0 and len(data) == 0

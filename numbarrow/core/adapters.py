@@ -38,6 +38,10 @@ def cast_64bit_date_arrow_to_numpy_array(pa_array: pa.Array, np_dtype: np.dtype)
     if len(pa_array):
         assert int64_array.buffers()[1].address == pa_array.buffers()[1].address, "got copied"
     bitmap, int64_data = uniform_arrow_array_adapter(int64_array)
+    if not len(pa_array):
+        # The cast of a zero-length array drops its validity buffer, and a
+        # bitmap is None only when the source carries none.
+        bitmap = create_bitmap(pa_array.buffers()[0], pa_array.offset, 0)
     data = int64_data.view(np_dtype)
     assert data.ctypes.data == int64_data.ctypes.data, "got copied"
     return bitmap, data
@@ -123,6 +127,10 @@ def _(pa_array: pa.Date32Array):
     if len(pa_array):
         assert int32_array.buffers()[1].address == pa_array.buffers()[1].address, "got copied"
     bitmap, int32_data = uniform_arrow_array_adapter(int32_array)
+    if not len(pa_array):
+        # As in cast_64bit_date_arrow_to_numpy_array: the zero-length cast
+        # dropped the validity buffer the source still carries.
+        bitmap = create_bitmap(pa_array.buffers()[0], pa_array.offset, 0)
     data = int32_data.astype(np.dtype("datetime64[D]"))
     if len(pa_array):
         assert int32_data.ctypes.data != data.ctypes.data
