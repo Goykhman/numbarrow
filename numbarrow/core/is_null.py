@@ -8,13 +8,12 @@ bit position ``i % 8`` within that byte.
 """
 
 import numpy as np
-from numba import njit
 from numba.core.types import boolean, int64, Array, Optional, uint8, bool_
 
-from numbarrow.core.configurations import jit_options
+from numbarrow.core.configurations import jit_with_options
 
 
-@njit(boolean(int64, Array(uint8, 1, "C", readonly=True)), **jit_options)
+@jit_with_options(boolean(int64, Array(uint8, 1, "C", readonly=True)))
 def is_null(index_: int, bitmap: np.ndarray) -> bool:
     """Check whether element *index_* is null according to *bitmap*.
 
@@ -39,7 +38,7 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
     return not (byte_for_index >> bit_position_in_byte) % 2
 
 
-@njit(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)), **jit_options)
+@jit_with_options(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)))
 def unpack_booleans(offset: int, length: int, packed_data: np.ndarray) -> np.ndarray:
     """Unpack bit-packed boolean data into a boolean array.
 
@@ -64,8 +63,8 @@ def unpack_booleans(offset: int, length: int, packed_data: np.ndarray) -> np.nda
 # design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
 
 
-@njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),
-              Optional(Array(uint8, 1, "C", readonly=True))), **jit_options)
+@jit_with_options(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),
+                          Optional(Array(uint8, 1, "C", readonly=True))))
 def is_null_struct(index_, struct_bitmap, field_bitmap):
     """Check whether a struct field value is null at either the struct or field layer.
 

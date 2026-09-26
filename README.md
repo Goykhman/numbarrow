@@ -126,6 +126,19 @@ struct-level bitmap is the only record of a row that is null as a whole, since
 the fields of such a row carry no validity bits of their own; pass both layers
 to `is_null_struct`.
 
+## Compilation and the cache
+
+numbarrow compiles its adapters with numba on first import, under the options
+`NUMBARROW_JIT_OPTIONS` gives as a JSON object; unset, that is `{"cache":
+true}`, so the compiled code is written to numba's on-disk cache, next to the
+package or under `NUMBA_CACHE_DIR`. Where no cache location can be written, a
+read-only install or an import from an `.egg`, `.whl` or `.pyz` archive such
+as `spark-submit --py-files` ships, the functions compile without a cache and
+a warning names the two remedies: point `NUMBA_CACHE_DIR` at a writable
+directory, or set `NUMBARROW_JIT_OPTIONS='{"cache": false}'`. numba's cache
+index does not record the options a function was compiled with, so point
+`NUMBA_CACHE_DIR` at a fresh directory when an option changes.
+
 ## PySpark Integration
 
 Use `make_mapinarrow_func` to create functions compatible with PySpark's `mapInArrow`:

@@ -4,6 +4,9 @@ Default configuration options for Numba JIT compilation used throughout numbarro
 
 import os
 import json
+import warnings
+
+from numba import njit
 
 
 invalid_jit_options_err = (
@@ -57,3 +60,28 @@ def get_jit_options():
 
 
 jit_options = get_jit_options()
+
+
+def jit_with_options(*signature):
+    """``njit`` under the options ``NUMBARROW_JIT_OPTIONS`` gives, compiling uncached where no cache can be written.
+
+    numba sets a cached function up when it is decorated, and raises ``RuntimeError`` there when no cache
+    location can be written: a read-only install, an unwritable ``site-packages`` and user cache directory, or
+    an import from an ``.egg``, ``.whl`` or ``.pyz`` archive, which Spark's ``--py-files`` ships. Nothing then
+    named the way out. Such a function compiles without a cache, with a warning naming ``NUMBA_CACHE_DIR`` and
+    ``NUMBARROW_JIT_OPTIONS='{"cache": false}'``. A write that fails later, on a full disk, is numba's own error.
+    """
+    def decorate(func):
+        try:
+            return njit(*signature, **jit_options)(func)
+        except RuntimeError as error:
+            if "no locator available" not in str(error) or not jit_options.get("cache"):
+                raise
+            warnings.warn(
+                f"numba cannot cache {func.__qualname__} here ({error}); it compiles without a cache. Set "
+                f"NUMBA_CACHE_DIR to a writable directory, or NUMBARROW_JIT_OPTIONS='{{\"cache\": false}}' to "
+                f"turn caching off and silence this warning",
+                RuntimeWarning, stacklevel=2,
+            )
+            return njit(*signature, **{**jit_options, "cache": False})(func)
+    return decorate

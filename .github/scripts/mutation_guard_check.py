@@ -215,9 +215,9 @@ MUTATIONS = [
     (
         "is_null_struct stops being compiled with one signature",
         "numbarrow/core/is_null.py",
-        '@njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
-        '              Optional(Array(uint8, 1, "C", readonly=True))), **jit_options)',
-        "@njit(**jit_options)",
+        '@jit_with_options(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
+        '                          Optional(Array(uint8, 1, "C", readonly=True))))',
+        "@jit_with_options()",
     ),
     (
         "viewers stop getting a cache name of their own",
@@ -625,6 +625,13 @@ MUTATIONS = [
         'numbarrow/core/mapinarrow_factory.py',
         '                _check_keys(children, child_type, f"{where}field {name!r}: ")',
         '                _check_keys(children, child_type, where)',
+    ),
+    (
+        'a function that numba cannot cache stops compiling uncached',
+        'numbarrow/core/configurations.py',
+        '            if "no locator available" not in str(error) or not jit_options.get("cache"):\n'
+        '                raise',
+        '            raise',
     ),
 ]
 

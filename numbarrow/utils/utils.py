@@ -9,11 +9,11 @@ Provides Numba-compatible functions that reinterpret a raw memory address
 import hashlib
 
 import numpy as np
-from numba import carray, from_dtype, int64, intp, njit
+from numba import carray, from_dtype, int64, intp
 from numba.core.types import Array, voidptr
 from numba.extending import intrinsic
 
-from numbarrow.core.configurations import jit_options
+from numbarrow.core.configurations import jit_with_options
 
 
 @intrinsic
@@ -69,7 +69,7 @@ def numpy_array_from_ptr_factory(dtype_):
         name += "_" + hashlib.sha1(repr(dtype_.descr).encode()).hexdigest()[:12]
     viewer.__name__ = name
     viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"
-    return njit(Array(from_dtype(dtype_), 1, "C")(intp, int64), **jit_options)(viewer)
+    return jit_with_options(Array(from_dtype(dtype_), 1, "C")(intp, int64))(viewer)
 
 
 class _Viewers(dict):
