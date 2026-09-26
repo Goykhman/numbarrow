@@ -614,6 +614,12 @@ MUTATIONS = [
         '    if np_dtype != np.dtype(f"datetime64[{unit}]"):',
         '    if False:',
     ),
+    (
+        'a fixed-width binary column stops going to pa.array directly',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        if arrow_type is not None and pa.types.is_fixed_size_binary(arrow_type):',
+        '        if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

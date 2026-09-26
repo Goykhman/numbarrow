@@ -288,8 +288,10 @@ def _convert(value, arrow_type):
     ``"a\x00b"`` arrives as ``"a"`` and a leading NUL empties the value
     outright. Going via ``tolist()`` hands Arrow real Python strings and
     bytes, which carry NULs, at about 18% more time on a 200k-row column. A
-    trailing NUL is already gone before this point, dropped by numpy when the
-    array was built, which matches the adapter refusing one on the way in.
+    trailing NUL is dropped by ``tolist()`` itself, as numpy's own element
+    access drops it, which matches the adapter refusing one on the way in;
+    under a declared fixed-size binary type the array goes to ``pa.array``
+    directly, which keeps every byte there.
 
     Without a declared type a unicode or bytes column is still named
     ``string`` or ``binary`` rather than inferred, because ``pa.array([])``
@@ -387,6 +389,13 @@ def _ndarray_to_arrow(value, arrow_type):
     if kind == "U":
         return pa.array(value.tolist(), type=arrow_type or pa.string())
     if kind == "S":
+        if arrow_type is not None and pa.types.is_fixed_size_binary(arrow_type):
+            # tolist() drops a trailing NUL, so a digest ending in 0x00 came
+            # back a byte short and was refused under its fixed width.
+            # pa.array keeps every byte of a fixed-width array under a
+            # fixed-width type, and only there; variable-width binary still
+            # cuts at the first NUL, so it keeps the tolist() route.
+            return pa.array(value, type=arrow_type)
         return pa.array(value.tolist(), type=arrow_type or pa.binary())
     if kind in ("M", "m"):
         value = _at_arrow_unit(value)

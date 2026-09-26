@@ -1070,3 +1070,14 @@ def test_nothing_of_a_batch_is_held_while_the_next_one_is_read():
     for _ in make_mapinarrow_func(main)(Batches()):
         pass
     assert alive_when_the_next_is_read == [False, False]
+
+
+def test_a_fixed_width_binary_column_keeps_a_trailing_nul_under_its_declared_type():
+    # tolist() drops a trailing NUL, so one digest in 256 came back a byte
+    # short and the batch was refused under fixed_size_binary(16); the
+    # docstring blamed numpy for a byte the buffer still held.
+    digests = np.array([b"0123456789abcde\x00", b"\x00fedcba987654321", b"0123456789abcdef"], dtype="|S16")
+    declared = pa.schema([("d", pa.binary(16))])
+    got = run_outputs({"d": digests}, declared).column("d")
+    assert got.type == pa.binary(16)
+    assert got.to_pylist() == [b"0123456789abcde\x00", b"\x00fedcba987654321", b"0123456789abcdef"]
