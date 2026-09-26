@@ -438,7 +438,7 @@ MUTATIONS = [
     (
         'a 0-d or 2-d array output stops being refused',
         'numbarrow/core/mapinarrow_factory.py',
-        '    if value.ndim != 1:',
+        '    if kind in ("U", "S") and value.ndim != 1:',
         '    if False:',
     ),
     (

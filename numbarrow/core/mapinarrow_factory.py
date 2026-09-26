@@ -366,14 +366,15 @@ def _at_arrow_unit(value):
 
 def _ndarray_to_arrow(value, arrow_type):
     """An ndarray of a non-object dtype as an Arrow array; see ``_convert``."""
-    if value.ndim != 1:
-        # A 0-d unicode or bytes array's tolist() is a bare scalar, which
-        # pa.array spreads one character per row, defeating the refusal it
-        # gives the array itself; every other dtype it refuses on its own.
-        raise TypeError(f"a {value.ndim}-dimensional {value.dtype} array; an output column is one-dimensional")
     if value.dtype.names is not None:
         return _record_to_struct(value, arrow_type)
     kind = value.dtype.kind
+    if kind in ("U", "S") and value.ndim != 1:
+        # A 0-d unicode or bytes array's tolist() is a bare scalar, which
+        # pa.array spreads one character per row, and a 2-d one's is nested
+        # lists; both defeat the one-dimensional refusal pa.array gives the
+        # array itself, which every other dtype still gets, naming the column.
+        raise TypeError(f"a {value.ndim}-dimensional {value.dtype} array; an output column is one-dimensional")
     if kind == "U":
         return pa.array(value.tolist(), type=arrow_type or pa.string())
     if kind == "S":
