@@ -8,6 +8,7 @@ these fail the build the next time any of it drifts, which is the only thing
 that stops it recurring.
 """
 import datetime
+import decimal
 import os
 import re
 import subprocess
@@ -151,6 +152,20 @@ def test_the_truncations_the_docstring_admits_for_a_list_are_the_ones_it_makes()
     assert _one_output_column([SUB_SECOND], pa.timestamp("s")).to_pylist() == [
         SUB_SECOND.replace(microsecond=0)
     ]
+
+
+def test_a_float_under_a_declared_decimal_is_refused_as_the_docstring_says():
+    # The docstring listed a float into decimal among the conversions that
+    # pass without a word, rounding to the declared scale; both routes refuse
+    # it, the sequence converter wanting an int or a Decimal.
+    assert "A float under a ``decimal`` type is refused on both routes" in FACTORY_DOC
+    assert "a float into ``decimal``" not in FACTORY_DOC
+    with pytest.raises(pa.ArrowException):
+        _one_output_column([1.236], pa.decimal128(6, 2))
+    with pytest.raises(pa.ArrowException):
+        _one_output_column(np.array([1.236]), pa.decimal128(6, 2))
+    exact = _one_output_column([decimal.Decimal("1.23")], pa.decimal128(6, 2))
+    assert exact.to_pylist() == [decimal.Decimal("1.23")]
 
 
 def _inferred_output_column(value):

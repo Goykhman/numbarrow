@@ -857,11 +857,13 @@ def make_mapinarrow_func(
         timestamp's extra digits are dropped silently.  So the lossy
         conversions that pass without a word are a timestamp into ``date32``
         or ``date64``, which floors to the day, a timestamp into ``time32``
-        or ``time64``, which drops the date, a float into ``decimal``, which
-        rounds to the declared scale, a number into ``bool``, which is true
-        for anything but zero, a float into a narrower float, which overflows
-        to ``inf``, and, from a list alone, a fraction into an integer type
-        and a timestamp unit change that drops digits.
+        or ``time64``, which drops the date, a number into ``bool``, which is
+        true for anything but zero, a float into a narrower float, which
+        overflows to ``inf``, and, from a list alone, a fraction into an
+        integer type and a timestamp unit change that drops digits.  A float
+        under a ``decimal`` type is refused on both routes: the sequence
+        converter takes an int or a :class:`decimal.Decimal`, and the typed
+        one refuses a float dtype.
 
         Left as ``None`` the batch is built from the dict alone: insertion
         order decides, and every type is inferred from the value, so a unicode
