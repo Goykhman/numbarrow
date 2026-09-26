@@ -69,8 +69,18 @@ def arrow_array_adapter(pa_array: pa.Array):
             f"Not implemented for a ChunkedArray of {pa_array.num_chunks} chunks of type "
             f"{type_repr(pa_array.type)}: pass one chunk, or combine_chunks() first"
         )
+    if isinstance(pa_array, pa.Scalar):
+        # One row of a column, not the column: a null list scalar has no
+        # length to read, and a struct or map scalar of a supported column
+        # was described as an unsupported array of that type.
+        raise NotImplementedError(
+            f"Not implemented for a {type(pa_array).__name__} of type {type_repr(pa_array.type)}: "
+            f"pass the Array, not one of its rows"
+        )
     arrow_type = getattr(pa_array, "type", None)
-    if arrow_type is None:
+    if not isinstance(arrow_type, pa.DataType):
+        # A pandas frame or a record array with a column called type answers
+        # the attribute with that column, which then went into the message.
         described = f"{type(pa_array).__name__}, which is not a pyarrow Array"
     elif hasattr(pa_array, "__len__"):
         described = f"an array of {len(pa_array)} elements of type {type_repr(arrow_type)}"

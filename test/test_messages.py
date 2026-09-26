@@ -213,3 +213,17 @@ def test_the_unexpected_keys_listing_is_cut_with_a_count():
         list(fn(iter([_batch(v=list(range(1000)))])))
     message = str(excinfo.value)
     assert "'user_000000'" in message and "and 990 more" in message and len(message) < 600
+
+
+def test_the_dispatcher_describes_a_scalar_and_leaks_no_type_column():
+    # A null list scalar died on len(), a struct scalar of a supported column
+    # was described as an unsupported array of that type, and a frame with a
+    # column called type put that column's values into the message.
+    for scalar in (pa.array([None], type=pa.list_(pa.int64()))[0], pa.array([{"a": 1}])[0]):
+        with pytest.raises(NotImplementedError, match=r"Scalar of type .*: pass the Array"):
+            arrow_array_adapter(scalar)
+    pd = pytest.importorskip("pandas")
+    frame = pd.DataFrame({"type": [f"secret-{i}" for i in range(50)], "v": range(50)})
+    with pytest.raises(NotImplementedError, match="DataFrame, which is not a pyarrow Array") as excinfo:
+        arrow_array_adapter(frame)
+    assert "secret" not in str(excinfo.value)

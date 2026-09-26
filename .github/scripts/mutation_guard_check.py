@@ -576,6 +576,18 @@ MUTATIONS = [
         '            shown = unexpected_keys[:KEYS_SHOWN]',
         '            shown = unexpected_keys',
     ),
+    (
+        'a scalar stops being described as one at the dispatcher',
+        'numbarrow/core/adapters.py',
+        '    if isinstance(pa_array, pa.Scalar):',
+        '    if False:',
+    ),
+    (
+        'a type attribute that is not a DataType stops being screened',
+        'numbarrow/core/adapters.py',
+        '    if not isinstance(arrow_type, pa.DataType):',
+        '    if arrow_type is None:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
