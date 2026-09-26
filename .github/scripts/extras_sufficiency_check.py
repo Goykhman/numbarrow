@@ -84,10 +84,16 @@ def check(repo: Path, extra: str, probe: str, python: str) -> str | None:
 
 
 def floor_interpreter(requires_python):
-    """The interpreter name for the floor of a requires-python specifier set, such as python3.12."""
-    floor = re.search(r">=\s*(\d+\.\d+)", requires_python)
+    """The interpreter name for the floor of a requires-python specifier set, such as python3.12.
+
+    The floor is the ``>=`` clause, or the ``~=`` compatible-release clause,
+    which names its floor the same way; a set with neither names no
+    interpreter to test on, and the gate says so and stops, as it does for an
+    extra with no probe.
+    """
+    floor = re.search(r"(?:>=|~=)\s*(\d+\.\d+)", requires_python)
     if floor is None:
-        raise SystemExit(f"requires-python {requires_python!r} names no >= floor to test the extras on")
+        raise SystemExit(f"requires-python {requires_python!r} names no >= or ~= floor to test the extras on")
     return "python" + floor.group(1)
 
 
