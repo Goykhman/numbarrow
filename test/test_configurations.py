@@ -81,3 +81,32 @@ def test_the_refusal_names_the_requirement_and_shows_the_value(monkeypatch):
     monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", "{cache: false}")
     with pytest.raises(ValueError, match=r"'\{cache: false\}' is not valid JSON"):
         get_jit_options()
+
+
+def test_a_runtime_error_other_than_numbas_no_locator_one_propagates(monkeypatch):
+    # The fallback is narrowed to numba's "no locator available", and nothing
+    # tested the narrowing: with the term dropped, every RuntimeError at
+    # decoration compiled uncached behind a warning about the cache.
+    from numbarrow.core import configurations
+    options_seen = []
+
+    def njit_raising_once(message):
+        def njit(*signature, **options):
+            def decorate(func):
+                options_seen.append(options)
+                if len(options_seen) == 1:
+                    raise RuntimeError(message)
+                return func
+            return decorate
+        return njit
+
+    monkeypatch.setattr(configurations, "jit_options", {"cache": True})
+    monkeypatch.setattr(configurations, "njit", njit_raising_once("some other failure at decoration"))
+    with pytest.raises(RuntimeError, match="some other failure at decoration"):
+        configurations.jit_with_options()(lambda: None)
+    assert options_seen == [{"cache": True}]
+    options_seen.clear()
+    monkeypatch.setattr(configurations, "njit", njit_raising_once("cannot cache function: no locator available"))
+    with pytest.warns(RuntimeWarning, match="compiles without a cache"):
+        configurations.jit_with_options()(lambda: None)
+    assert options_seen == [{"cache": True}, {"cache": False}]

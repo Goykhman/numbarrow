@@ -694,6 +694,44 @@ MUTATIONS = [
         '        name += "_" + hashlib.sha1(repr(dtype_).encode()).hexdigest()[:12]',
         '        name += "_" + hashlib.sha1(repr(dtype_.descr).encode()).hexdigest()[:12]',
     ),
+    (
+        'the cache fallback stops being narrowed to the no-locator error',
+        'numbarrow/core/configurations.py',
+        '            if "no locator available" not in str(error) or not jit_options.get("cache"):',
+        '            if not jit_options.get("cache"):',
+    ),
+    (
+        'the repeated-name check stops looking inside a map',
+        'numbarrow/core/mapinarrow_factory.py',
+        '            repeated.extend(_repeated_names([arrow_type.key_field, arrow_type.item_field]))',
+        '            pass',
+    ),
+    (
+        'the repeated-name check stops seeing through an extension type',
+        'numbarrow/core/mapinarrow_factory.py',
+        '        arrow_type = _storage(field.type)',
+        '        arrow_type = field.type',
+    ),
+    (
+        'the union check stops seeing through an extension type',
+        'numbarrow/utils/arrow_array_utils.py',
+        '    while isinstance(arrow_type, pa.BaseExtensionType):\n'
+        '        arrow_type = arrow_type.storage_type\n'
+        '    return pa.types.is_union(arrow_type)',
+        '    return pa.types.is_union(arrow_type)',
+    ),
+    (
+        'the key check stops seeing through an extension type when asking whether a type carries keys',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    arrow_type = _storage(arrow_type)\n    if pa.types.is_struct(arrow_type):\n        return True',
+        '    if pa.types.is_struct(arrow_type):\n        return True',
+    ),
+    (
+        'the key check stops seeing through an extension type over a struct',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    arrow_type = _storage(arrow_type)\n    if pa.types.is_struct(arrow_type):\n        fields = ',
+        '    if pa.types.is_struct(arrow_type):\n        fields = ',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
