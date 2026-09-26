@@ -145,8 +145,8 @@ def _iterable_rows(rows):
     return kept
 
 
-def _check_keys(rows, arrow_type):
-    """Refuse, at any depth, a dict key that no declared struct field has.
+def _check_keys(rows, arrow_type, where=""):
+    """Refuse, at any depth, a dict key that no declared struct field has, naming the path to it.
 
     Arrow matches struct fields by exact name and fills a missing one with
     null, so a list of dicts keyed ``Amount`` against a field called
@@ -172,7 +172,7 @@ def _check_keys(rows, arrow_type):
             shown = unexpected_keys[:KEYS_SHOWN]
             more = f" and {len(unexpected_keys) - KEYS_SHOWN} more" if len(unexpected_keys) > KEYS_SHOWN else ""
             raise ValueError(
-                f"declared {type_repr(arrow_type)} but the dicts carry keys {shown}{more} "
+                f"{where}declared {type_repr(arrow_type)} but the dicts carry keys {shown}{more} "
                 f"that no declared field has; Arrow matches struct fields by exact name and "
                 f"fills a missing one with null"
             )
@@ -180,22 +180,22 @@ def _check_keys(rows, arrow_type):
             given = getattr(row, "_fields", None) or getattr(row, "__fields__", None)
             if given is not None and set(given) == set(names) and list(given) != names:
                 raise ValueError(
-                    f"declared {type_repr(arrow_type)} but a row names its fields {list(given)}; a tuple's "
-                    f"fields bind by position, so build it in the declared order or return dicts"
+                    f"{where}declared {type_repr(arrow_type)} but a row names its fields {list(given)}; a "
+                    f"tuple's fields bind by position, so build it in the declared order or return dicts"
                 )
         for index, (name, child_type) in enumerate(fields.items()):
             if _carries_keys(child_type):
                 children = [row[name] for row in dicts if name in row]
                 children.extend(row[index] for row in tuples if index < len(row))
-                _check_keys(children, child_type)
+                _check_keys(children, child_type, f"{where}field {name!r}: ")
     elif _is_list_like(arrow_type):
-        _check_keys([item for row in _iterable_rows(rows) for item in row], arrow_type.value_type)
+        _check_keys([item for row in _iterable_rows(rows) for item in row], arrow_type.value_type, f"{where}list item: ")
     elif pa.types.is_map(arrow_type):
         keys, items = _map_entries(rows)
         if _carries_keys(arrow_type.key_type):
-            _check_keys(keys, arrow_type.key_type)
+            _check_keys(keys, arrow_type.key_type, f"{where}map key: ")
         if _carries_keys(arrow_type.item_type):
-            _check_keys(items, arrow_type.item_type)
+            _check_keys(items, arrow_type.item_type, f"{where}map value: ")
 
 
 def _map_entries(rows):

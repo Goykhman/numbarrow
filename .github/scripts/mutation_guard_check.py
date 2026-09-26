@@ -620,6 +620,12 @@ MUTATIONS = [
         '        if arrow_type is not None and pa.types.is_fixed_size_binary(arrow_type):',
         '        if False:',
     ),
+    (
+        'a nested key refusal stops naming the field path',
+        'numbarrow/core/mapinarrow_factory.py',
+        '                _check_keys(children, child_type, f"{where}field {name!r}: ")',
+        '                _check_keys(children, child_type, where)',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

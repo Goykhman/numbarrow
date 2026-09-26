@@ -249,3 +249,18 @@ def test_the_function_names_the_shape_it_takes_when_handed_a_batch_or_a_table():
         with pytest.raises(TypeError, match="iterator of pyarrow.RecordBatch"):
             list(fn(handed))
     assert list(fn([batch]))[0].column("out").to_pylist() == [1, 2, 3]
+
+
+def test_a_nested_key_refusal_names_the_path_to_the_field():
+    # Two same-typed sibling fields, a map's key and its value, and different
+    # depths all raised a byte-identical message naming the column alone.
+    inner = pa.struct([("amount", pa.int64())])
+    schema = pa.schema([("s", pa.struct([("a", inner), ("b", inner), ("m", pa.map_(pa.string(), inner))]))])
+    rows = [{"a": {"amount": 1}, "b": {"Amount": 2}, "m": [("k", {"amount": 3})]}]
+    fn = make_mapinarrow_func(lambda d, b, br: {"s": rows}, output_schema=schema)
+    with pytest.raises(ValueError, match=r"output column 's': field 'b': declared"):
+        list(fn(iter([_batch(v=[1])])))
+    rows = [{"a": {"amount": 1}, "b": {"amount": 2}, "m": [("k", {"Amount": 3})]}]
+    fn = make_mapinarrow_func(lambda d, b, br: {"s": rows}, output_schema=schema)
+    with pytest.raises(ValueError, match=r"output column 's': field 'm': map value: declared"):
+        list(fn(iter([_batch(v=[1])])))
