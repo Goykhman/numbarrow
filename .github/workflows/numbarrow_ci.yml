@@ -37,6 +37,10 @@ jobs:
       shell: bash
       run: echo "__version__ = '${{ env.VERSION }}'" > numbarrow/__init__.py
     - name: Install dependencies
+      # bash, as the steps around it: under pwsh, the windows default, only the
+      # last command's exit decides a multi-line step, so a failing pin here
+      # and a failing lint below went green on nine of the thirty cells.
+      shell: bash
       run: |
         python -m pip install --upgrade pip
         pip install flake8 pytest setuptools
@@ -44,6 +48,7 @@ jobs:
         pip install pyspark==3.5.7
         pip install -e .
     - name: Lint with flake8
+      shell: bash
       run: |
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
