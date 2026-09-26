@@ -415,14 +415,14 @@ def _ndarray_to_arrow(value, arrow_type):
 
 
 def _refuse_pandas_rows(value):
-    """Refuse a pandas Series or DataFrame among the rows of a list or tuple column.
+    """Refuse a pandas Series or DataFrame among the rows of a list, tuple or object array column.
 
     ``pa.array`` reads a Series row by its index labels, so a sorted or
     filtered one came back reordered, and one whose labels were not 0..n-1
-    died on a bare KeyError.
+    died on a bare KeyError. A row inside an object array is read the same
+    way, and the check looked only inside a list or a tuple, so every shape
+    of column that reaches here is looked through.
     """
-    if not isinstance(value, (list, tuple)):
-        return
     for row in value:
         if _is_pandas(row, "Series", "DataFrame"):
             raise TypeError(

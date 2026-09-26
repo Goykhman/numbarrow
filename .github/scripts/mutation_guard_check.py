@@ -663,6 +663,13 @@ MUTATIONS = [
         '    if named == []:',
         '    if False:',
     ),
+    (
+        'a pandas Series row inside an object array stops being refused',
+        'numbarrow/core/mapinarrow_factory.py',
+        '    for row in value:\n        if _is_pandas(row, "Series", "DataFrame"):',
+        '    for row in (value if isinstance(value, (list, tuple)) else ()):\n'
+        '        if _is_pandas(row, "Series", "DataFrame"):',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]

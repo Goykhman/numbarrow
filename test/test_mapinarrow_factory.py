@@ -982,6 +982,19 @@ def test_a_pandas_series_row_is_refused_rather_than_read_by_label():
     assert run_outputs({"w": chunked}).column("w").to_pylist() == ["a", "b"]
 
 
+def test_a_pandas_series_row_inside_an_object_array_is_refused_too():
+    # The row check looked only inside a list or a tuple, so the same sorted
+    # Series as the one element of an object array reached pa.array and came
+    # back in label order, [3, 1, 2] for values stored as [1, 2, 3].
+    pd = pytest.importorskip("pandas")
+    rows = np.empty(1, dtype=object)
+    rows[0] = pd.Series([3, 1, 2]).sort_values()
+    with pytest.raises(TypeError, match=r"'s'.*Series.*list\(row\)"):
+        run_outputs({"s": rows}, pa.schema([("s", pa.list_(pa.int64()))]))
+    with pytest.raises(TypeError, match=r"'s'.*Series"):
+        run_outputs({"s": rows})
+
+
 def test_a_key_error_from_pa_array_names_the_column_and_the_field():
     # pa.array reads a UserDict row by index, and the KeyError it raised was
     # outside the classes the output side renamed, so it escaped as "0".
