@@ -182,6 +182,14 @@ a numpy masked array carry nulls out as well.
 
 See [test/test_mapinarrow_spark.py](test/test_mapinarrow_spark.py) for a complete runnable example.
 
+Spark binds the batch's columns, and a struct column's fields, to the schema
+given to `mapInArrow` by position, never by name: two columns or two fields
+whose types share an accessor family swap silently when the dict or the record
+dtype is built in the other order. Build them in the declared order, or pass
+`output_schema` derived from the Spark schema,
+`pyspark.sql.pandas.types.to_arrow_schema(spark_schema)`, and let Arrow bind
+columns and struct fields by name.
+
 ## Compatibility
 
 | Dependency | Versions |

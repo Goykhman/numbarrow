@@ -695,9 +695,17 @@ def make_mapinarrow_func(
         ``java.lang.UnsupportedOperationException`` whatever its width, as
         float64 under ``LongType`` and int64 under ``DoubleType`` do, both 64
         bits wide, and so does a width mismatch inside one family, such as
-        int32 under ``LongType``.  Build the returned dict in the order the
-        output schema declares, or pass ``output_schema`` and let Arrow bind
-        it by name instead.
+        int32 under ``LongType``.  A struct column's fields are read by
+        position too: without ``output_schema`` a record array's dtype order
+        and a dict's key order decide where each field lands, batch by batch
+        when some rows leave a null field out, so ``{"lat": .., "lon": ..}``
+        under ``struct<lon, lat>`` swaps the two without a word.  Build the
+        returned dict, and any record dtype, in the order the output schema
+        declares, or pass ``output_schema`` and let Arrow bind columns and
+        struct fields by name; derive it from the Spark schema,
+        ``pyspark.sql.pandas.types.to_arrow_schema(spark_schema)``, so the
+        two orders cannot disagree, since this function never sees the schema
+        ``mapInArrow`` is given.
 
         ``data_dict`` maps each selected column's name to its data.  A column
         of a uniform type maps to one array.  A struct or list-of-struct
