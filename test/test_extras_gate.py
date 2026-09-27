@@ -12,7 +12,12 @@ def _gate():
         pytest.skip("the extras gate is not in this tree")
     spec = importlib.util.spec_from_file_location("extras_sufficiency_check", SCRIPT)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except ImportError as exc:
+        # The gate runs on the floor interpreter, and CI also tests below the
+        # floor, where a module the script needs, tomllib on 3.10, is missing.
+        pytest.skip(f"the extras gate cannot load here: {exc}")
     return module
 
 
