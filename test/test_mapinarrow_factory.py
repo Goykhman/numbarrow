@@ -96,8 +96,9 @@ def test_input_columns_selects_only_the_named_columns():
 
 
 def test_input_columns_is_read_once_so_a_generator_serves_every_batch():
-    # The names were read from the argument inside the batch loop, so a
-    # generator, map() or filter() was used up by the first batch and every
+    # A generator, map() or filter() given as input_columns must reach the UDF
+    # in every batch, not only the first. The names used to be read from the
+    # argument inside the batch loop, so the first batch used them up and every
     # later batch was adapted with no columns: the UDF died on a bare KeyError.
     batches = [pa.RecordBatch.from_pydict({"x": [1, 2], "y": [0, 0]}),
                pa.RecordBatch.from_pydict({"x": [3], "y": [0]})]
