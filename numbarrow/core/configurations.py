@@ -62,7 +62,7 @@ def get_jit_options():
 jit_options = get_jit_options()
 
 
-def jit_with_options(*signature):
+def jit_with_options(signature):
     """``njit`` under the options ``NUMBARROW_JIT_OPTIONS`` gives, compiling uncached where no cache can be written.
 
     numba sets a cached function up when it is decorated, and raises ``RuntimeError`` there when no cache
@@ -73,7 +73,7 @@ def jit_with_options(*signature):
     """
     def decorate(func):
         try:
-            return njit(*signature, **jit_options)(func)
+            return njit(signature, **jit_options)(func)
         except RuntimeError as error:
             if "no locator available" not in str(error) or not jit_options.get("cache"):
                 raise
@@ -83,5 +83,5 @@ def jit_with_options(*signature):
                 f"turn caching off and silence this warning",
                 RuntimeWarning, stacklevel=2,
             )
-            return njit(*signature, **{**jit_options, "cache": False})(func)
+            return njit(signature, **{**jit_options, "cache": False})(func)
     return decorate

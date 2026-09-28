@@ -215,7 +215,7 @@ MUTATIONS = [
         "numbarrow/core/is_null.py",
         '@jit_with_options(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
         '                          Optional(Array(uint8, 1, "C", readonly=True))))',
-        "@jit_with_options()",
+        "@jit_with_options(None)",
     ),
     (
         "viewers stop getting a cache name of their own",

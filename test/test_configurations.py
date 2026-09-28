@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from numba import void
 
 from numbarrow.core.configurations import get_jit_options, invalid_jit_options_err
 
@@ -103,10 +104,10 @@ def test_a_runtime_error_other_than_numbas_no_locator_one_propagates(monkeypatch
     monkeypatch.setattr(configurations, "jit_options", {"cache": True})
     monkeypatch.setattr(configurations, "njit", njit_raising_once("some other failure at decoration"))
     with pytest.raises(RuntimeError, match="some other failure at decoration"):
-        configurations.jit_with_options()(lambda: None)
+        configurations.jit_with_options(void())(lambda: None)
     assert options_seen == [{"cache": True}]
     options_seen.clear()
     monkeypatch.setattr(configurations, "njit", njit_raising_once("cannot cache function: no locator available"))
     with pytest.warns(RuntimeWarning, match="compiles without a cache"):
-        configurations.jit_with_options()(lambda: None)
+        configurations.jit_with_options(void())(lambda: None)
     assert options_seen == [{"cache": True}, {"cache": False}]
