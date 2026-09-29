@@ -2,6 +2,7 @@
 Default configuration options for Numba JIT compilation used throughout numbarrow.
 """
 
+import inspect
 import os
 import json
 import warnings
@@ -68,8 +69,11 @@ def jit_with_options(signature):
     numba sets a cached function up when it is decorated, and raises ``RuntimeError`` there when no cache
     location can be written: a read-only install, an unwritable ``site-packages`` and user cache directory, or
     an import from an ``.egg``, ``.whl`` or ``.pyz`` archive, which Spark's ``--py-files`` ships. Nothing then
-    named the way out. Such a function compiles without a cache, with a warning naming ``NUMBA_CACHE_DIR`` and
-    ``NUMBARROW_JIT_OPTIONS='{"cache": false}'``. A write that fails later, on a full disk, is numba's own error.
+    named the way out. Such a function compiles without a cache, with a warning naming the remedy:
+    ``NUMBA_CACHE_DIR`` for a source file on disk, and for an archive, where numba never reads it, an unpacked
+    install or a ``.zip``, which numba 0.61 and later cache in the user's cache directory. Either way
+    ``NUMBARROW_JIT_OPTIONS='{"cache": false}'`` turns caching off and silences the warning. A write that fails
+    later, on a full disk, is numba's own error.
     """
     def decorate(func):
         try:
@@ -77,10 +81,20 @@ def jit_with_options(signature):
         except RuntimeError as error:
             if "no locator available" not in str(error) or not jit_options.get("cache"):
                 raise
+            silence = "NUMBARROW_JIT_OPTIONS='{\"cache\": false}' to turn caching off and silence this warning"
+            if os.path.exists(inspect.getfile(func)):
+                remedy = f"Set NUMBA_CACHE_DIR to a writable directory, or {silence}"
+            else:
+                # Every location numba reads NUMBA_CACHE_DIR for needs the source
+                # file on disk, so for an archive the warning named a remedy
+                # that changed nothing.
+                remedy = (
+                    "NUMBA_CACHE_DIR has no effect here, because the source is not a file on disk: to cache, "
+                    "install numbarrow unpacked or import it from a .zip, which numba 0.61 and later cache in the "
+                    f"user's cache directory. Set {silence}"
+                )
             warnings.warn(
-                f"numba cannot cache {func.__qualname__} here ({error}); it compiles without a cache. Set "
-                f"NUMBA_CACHE_DIR to a writable directory, or NUMBARROW_JIT_OPTIONS='{{\"cache\": false}}' to "
-                f"turn caching off and silence this warning",
+                f"numba cannot cache {func.__qualname__} here ({error}); it compiles without a cache. {remedy}",
                 RuntimeWarning, stacklevel=2,
             )
             return njit(signature, **{**jit_options, "cache": False})(func)

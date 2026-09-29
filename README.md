@@ -135,13 +135,17 @@ to `is_null_struct`.
 numbarrow compiles its adapters with numba on first import, under the options
 `NUMBARROW_JIT_OPTIONS` gives as a JSON object; unset, that is `{"cache":
 true}`, so the compiled code is written to numba's on-disk cache, next to the
-package or under `NUMBA_CACHE_DIR`. Where no cache location can be written, a
-read-only install or an import from an `.egg`, `.whl` or `.pyz` archive such
-as `spark-submit --py-files` ships, the functions compile without a cache and
-a warning names the two remedies: point `NUMBA_CACHE_DIR` at a writable
-directory, or set `NUMBARROW_JIT_OPTIONS='{"cache": false}'`. numba's cache
-index does not record the options a function was compiled with, so point
-`NUMBA_CACHE_DIR` at a fresh directory when an option changes. Both are read
+package or under `NUMBA_CACHE_DIR`. Where no cache location can be written,
+the functions compile without a cache and a warning names the remedy. For a
+read-only install that is `NUMBA_CACHE_DIR`, pointed at a writable directory.
+For an import from an `.egg`, `.whl` or `.pyz` archive such as `spark-submit
+--py-files` ships, `NUMBA_CACHE_DIR` has no effect, since numba reads it only
+for a source file on disk: install numbarrow unpacked, or ship it as a `.zip`,
+which numba 0.61 and later cache in the user's cache directory. Either way
+`NUMBARROW_JIT_OPTIONS='{"cache": false}'` turns caching off and silences the
+warning. numba's cache index does not record the options a function was
+compiled with, so point `NUMBA_CACHE_DIR` at a fresh directory when an option
+changes. Both are read
 at import: `NUMBARROW_JIT_OPTIONS` when numbarrow is first imported and
 `NUMBA_CACHE_DIR` when numba is, which another library may have done earlier,
 so set both before either. numba re-reads its environment only when it

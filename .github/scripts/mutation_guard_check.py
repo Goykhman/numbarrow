@@ -732,6 +732,18 @@ MUTATIONS = [
         '    arrow_type = _storage(arrow_type)\n    if pa.types.is_struct(arrow_type):\n        fields = ',
         '    if pa.types.is_struct(arrow_type):\n        fields = ',
     ),
+    (
+        'the cache warning offers NUMBA_CACHE_DIR to an import from an archive',
+        'numbarrow/core/configurations.py',
+        '            if os.path.exists(inspect.getfile(func)):',
+        '            if True:',
+    ),
+    (
+        'the cache warning stops naming NUMBA_CACHE_DIR for a source file on disk',
+        'numbarrow/core/configurations.py',
+        '            if os.path.exists(inspect.getfile(func)):',
+        '            if False:',
+    ),
 ]
 
 COPY = ["numbarrow", "test", "README.md", "pyproject.toml", "docs"]
