@@ -633,7 +633,7 @@ MUTATIONS = [
     (
         'a function that numba cannot cache stops compiling uncached',
         'numbarrow/core/configurations.py',
-        '            if "no locator available" not in str(error) or not jit_options.get("cache"):\n'
+        '            if not cache_failed or not jit_options.get("cache"):\n'
         '                raise',
         '            raise',
     ),
@@ -697,8 +697,8 @@ MUTATIONS = [
     (
         'the cache fallback stops being narrowed to the no-locator error',
         'numbarrow/core/configurations.py',
-        '            if "no locator available" not in str(error) or not jit_options.get("cache"):',
-        '            if not jit_options.get("cache"):',
+        '            cache_failed = isinstance(error, OSError) or "no locator available" in str(error)',
+        '            cache_failed = True',
     ),
     (
         'the repeated-name check stops looking inside a map',
@@ -743,6 +743,24 @@ MUTATIONS = [
         'numbarrow/core/configurations.py',
         '            if os.path.exists(inspect.getfile(func)):',
         '            if False:',
+    ),
+    (
+        'a cache write that fails at decoration stops being caught',
+        'numbarrow/core/configurations.py',
+        '        except (RuntimeError, OSError) as error:',
+        '        except RuntimeError as error:',
+    ),
+    (
+        'a cache write that fails at decoration stops compiling uncached',
+        'numbarrow/core/configurations.py',
+        '            cache_failed = isinstance(error, OSError) or "no locator available" in str(error)',
+        '            cache_failed = "no locator available" in str(error)',
+    ),
+    (
+        'an error at decoration with caching off stops reaching the caller',
+        'numbarrow/core/configurations.py',
+        '            if not cache_failed or not jit_options.get("cache"):',
+        '            if not cache_failed:',
     ),
 ]
 

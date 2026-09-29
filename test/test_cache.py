@@ -237,6 +237,27 @@ def test_a_zip_import_is_cached_by_numba_from_0_61(tmp_path):
 
 
 @needs_a_directory_it_cannot_write
+def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_with_a_warning(tmp_path):
+    # numba takes the user's cache directory for a .zip without checking that
+    # it can be written, so where it cannot, an executor with a read-only
+    # home, the first save raised PermissionError and the import died on it.
+    archive = _archive(tmp_path / "numbarrow.zip")
+    home = tmp_path / "home"
+    home.mkdir()
+    home.chmod(0o555)
+    try:
+        env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"),
+                   NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+        env.pop("NUMBARROW_JIT_OPTIONS", None)
+        run = subprocess.run([sys.executable, "-W", "always", "-c", IMPORT_AND_SHOW_FILE],
+                             capture_output=True, text=True, env=env, cwd=str(tmp_path))
+        assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
+        assert "compiles without a cache" in run.stderr and "NUMBA_CACHE_DIR has no effect here" in run.stderr
+    finally:
+        home.chmod(0o755)
+
+
+@needs_a_directory_it_cannot_write
 def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(tmp_path):
     # The other way to have no cache location: the source is on disk, and
     # neither its directory nor the user's cache directory can be written.

@@ -68,18 +68,20 @@ def jit_with_options(signature):
 
     numba sets a cached function up when it is decorated, and raises ``RuntimeError`` there when no cache
     location can be written: a read-only install, an unwritable ``site-packages`` and user cache directory, or
-    an import from an ``.egg``, ``.whl`` or ``.pyz`` archive, which Spark's ``--py-files`` ships. Nothing then
-    named the way out. Such a function compiles without a cache, with a warning naming the remedy:
-    ``NUMBA_CACHE_DIR`` for a source file on disk, and for an archive, where numba never reads it, an unpacked
-    install or a ``.zip``, which numba 0.61 and later cache in the user's cache directory. Either way
-    ``NUMBARROW_JIT_OPTIONS='{"cache": false}'`` turns caching off and silences the warning. A write that fails
-    later, on a full disk, is numba's own error.
+    an import from an ``.egg``, ``.whl`` or ``.pyz`` archive, which Spark's ``--py-files`` ships. For a ``.zip``
+    it takes the user's cache directory without checking that it can be written, and the first write raises
+    ``OSError`` instead. Nothing then named the way out. Such a function compiles without a cache, with a
+    warning naming the remedy: ``NUMBA_CACHE_DIR`` for a source file on disk, and for an archive, where numba
+    never reads it, an unpacked install or a ``.zip``, which numba 0.61 and later cache in the user's cache
+    directory. Either way ``NUMBARROW_JIT_OPTIONS='{"cache": false}'`` turns caching off and silences the
+    warning. An error that is not the cache's comes back from the uncached compile.
     """
     def decorate(func):
         try:
             return njit(signature, **jit_options)(func)
-        except RuntimeError as error:
-            if "no locator available" not in str(error) or not jit_options.get("cache"):
+        except (RuntimeError, OSError) as error:
+            cache_failed = isinstance(error, OSError) or "no locator available" in str(error)
+            if not cache_failed or not jit_options.get("cache"):
                 raise
             silence = "NUMBARROW_JIT_OPTIONS='{\"cache\": false}' to turn caching off and silence this warning"
             if os.path.exists(inspect.getfile(func)):
