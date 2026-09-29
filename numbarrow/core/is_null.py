@@ -8,13 +8,12 @@ bit position ``i % 8`` within that byte.
 """
 
 import numpy as np
-from numba import njit
 from numba.core.types import boolean, int64, Array, Optional, uint8, bool_
 
-from numbarrow.core.configurations import jit_options
+from numbarrow.core.configurations import jit_with_options
 
 
-@njit(boolean(int64, Array(uint8, 1, "C", readonly=True)), **jit_options)
+@jit_with_options(boolean(int64, Array(uint8, 1, "C", readonly=True)))
 def is_null(index_: int, bitmap: np.ndarray) -> bool:
     """Check whether element *index_* is null according to *bitmap*.
 
@@ -24,11 +23,12 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
     ``index_`` must satisfy ``0 <= index_ < 8 * len(bitmap)``. Compiled without
     bounds checking, which is numba's default, an index past the bitmap reads
     memory that is not the bitmap's; ``NUMBARROW_JIT_OPTIONS='{"boundscheck":
-    true}'`` turns that into ``IndexError``. A negative index reads from the
-    bitmap's end like any numpy index, which is the wrong bit and in bounds,
-    so bounds checking does not catch it.
+    true}'`` turns that into ``IndexError``. A negative index down to
+    ``-8 * len(bitmap)`` reads from the bitmap's end like any numpy index,
+    which is the wrong bit and in bounds, so bounds checking does not catch
+    it; below that the read is out of bounds, and bounds checking does.
 
-    :param index_: zero-based element index
+    :param index\\_: zero-based element index
     :param bitmap: uint8 array containing the packed validity bitmap
     :returns: True if the element is null (bit is 0), False if valid (bit is 1)
     """
@@ -39,7 +39,7 @@ def is_null(index_: int, bitmap: np.ndarray) -> bool:
     return not (byte_for_index >> bit_position_in_byte) % 2
 
 
-@njit(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)), **jit_options)
+@jit_with_options(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)))
 def unpack_booleans(offset: int, length: int, packed_data: np.ndarray) -> np.ndarray:
     """Unpack bit-packed boolean data into a boolean array.
 
@@ -64,8 +64,8 @@ def unpack_booleans(offset: int, length: int, packed_data: np.ndarray) -> np.nda
 # design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
 
 
-@njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),
-              Optional(Array(uint8, 1, "C", readonly=True))), **jit_options)
+@jit_with_options(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),
+                          Optional(Array(uint8, 1, "C", readonly=True))))
 def is_null_struct(index_, struct_bitmap, field_bitmap):
     """Check whether a struct field value is null at either the struct or field layer.
 
@@ -82,7 +82,7 @@ def is_null_struct(index_, struct_bitmap, field_bitmap):
     counting the entries in the index it just read, so a second entry is
     something two processes warming a cold cache can disagree about.
 
-    :param index_: zero-based element index, converted to ``int64``
+    :param index\\_: zero-based element index, converted to ``int64``
     :param struct_bitmap: uint8 packed bitmap for struct-level validity, or None
     :param field_bitmap: uint8 packed bitmap for field-level validity, or None
     :returns: True if null at either layer

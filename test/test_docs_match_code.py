@@ -8,7 +8,11 @@ these fail the build the next time any of it drifts, which is the only thing
 that stops it recurring.
 """
 import datetime
+import decimal
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -88,7 +92,7 @@ def _is_view(array):
     """True when the result views an Arrow buffer rather than owning fresh memory."""
     node = array
     for _ in range(8):
-        if isinstance(node, memoryview):
+        if isinstance(node, (memoryview, pa.Buffer)):
             return True
         node = getattr(node, "base", None)
         if node is None:
@@ -150,6 +154,20 @@ def test_the_truncations_the_docstring_admits_for_a_list_are_the_ones_it_makes()
     ]
 
 
+def test_a_float_under_a_declared_decimal_is_refused_as_the_docstring_says():
+    # The docstring listed a float into decimal among the conversions that
+    # pass without a word, rounding to the declared scale; both routes refuse
+    # it, the sequence converter wanting an int or a Decimal.
+    assert "A float under a ``decimal`` type is refused on both routes" in FACTORY_DOC
+    assert "a float into ``decimal``" not in FACTORY_DOC
+    with pytest.raises(pa.ArrowException):
+        _one_output_column([1.236], pa.decimal128(6, 2))
+    with pytest.raises(pa.ArrowException):
+        _one_output_column(np.array([1.236]), pa.decimal128(6, 2))
+    exact = _one_output_column([decimal.Decimal("1.23")], pa.decimal128(6, 2))
+    assert exact.to_pylist() == [decimal.Decimal("1.23")]
+
+
 def _inferred_output_column(value):
     """The column a UDF returning *value* with no output_schema yields."""
     batch = pa.RecordBatch.from_pydict({"v": [1.0]})
@@ -161,10 +179,12 @@ def test_an_inferred_datetime64_column_comes_back_as_the_docs_say():
     # Both sentences promised a timestamp of the array's unit for every unit,
     # and pa.array infers date32 for the day one, which the round-trip test's
     # own drift table admits by leaving date32 out of it.
-    assert ("a ``datetime64`` array comes back a naive ``timestamp`` of its unit, except a "
-            "day-unit one, which comes back ``date32``") in FACTORY_DOC
-    assert ("a `datetime64` output becomes a naive timestamp of its unit, except "
-            "`datetime64[D]`, which becomes `date32`") in README_TEXT
+    assert ("a ``datetime64`` array comes back a naive ``timestamp`` of its unit, with a multiplier such as "
+            "``datetime64[5s]`` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
+            "unit comes back ``date32``, a unit finer than a nanosecond is refused") in FACTORY_DOC
+    assert ("a `datetime64` output becomes a naive timestamp of its unit, with a multiplier such as "
+            "`datetime64[5s]` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
+            "unit becomes `date32`, a unit finer than a nanosecond is refused") in README_TEXT
     days = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
     column = _inferred_output_column(days)
     assert column.type == pa.date32()
@@ -183,6 +203,28 @@ def test_the_readme_names_the_pandas_floor_the_extras_declare():
     row = re.search(r"\| pandas \| ([\d.]+)\+", README.read_text()).group(1)
     assert floors == {row}, (floors, row)
     assert "1.5.0" not in README_TEXT
+
+
+def test_the_cache_dir_is_read_at_numbas_import_as_the_readme_says(tmp_path):
+    # The README said both variables are read when numbarrow is first
+    # imported. NUMBA_CACHE_DIR is numba's, read when numba is imported and
+    # again only when it compiles something, so a directory set between the
+    # two imports missed the first function numbarrow compiles, and all of
+    # them when the old cache was warm.
+    assert "`NUMBA_CACHE_DIR` when numba is" in README_TEXT
+    assert "misses at least the first function numbarrow compiles" in README_TEXT
+    first, late = tmp_path / "first", tmp_path / "late"
+    src = (f"import os; os.environ['NUMBA_CACHE_DIR'] = {str(first)!r}\n"
+           "import numba\n"
+           f"os.environ['NUMBA_CACHE_DIR'] = {str(late)!r}\n"
+           "import numbarrow.core.is_null\n")
+    env = {key: value for key, value in os.environ.items() if key not in ("NUMBA_CACHE_DIR", "NUMBARROW_JIT_OPTIONS")}
+    env["PYTHONPATH"] = str(README.parent)
+    run = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert run.returncode == 0, run.stderr
+    indexed = {where: sorted(path.name.split(".")[1].split("-")[0] for path in (tmp_path / where).rglob("*.nbi"))
+               for where in ("first", "late")}
+    assert "is_null" in indexed["first"] and "is_null" not in indexed["late"], indexed
 
 
 def _output_column(value):

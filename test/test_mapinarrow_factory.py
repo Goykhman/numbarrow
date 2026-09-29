@@ -1,4 +1,6 @@
+import collections
 import datetime
+import gc
 import weakref
 
 import numpy as np
@@ -8,6 +10,7 @@ import pytest
 
 from numbarrow.core.is_null import is_null
 from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
+from test.conftest import Wrapped
 
 
 def run_batch(batch, input_columns=None):
@@ -90,6 +93,24 @@ def test_input_columns_selects_only_the_named_columns():
     seen = run_batch(batch, input_columns=["c", "a"])
     assert list(seen["data"]) == ["c", "a"] and list(seen["bitmap"]) == ["c", "a"]
     assert seen["data"]["c"].tolist() == [5, 6]
+
+
+def test_input_columns_is_read_once_so_a_generator_serves_every_batch():
+    # A generator, map() or filter() given as input_columns must reach the UDF
+    # in every batch, not only the first. The names used to be read from the
+    # argument inside the batch loop, so the first batch used them up and every
+    # later batch was adapted with no columns: the UDF died on a bare KeyError.
+    batches = [pa.RecordBatch.from_pydict({"x": [1, 2], "y": [0, 0]}),
+               pa.RecordBatch.from_pydict({"x": [3], "y": [0]})]
+    seen = []
+
+    def main(data_dict, bitmap_dict, broadcasts):
+        seen.append(list(data_dict))
+        return {"out": data_dict["x"] * 2}
+
+    got = list(make_mapinarrow_func(main, input_columns=(name for name in ["x"]))(iter(batches)))
+    assert seen == [["x"], ["x"]]
+    assert [batch.column("out").to_pylist() for batch in got] == [[2, 4], [6]]
 
 
 def test_a_struct_field_sharing_a_column_name_reaches_the_udf():
@@ -344,7 +365,8 @@ def test_a_day_unit_datetime64_under_another_declared_type_is_its_date32_cast():
 def test_a_declared_type_keeps_the_other_datetime64_conversions():
     # What widening the day unit must leave alone: a unit change that drops
     # digits still raises, a date type still floors to the day without a word,
-    # and a timedelta is still a dtype pa.array has no converter for.
+    # a day-unit timedelta comes back in seconds, which pa.array models, and a
+    # month one has no fixed length and is refused.
     days = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
     sub_second = datetime.datetime(2020, 1, 1, 12, 34, 56, 789012)
     seconds = np.array([sub_second], dtype="datetime64[s]")
@@ -359,10 +381,29 @@ def test_a_declared_type_keeps_the_other_datetime64_conversions():
     dated = run_outputs({"t": days}, pa.schema([("t", pa.date64())])).column("t")
     assert dated.to_pylist() == [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)]
     spans = np.array([1, 2], dtype="timedelta64[D]")
-    with pytest.raises(pa.ArrowNotImplementedError, match=r"'t'.*timedelta64"):
-        run_outputs({"t": spans}, pa.schema([("t", pa.duration("s"))]))
-    with pytest.raises(pa.ArrowNotImplementedError, match=r"'t'.*timedelta64"):
-        run_outputs({"t": spans})
+    for schema in (None, pa.schema([("t", pa.duration("s"))])):
+        got = run_outputs({"t": spans}, schema).column("t")
+        assert got.type == pa.duration("s") and got.to_pylist() == [datetime.timedelta(days=d) for d in (1, 2)]
+    with pytest.raises(TypeError, match=r"'t'.*no fixed length"):
+        run_outputs({"t": np.array([1, 2], dtype="timedelta64[M]")})
+
+
+def test_a_coarse_time_unit_under_a_declared_non_temporal_type_is_refused_rather_than_rescaled():
+    # Taking a day or hour unit to seconds happened before the declared type
+    # was applied, so counts of [1, 2] days declared int64 came back as
+    # [86400, 172800], where pa.array had refused the unit.
+    for dtype in ("timedelta64[D]", "timedelta64[h]", "datetime64[h]"):
+        counts = np.array([1, 2], dtype=dtype)
+        for declared in (pa.int64(), pa.string()):
+            with pytest.raises(TypeError, match=r"'n'.*would change them"):
+                run_outputs({"n": counts}, pa.schema([("n", declared)]))
+    # A multiplier still folds, since pa.array reads the count as one of the
+    # base unit, and a temporal declared type still takes the coarse unit.
+    bins = np.array([1, 2], dtype="timedelta64[5s]")
+    assert run_outputs({"n": bins}, pa.schema([("n", pa.int64())])).column("n").to_pylist() == [5, 10]
+    hours = np.array([1, 2], dtype="datetime64[h]")
+    dated = run_outputs({"n": hours}, pa.schema([("n", pa.date32())])).column("n")
+    assert dated.to_pylist() == [datetime.date(1970, 1, 1), datetime.date(1970, 1, 1)]
 
 
 def test_output_schema_refuses_a_struct_key_no_field_has():
@@ -423,6 +464,9 @@ def test_a_struct_key_no_field_has_is_refused_at_any_depth():
         "map of structs": (pa.map_(pa.string(), inner), [{"k": {"Amount": 1}}]),
         "map of structs from pairs": (pa.map_(pa.string(), inner), [[("k", {"Amount": 1})]]),
         "struct-keyed map": (pa.map_(inner, pa.int64()), [[({"Amount": 1}, 5)]]),
+        # An extension type carries its storage's fields, and the check looks
+        # through it on both of its questions; nothing exercised either.
+        "extension over struct": (Wrapped(inner), [{"Amount": 1}]),
     }
     for label, (declared_type, value) in cases.items():
         with pytest.raises(ValueError, match="Amount"):
@@ -556,6 +600,17 @@ def test_a_record_array_becomes_a_struct_column():
     wide = np.array([(2 ** 40,), (1,)], dtype=[("i", "i8")])
     with pytest.raises(pa.ArrowInvalid, match=r"'r'.*field 'i'"):
         run_outputs({"r": wide}, pa.schema([("r", pa.struct([("i", pa.int32())]))]))
+
+
+def test_a_record_array_field_that_fails_is_named_without_a_declared_type():
+    # Only the declared path wrapped a child's failure with its field name; a
+    # record array converted as inferred failed naming the output column alone.
+    records = np.zeros(2, dtype=[("ok", "i8"), ("bad", "c16")])
+    with pytest.raises(pa.ArrowException, match=r"'r'.*field 'bad'"):
+        run_outputs({"r": records})
+    declared = pa.schema([("r", pa.struct([("ok", pa.int64()), ("bad", pa.float64())]))])
+    with pytest.raises(pa.ArrowException, match=r"'r'.*field 'bad'"):
+        run_outputs({"r": records}, declared)
 
 
 def test_a_record_array_with_no_fields_keeps_its_rows():
@@ -813,3 +868,317 @@ def test_a_bare_tuple_is_a_sequence_not_a_pair():
     assert listed.type == pa.list_(pa.int64()) and listed.to_pylist() == [[1, 2], None]
     arrays = run_outputs({"a": (np.array([1, 2]), np.array([3, 4]))}).column("a")
     assert arrays.type == pa.list_(pa.int64()) and arrays.to_pylist() == [[1, 2], [3, 4]]
+
+
+def test_a_time_unit_multiplier_is_folded_in_before_arrow_reads_it():
+    # pa.array reads numpy's base unit and ignored the multiplier, so five-second
+    # bins came back at one-second steps, and datetime64[2D] slipped past the
+    # day-unit inference into the misread it guards against.
+    base = np.datetime64("2020-03-01T10:00:00")
+    stamps = (base + np.arange(3) * np.timedelta64(5, "s")).astype("datetime64[5s]")
+    expected = [datetime.datetime(2020, 3, 1, 10, 0, s) for s in (0, 5, 10)]
+    got = run_outputs({"t": stamps}).column("t")
+    assert got.type == pa.timestamp("s") and got.to_pylist() == expected
+    declared = pa.schema([("t", pa.timestamp("s"))])
+    assert run_outputs({"t": stamps}, declared).column("t").to_pylist() == expected
+    days = np.array(["2020-03-01", "2020-03-03", "2020-03-05"], dtype="datetime64[2D]")
+    assert run_outputs({"d": days}).column("d").to_pylist() == [datetime.date(2020, 3, d) for d in (1, 3, 5)]
+    stamped = run_outputs({"d": days}, pa.schema([("d", pa.timestamp("s"))])).column("d")
+    assert stamped.to_pylist() == [datetime.datetime(2020, 3, d) for d in (1, 3, 5)]
+    deltas = np.array([15, 60, 45], dtype="timedelta64[s]").astype("timedelta64[15s]")
+    assert run_outputs({"e": deltas}).column("e").to_pylist() == [datetime.timedelta(seconds=s) for s in (15, 60, 45)]
+
+
+def test_a_coarse_time_unit_becomes_seconds_or_days_and_a_finer_one_is_refused():
+    # pa.array models seconds down to nanoseconds; an hour, minute, week, month
+    # or year unit raised ArrowNotImplementedError against the docstring's
+    # promise of a timestamp of the unit.
+    hours = np.array(["2020-03-01T10", "2020-03-01T11"], dtype="datetime64[h]")
+    got = run_outputs({"t": hours}).column("t")
+    assert got.type == pa.timestamp("s")
+    assert got.to_pylist() == [datetime.datetime(2020, 3, 1, h) for h in (10, 11)]
+    months = np.array(["2020-03", "2020-04"], dtype="datetime64[M]")
+    got = run_outputs({"d": months}).column("d")
+    assert got.type == pa.date32() and got.to_pylist() == [datetime.date(2020, 3, 1), datetime.date(2020, 4, 1)]
+    weeks = np.array([1, 2], dtype="timedelta64[W]")
+    assert run_outputs({"e": weeks}).column("e").to_pylist() == [datetime.timedelta(weeks=w) for w in (1, 2)]
+    with pytest.raises(TypeError, match=r"'t'.*nanoseconds"):
+        run_outputs({"t": np.array([1, 2], dtype="datetime64[ps]")})
+    with pytest.raises(TypeError, match=r"'e'.*no fixed length"):
+        run_outputs({"e": np.array([1, 2], dtype="timedelta64[M]")})
+
+
+def test_a_nullable_inside_a_nullable_is_refused():
+    # A helper that returned a Nullable, wrapped once more with the input's
+    # bitmap, went to pa.array as the 2-tuple it is and came back as two rows.
+    inner = Nullable(np.arange(2, dtype=np.int64), None)
+    with pytest.raises(TypeError, match=r"'out'.*Nullable inside a Nullable"):
+        run_outputs({"out": Nullable(inner, None)})
+
+
+def test_the_key_check_reaches_rows_that_are_not_dicts():
+    # A tuple, a namedtuple, a pyspark Row and a sequence by __getitem__ alone
+    # bind by position in pa.array, and none of them was looked inside, so a
+    # mistyped nested key was silently nulled behind any of them.
+    Outer = collections.namedtuple("Outer", ["id", "inner"])
+
+    class Row(tuple):
+        __fields__ = ["id", "inner"]
+
+    class Seq:
+        def __init__(self, items):
+            self._items = items
+
+        def __len__(self):
+            return len(self._items)
+
+        def __getitem__(self, index):
+            return self._items[index]
+
+    nested = pa.schema([("s", pa.struct([("id", pa.int64()), ("inner", pa.struct([("amount", pa.int64())]))]))])
+    for rows in ([(1, {"Amount": 5}), (2, {"Amount": 6})],
+                 [Outer(1, {"Amount": 5}), Outer(2, {"Amount": 6})],
+                 [Row((1, {"Amount": 5})), Row((2, {"Amount": 6}))]):
+        with pytest.raises(ValueError, match=r"'s'.*'Amount'"):
+            run_outputs({"s": rows}, nested)
+    listed = pa.schema([("s", pa.list_(pa.struct([("amount", pa.int64())])))])
+    with pytest.raises(ValueError, match=r"'s'.*'Amount'"):
+        run_outputs({"s": [Seq([{"amount": 1}]), Seq([{"Amount": 2}])]}, listed)
+    mapped = pa.schema([("s", pa.map_(pa.string(), pa.struct([("amount", pa.int64())])))])
+    entries = [[{"key": "k", "value": {"Amount": 1}}], [{"key": "j", "value": {"amount": 2}}]]
+    with pytest.raises(ValueError, match=r"'s'.*'Amount'"):
+        run_outputs({"s": entries}, mapped)
+    good = run_outputs({"s": [Outer(1, {"amount": 5}), (2, {"amount": 6})]}, nested).column("s")
+    assert good.to_pylist() == [{"id": 1, "inner": {"amount": 5}}, {"id": 2, "inner": {"amount": 6}}]
+
+
+def test_a_namedtuple_row_naming_the_fields_in_another_order_is_refused():
+    # pa.array binds a namedtuple by position, so YX(y=100, x=0) under
+    # struct<x, y> put 100 in x and 0 in y without a word.
+    YX = collections.namedtuple("YX", ["y", "x"])
+    schema = pa.schema([("s", pa.struct([("x", pa.int64()), ("y", pa.int64())]))])
+    with pytest.raises(ValueError, match=r"'s'.*\['y', 'x'\].*position"):
+        run_outputs({"s": [YX(100, 0), YX(200, 1)]}, schema)
+    XY = collections.namedtuple("XY", ["x", "y"])
+    got = run_outputs({"s": [XY(0, 100), XY(1, 200)]}, schema).column("s")
+    assert got.to_pylist() == [{"x": 0, "y": 100}, {"x": 1, "y": 200}]
+
+
+def test_a_namedtuple_row_naming_other_fields_is_refused_rather_than_bound_by_position():
+    # The order check compared the two sets of names, so Point(lon=10,
+    # latitude=50) under struct<lat, lon>, one field misnamed, passed it and
+    # pa.array put the lon value in lat and the latitude value in lon.
+    Point = collections.namedtuple("Point", ["lon", "latitude"])
+    schema = pa.schema([("p", pa.struct([("lat", pa.float64()), ("lon", pa.float64())]))])
+    with pytest.raises(ValueError, match=r"'p'.*\['lon', 'latitude'\].*not the declared fields.*position"):
+        run_outputs({"p": [Point(lon=10.0, latitude=50.0)]}, schema)
+    Extra = collections.namedtuple("Extra", ["lat", "lon", "alt"])
+    with pytest.raises(ValueError, match=r"'p'.*\['lat', 'lon', 'alt'\].*not the declared fields"):
+        run_outputs({"p": [Extra(50.0, 10.0, 0.0)]}, schema)
+
+
+def test_pyarrow_scalar_rows_are_left_to_pa_array():
+    # From pyarrow 21 a MapScalar is a Mapping whose values is an array, so the
+    # key check died calling it; pa.array checks a scalar row itself.
+    mapped = pa.map_(pa.string(), pa.struct([("amount", pa.int64())]))
+    rows = list(pa.array([[("k", {"amount": 1})], [("j", {"amount": 2}), ("i", {"amount": 3})]], type=mapped))
+    got = run_outputs({"s": rows}, pa.schema([("s", mapped)])).column("s")
+    assert got.to_pylist() == [[("k", {"amount": 1})], [("j", {"amount": 2}), ("i", {"amount": 3})]]
+
+
+def test_a_pandas_series_row_is_refused_rather_than_read_by_label():
+    # pa.array reads a Series row by its index labels: a sorted one came back
+    # in label order, one from a groupby died on a bare KeyError, a frame under
+    # one key came back transposed, and a multi-chunk pyarrow-backed Series
+    # reached RecordBatch.from_arrays as a ChunkedArray.
+    pd = pytest.importorskip("pandas")
+    rows = [pd.Series([3, 1, 2]).sort_values(), pd.Series([6, 5, 4]).sort_values()]
+    schema = pa.schema([("s", pa.list_(pa.int64()))])
+    with pytest.raises(TypeError, match=r"'s'.*Series.*list\(row\)"):
+        run_outputs({"s": rows}, schema)
+    got = run_outputs({"s": [list(row) for row in rows]}, schema).column("s")
+    assert got.to_pylist() == [[1, 2, 3], [4, 5, 6]]
+    frame = pd.DataFrame({"x": [1, 2]})
+    with pytest.raises(TypeError, match=r"'out'.*DataFrame"):
+        run_outputs({"out": frame[["x"]]})
+    chunked = pd.concat([pd.Series(["a"], dtype="string[pyarrow]"), pd.Series(["b"], dtype="string[pyarrow]")])
+    assert run_outputs({"w": chunked}).column("w").to_pylist() == ["a", "b"]
+
+
+def test_a_pandas_series_row_inside_an_object_array_is_refused_too():
+    # The row check looked only inside a list or a tuple, so the same sorted
+    # Series as the one element of an object array reached pa.array and came
+    # back in label order, [3, 1, 2] for values stored as [1, 2, 3].
+    pd = pytest.importorskip("pandas")
+    rows = np.empty(1, dtype=object)
+    rows[0] = pd.Series([3, 1, 2]).sort_values()
+    with pytest.raises(TypeError, match=r"'s'.*Series.*list\(row\)"):
+        run_outputs({"s": rows}, pa.schema([("s", pa.list_(pa.int64()))]))
+    with pytest.raises(TypeError, match=r"'s'.*Series"):
+        run_outputs({"s": rows})
+
+
+def test_a_pandas_series_row_under_a_struct_names_to_dict_as_the_remedy():
+    # The refusal named row.to_numpy() and list(row) as the way over, and
+    # under a declared struct pa.array refuses both of those in turn; a Series
+    # keyed by field name goes over as row.to_dict().
+    pd = pytest.importorskip("pandas")
+    schema = pa.schema([("p", pa.struct([("lat", pa.float64()), ("lon", pa.float64())]))])
+    rows = [pd.Series({"lat": 50.0, "lon": 10.0}), pd.Series({"lat": 1.0, "lon": 2.0})]
+    with pytest.raises(TypeError, match=r"'p'.*Series.*row\.to_dict\(\)") as excinfo:
+        run_outputs({"p": rows}, schema)
+    assert "to_numpy" not in str(excinfo.value)
+    got = run_outputs({"p": [row.to_dict() for row in rows]}, schema).column("p")
+    assert got.to_pylist() == [{"lat": 50.0, "lon": 10.0}, {"lat": 1.0, "lon": 2.0}]
+
+
+def test_a_key_error_from_pa_array_names_the_column_and_the_field():
+    # pa.array reads a UserDict row by index, and the KeyError it raised was
+    # outside the classes the output side renamed, so it escaped as "0".
+    rows = [collections.UserDict({"amount": 1}), collections.UserDict({"amount": 2})]
+    schema = pa.schema([("s", pa.struct([("amount", pa.int64())]))])
+    with pytest.raises(KeyError, match=r"output column 's': 0"):
+        run_outputs({"s": rows}, schema)
+    records = np.array([(1, rows[0])], dtype=[("i", "i8"), ("o", "O")])
+    declared = pa.schema([("r", pa.struct([("i", pa.int64()), ("o", pa.struct([("amount", pa.int64())]))]))])
+    with pytest.raises(KeyError, match=r"'r'.*field 'o': 0"):
+        run_outputs({"r": records}, declared)
+
+
+def test_the_field_guard_sees_through_extension_map_and_view_layouts():
+    # An extension array with struct storage, a map declared as a list of
+    # key/value structs, and a list view were compared as unlike kinds, so the
+    # guard returned nothing and the cast filled the column with nulls.
+    point = pa.struct([("x", pa.float64()), ("y", pa.float64())])
+    if hasattr(pa, "opaque"):
+        ext_type = pa.opaque(point, "point", "vendor")
+        ext = pa.ExtensionArray.from_storage(ext_type, pa.array([{"x": 1.0, "y": 2.0}], type=point))
+        declared = pa.schema([("p", pa.struct([("lon", pa.float64()), ("lat", pa.float64())]))])
+        with pytest.raises(ValueError, match=r"'p'.*\['x', 'y'\]"):
+            run_outputs({"p": ext}, declared)
+    mapped = pa.array([[("k", {"Amount": 1})]], type=pa.map_(pa.string(), pa.struct([("Amount", pa.int64())])))
+    entries = pa.struct([("key", pa.string()), ("value", pa.struct([("amount", pa.int64())]))])
+    with pytest.raises(ValueError, match=r"'m'.*\['Amount'\]"):
+        run_outputs({"m": mapped}, pa.schema([("m", pa.list_(entries))]))
+    if hasattr(pa, "list_view"):
+        viewed = pa.schema([("v", pa.list_view(pa.struct([("amount", pa.int64())])))])
+        with pytest.raises(ValueError, match=r"'v'.*'Amount'"):
+            run_outputs({"v": [[{"Amount": 5}]]}, viewed)
+
+
+def test_a_batch_whose_inferred_type_differs_from_the_first_is_refused_by_name():
+    # Spark's writer refused the second schema it saw, naming nothing: an
+    # all-None list beside one holding strings, or ints beside floats.
+    batches = [pa.RecordBatch.from_pydict({"x": [1, 2]}), pa.RecordBatch.from_pydict({"x": [3]})]
+    values = iter([[None, None], ["a"]])
+    fn = make_mapinarrow_func(lambda d, b, br: {"s": next(values)})
+    with pytest.raises(ValueError, match=r"'s'.*null.*string.*output_schema"):
+        list(fn(iter(batches)))
+    values = iter([[1, 2], [1.5]])
+    fn = make_mapinarrow_func(lambda d, b, br: {"n": next(values)})
+    with pytest.raises(ValueError, match=r"'n'.*int64.*double"):
+        list(fn(iter(batches)))
+    values = iter([{"a": [1, 2]}, {"b": [3]}])
+    fn = make_mapinarrow_func(lambda d, b, br: next(values))
+    with pytest.raises(ValueError, match=r"\['b'\].*\['a'\]"):
+        list(fn(iter(batches)))
+    values = iter([[None, None], ["a"]])
+    declared = pa.schema([("s", pa.string())])
+    fn = make_mapinarrow_func(lambda d, b, br: {"s": next(values)}, output_schema=declared)
+    assert [batch.column("s").to_pylist() for batch in fn(iter(batches))] == [[None, None], ["a"]]
+
+
+def test_a_nullable_extension_column_is_masked_through_its_storage():
+    # The flat test read the extension type, which reports no dictionary
+    # whatever its storage, so a dictionary storage took the from_buffers path
+    # and aborted the interpreter, and one carrying a null went to if_else,
+    # which has no extension kernel.
+    if not hasattr(pa, "opaque"):
+        pytest.skip("pa.opaque arrived in pyarrow 17")
+    labels = pa.opaque(pa.dictionary(pa.int32(), pa.string()), "label", "vendor")
+    bitmap = np.array([0b101], dtype=np.uint8)
+    for storage in (pa.array(["a", "b", "c"]).dictionary_encode(), pa.array(["a", None, "c"]).dictionary_encode()):
+        column = pa.ExtensionArray.from_storage(labels, storage)
+        got = run_outputs({"out": Nullable(column, bitmap)}).column("out")
+        assert got.type == labels and got.storage.to_pylist() == ["a", None, "c"]
+
+
+def test_nothing_of_a_batch_is_held_while_the_next_one_is_read():
+    # The adapted arrays and the handed-out bitmaps stayed bound in the
+    # generator's frame across the yield, so a string column's |U copy was
+    # live twice while the next batch was adapted.
+    seen = []
+
+    def main(data_dict, bitmap_dict, broadcasts):
+        seen.append(weakref.ref(data_dict["s"]))
+        return {"n": np.zeros(len(data_dict["s"]), dtype=np.int64)}
+
+    alive_when_the_next_is_read = []
+
+    class Batches:
+        def __init__(self):
+            self.batches = [pa.RecordBatch.from_pydict({"s": ["a", "b"]}), pa.RecordBatch.from_pydict({"s": ["c"]})]
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if seen:
+                gc.collect()
+                alive_when_the_next_is_read.append(seen[-1]() is not None)
+            if not self.batches:
+                raise StopIteration
+            return self.batches.pop(0)
+
+    for _ in make_mapinarrow_func(main)(Batches()):
+        pass
+    assert alive_when_the_next_is_read == [False, False]
+
+
+def test_a_fixed_width_binary_column_keeps_a_trailing_nul_under_its_declared_type():
+    # tolist() drops a trailing NUL, so one digest in 256 came back a byte
+    # short and the batch was refused under fixed_size_binary(16); the
+    # docstring blamed numpy for a byte the buffer still held.
+    digests = np.array([b"0123456789abcde\x00", b"\x00fedcba987654321", b"0123456789abcdef"], dtype="|S16")
+    declared = pa.schema([("d", pa.binary(16))])
+    got = run_outputs({"d": digests}, declared).column("d")
+    assert got.type == pa.binary(16)
+    assert got.to_pylist() == [b"0123456789abcde\x00", b"\x00fedcba987654321", b"0123456789abcdef"]
+
+
+def test_the_key_check_covers_the_list_layouts_a_missing_field_and_a_none_row():
+    # large_list and fixed_size_list, a row lacking a nested field and a None
+    # row in a struct column were terms of the check no test reached: dropping
+    # any of them left the suite green.
+    inner = pa.struct([("amount", pa.int64())])
+    for layout in (pa.large_list(inner), pa.list_(inner, 1)):
+        with pytest.raises(ValueError, match=r"'s'.*'Amount'"):
+            run_outputs({"s": [[{"Amount": 1}], [{"amount": 2}]]}, pa.schema([("s", layout)]))
+    nested = pa.schema([("s", pa.struct([("id", pa.int64()), ("inner", inner)]))])
+    got = run_outputs({"s": [{"id": 1, "inner": {"amount": 5}}, {"id": 2}]}, nested).column("s")
+    assert got.to_pylist() == [{"id": 1, "inner": {"amount": 5}}, {"id": 2, "inner": None}]
+    got = run_outputs({"s": [{"amount": 1}, None]}, pa.schema([("s", inner)])).column("s")
+    assert got.to_pylist() == [{"amount": 1}, None]
+
+
+def test_an_empty_bytes_column_keeps_its_type():
+    # The unicode half of the empty-batch pin had a test and the bytes half
+    # did not: an empty |S column inferred null with the default dropped.
+    got = run_outputs({"b": np.empty(0, dtype="S5"), "n": np.empty(0, dtype=np.int64)})
+    assert [field.type for field in got.schema] == [pa.binary(), pa.int64()]
+
+
+def test_every_refusal_class_of_a_record_field_names_the_field():
+    # Only the pyarrow member of the field's except tuple was pinned; narrowed
+    # to it, a dict key no field has, a nested record declared as a list and
+    # an int beyond int64 all stopped naming the field.
+    inner = pa.struct([("amount", pa.int64())])
+    with_dict = np.array([({"Amount": 1},)], dtype=[("meta", "O")])
+    with pytest.raises(ValueError, match=r"'r': field 'meta': declared"):
+        run_outputs({"r": with_dict}, pa.schema([("r", pa.struct([("meta", inner)]))]))
+    nested = np.array([((1, 2),)], dtype=[("pair", [("c", "i8"), ("d", "i8")])])
+    with pytest.raises(TypeError, match=r"'r': field 'pair': a record array"):
+        run_outputs({"r": nested}, pa.schema([("r", pa.struct([("pair", pa.list_(pa.int64()))]))]))
+    big = np.array([(2 ** 70,)], dtype=[("big", "O")])
+    with pytest.raises(OverflowError, match=r"'r': field 'big'"):
+        run_outputs({"r": big}, pa.schema([("r", pa.struct([("big", pa.int64())]))]))

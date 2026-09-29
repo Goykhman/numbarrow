@@ -240,6 +240,12 @@ def create_str_array(pa_str_array: pa.StringArray | pa.LargeStringArray) -> tupl
 # design. See: https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html
 
 
+def _is_union_layout(arrow_type):
+    while isinstance(arrow_type, pa.BaseExtensionType):
+        arrow_type = arrow_type.storage_type
+    return pa.types.is_union(arrow_type)
+
+
 def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
     np.ndarray | None, dict[str, np.ndarray | None], dict[str, np.ndarray]
 ]:
@@ -291,6 +297,18 @@ def structured_array_adapter(struct_array: pa.StructArray) -> tuple[
     # `is_null_struct` takes both, so folding the struct layer into the field
     # bitmap here would collapse a distinction the caller needs.
     raw_children = [struct_array.field(i) for i in range(len(data_type))]
+    for field_ind, raw_child in enumerate(raw_children):
+        if _is_union_layout(raw_child.type):
+            # flatten() hands the struct's validity to each child, and a union
+            # carries no validity buffer of its own, so Arrow's C++ layer
+            # aborted the process on one under a struct with a null row, where
+            # the dispatcher's typed refusal was due. Refused before anything
+            # is flattened, null row or not.
+            raise NotImplementedError(
+                f"struct field {data_type[field_ind].name!r}: Not implemented for an array of "
+                f"{len(raw_child)} elements of type {type_repr(raw_child.type)}, a union layout, which "
+                f"cannot take the struct's validity"
+            )
     masked = list(struct_array.flatten()) if struct_array.null_count else raw_children
     for field_ind in range(len(data_type)):
         field: pa.Field = data_type[field_ind]
@@ -426,9 +444,11 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, 
     Returns the validity bitmap, which owns its memory, and a zero-copy numpy
     view over the array's data buffer. The view is read-only and cannot be made
     writable: Arrow buffers are immutable by contract, and this is what
-    pyarrow's own ``Array.to_numpy(zero_copy_only=True)`` returns. Declare numba
-    signatures that receive it with ``readonly=True``, which accepts writable
-    arrays too.
+    pyarrow's own ``Array.to_numpy(zero_copy_only=True)`` returns. A slice or
+    reshape of it that an ``@njit`` function returns is a new array numba
+    boxes as writable, and its flag can be flipped, as pyarrow's own view's
+    can by the same route. Declare numba signatures that receive it with
+    ``readonly=True``, which accepts writable arrays too.
     """
     data_arrow_ty = pa_array.type
     data_np_ty = arrow_to_numpy_dtypes.get(data_arrow_ty, None)
@@ -478,8 +498,15 @@ def uniform_arrow_array_adapter(pa_array: pa.Array) -> tuple[np.ndarray | None, 
     # changed the source Arrow array. numpy refuses to set WRITEABLE on an
     # array whose base is read-only, which is also what makes pyarrow's own
     # to_numpy(zero_copy_only=True) refuse the flip.
+    # The read-only memoryview is wrapped in a foreign pyarrow buffer, and that
+    # is what the result keeps as its base. Handed the memoryview itself,
+    # np.frombuffer kept only a wrapper of it as .base, and that wrapper's
+    # release() dropped the memoryview's hold on the source, so a caller who
+    # released it, dropped the array and read the view read freed memory. A
+    # pa.Buffer has no release(), holds the memoryview and through it the
+    # source buffer, and exports read-only, so the flip stays refused.
     data = np.frombuffer(
-        memoryview(data_buf).toreadonly(),
+        pa.py_buffer(memoryview(data_buf).toreadonly()),
         dtype=data_np_ty,
         count=data_len,
         offset=pa_array.offset * data_item_byte_size

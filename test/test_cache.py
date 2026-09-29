@@ -19,11 +19,21 @@ cache under test is the one the subprocess wrote and nothing else.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
+
+# chmod takes write access from a directory neither on Windows nor from root.
+needs_a_directory_it_cannot_write = pytest.mark.skipif(
+    os.name == "nt" or os.geteuid() == 0, reason="needs a directory this user cannot write to")
+
+IMPORT_AND_SHOW_FILE = "import numbarrow.core.adapters as a; print(a.__file__)"
 
 IMPORT_AND_VIEW = (
     "import numpy as np\n"
@@ -171,3 +181,133 @@ def test_a_cold_cache_survives_a_concurrent_first_import_of_is_null_struct(tmp_p
     assert not failed, failed[0]
     out = _run(CHECK_EVERY_STRUCT_SHAPE, env, tmp_path)
     assert out.returncode == 0, out.stderr
+
+
+def _archive(path):
+    """numbarrow's modules zipped into ``path``, which goes on PYTHONPATH as it is."""
+    with zipfile.ZipFile(path, "w") as zipped:
+        for source in sorted((REPO / "numbarrow").rglob("*.py")):
+            zipped.write(source, str(source.relative_to(REPO)))
+    return path
+
+
+@pytest.mark.parametrize("name", ["numbarrow-0.0.0-py3.12.egg", "numbarrow-0.0.0-py3-none-any.whl"])
+def test_an_import_from_an_archive_compiles_uncached_with_a_warning_naming_the_remedy(tmp_path, name):
+    # numba's cache locators need the source file on disk, so an import from
+    # an .egg, .whl or .pyz archive, which Spark's --py-files ships, raised
+    # RuntimeError at decoration, naming neither the way to a cache nor the
+    # option that turns caching off. NUMBA_CACHE_DIR is no way to one: it is
+    # set and writable here, the warning fires all the same and nothing is
+    # written there, so the warning says so instead of offering it.
+    archive = _archive(tmp_path / name)
+    env = dict(os.environ, PYTHONPATH=str(archive), NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+    env.pop("NUMBARROW_JIT_OPTIONS", None)
+    run = subprocess.run([sys.executable, "-W", "always", "-c", IMPORT_AND_SHOW_FILE],
+                         capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
+    assert "compiles without a cache" in run.stderr
+    assert "NUMBA_CACHE_DIR has no effect here" in run.stderr and "Set NUMBA_CACHE_DIR" not in run.stderr
+    assert _index_files(tmp_path / "cache") == []
+    quiet = subprocess.run([sys.executable, "-W", "error", "-c", IMPORT_AND_SHOW_FILE],
+                           capture_output=True, text=True,
+                           env=dict(env, NUMBARROW_JIT_OPTIONS='{"cache": false}'), cwd=str(tmp_path))
+    assert quiet.returncode == 0, quiet.stderr
+
+
+def test_a_zip_import_is_cached_by_numba_from_0_61(tmp_path):
+    # The warning and the README send an archive's user to a .zip, which
+    # numba caches from 0.61 on, in the user's cache directory whatever
+    # NUMBA_CACHE_DIR says. Before that a .zip is one more archive.
+    import numba
+    archive = _archive(tmp_path / "numbarrow.zip")
+    home = tmp_path / "home"
+    env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"),
+               NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+    env.pop("NUMBARROW_JIT_OPTIONS", None)
+    run = subprocess.run([sys.executable, "-W", "always", "-c", IMPORT_AND_SHOW_FILE],
+                         capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
+    cached = tuple(int(part) for part in numba.__version__.split(".")[:2]) >= (0, 61)
+    assert ("compiles without a cache" not in run.stderr) == cached, run.stderr
+    assert _index_files(tmp_path / "cache") == []
+    if os.name != "nt":
+        # On Windows numba asks the system for the user's cache directory, and
+        # no variable set here moves it.
+        assert bool(_index_files(home)) == cached
+
+
+@needs_a_directory_it_cannot_write
+def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_with_a_warning(tmp_path):
+    # numba takes the user's cache directory for a .zip without checking that
+    # it can be written, so where it cannot, an executor with a read-only
+    # home, the first save raised PermissionError and the import died on it.
+    archive = _archive(tmp_path / "numbarrow.zip")
+    home = tmp_path / "home"
+    home.mkdir()
+    home.chmod(0o555)
+    try:
+        env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"),
+                   NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+        env.pop("NUMBARROW_JIT_OPTIONS", None)
+        run = subprocess.run([sys.executable, "-W", "always", "-c", IMPORT_AND_SHOW_FILE],
+                             capture_output=True, text=True, env=env, cwd=str(tmp_path))
+        assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
+        assert "compiles without a cache" in run.stderr and "NUMBA_CACHE_DIR has no effect here" in run.stderr
+    finally:
+        home.chmod(0o755)
+
+
+@needs_a_directory_it_cannot_write
+def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(tmp_path):
+    # The other way to have no cache location: the source is on disk, and
+    # neither its directory nor the user's cache directory can be written.
+    # NUMBA_CACHE_DIR is the remedy there, and nothing showed that the warning
+    # names it or that setting it works.
+    site = tmp_path / "site"
+    shutil.copytree(REPO / "numbarrow", site / "numbarrow", ignore=shutil.ignore_patterns("__pycache__"))
+    home = tmp_path / "home"
+    home.mkdir()
+    read_only = [home, *(path for path in site.rglob("*") if path.is_dir())]
+    for path in read_only:
+        path.chmod(0o555)
+    try:
+        env = dict(os.environ, PYTHONPATH=str(site), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"))
+        env.pop("NUMBARROW_JIT_OPTIONS", None)
+        env.pop("NUMBA_CACHE_DIR", None)
+        run = subprocess.run([sys.executable, "-W", "always", "-c", IMPORT_AND_SHOW_FILE],
+                             capture_output=True, text=True, env=env, cwd=str(tmp_path))
+        assert run.returncode == 0 and str(site) in run.stdout, run.stderr
+        assert "compiles without a cache" in run.stderr and "Set NUMBA_CACHE_DIR" in run.stderr
+        cured = subprocess.run([sys.executable, "-W", "error", "-c", IMPORT_AND_SHOW_FILE],
+                               capture_output=True, text=True,
+                               env=dict(env, NUMBA_CACHE_DIR=str(tmp_path / "cache")), cwd=str(tmp_path))
+        assert cured.returncode == 0, cured.stderr
+        assert _index_files(tmp_path / "cache")
+    finally:
+        for path in read_only:
+            path.chmod(0o755)
+
+
+CHECK_BOUNDS = (
+    "import numpy as np\n"
+    "from numbarrow.core.is_null import is_null, unpack_booleans\n"
+    "bitmap = np.zeros(1, dtype=np.uint8)\n"
+    "outcomes = []\n"
+    "for call in (lambda: is_null(100000, bitmap), lambda: unpack_booleans(0, 100000, bitmap)):\n"
+    "    try:\n"
+    "        call()\n"
+    "        outcomes.append('returned')\n"
+    "    except IndexError:\n"
+    "        outcomes.append('IndexError')\n"
+    "print(' '.join(outcomes))\n"
+)
+
+
+def test_jit_options_reach_the_is_null_decorators(tmp_path):
+    # The options test imported only the viewers, so hard-coding the options
+    # on is_null.py's three decorators kept the suite green, and the documented
+    # boundscheck contract had no test at all.
+    checked = _run(CHECK_BOUNDS, _env(tmp_path / "checked", {"cache": False, "boundscheck": True}), tmp_path)
+    assert checked.returncode == 0 and checked.stdout.split() == ["IndexError", "IndexError"], checked.stderr
+    unchecked = _run(CHECK_BOUNDS, _env(tmp_path / "unchecked", {"cache": False}), tmp_path)
+    assert unchecked.returncode == 0 and unchecked.stdout.split() == ["returned", "returned"], unchecked.stderr
