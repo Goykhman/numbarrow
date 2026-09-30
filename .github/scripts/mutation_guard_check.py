@@ -722,6 +722,13 @@ MUTATIONS = [
         '            cache_failed = True',
     ),
     (
+        'the cache option stops reaching unpack_booleans while every other option does',
+        'numbarrow/core/configurations.py',
+        '            return njit(signature, **jit_options)(func)',
+        '            return njit(signature, **{**jit_options, "cache": jit_options.get("cache")'
+        ' and func.__name__ != "unpack_booleans"})(func)',
+    ),
+    (
         'the repeated-name check stops looking inside a map',
         'numbarrow/core/mapinarrow_factory.py',
         '            repeated.extend(_repeated_names([arrow_type.key_field, arrow_type.item_field]))',
