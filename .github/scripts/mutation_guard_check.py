@@ -218,6 +218,14 @@ MUTATIONS = [
         "@jit_with_options(None)",
     ),
     (
+        "is_null_struct's decorator stops reading the options",
+        "numbarrow/core/is_null.py",
+        '@jit_with_options(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
+        '                          Optional(Array(uint8, 1, "C", readonly=True))))',
+        '@__import__("numba").njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
+        '                          Optional(Array(uint8, 1, "C", readonly=True))), cache=True)',
+    ),
+    (
         "viewers stop getting a cache name of their own",
         "numbarrow/utils/utils.py",
         '    viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"',

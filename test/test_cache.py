@@ -311,8 +311,19 @@ CHECK_BOUNDS = (
 def test_jit_options_reach_the_is_null_decorators(tmp_path):
     # The options test imported only the viewers, so hard-coding the options
     # on is_null.py's three decorators kept the suite green, and the documented
-    # boundscheck contract had no test at all.
+    # boundscheck contract had no test at all. Bounds checking shows on the two
+    # functions that index a bitmap; is_null_struct indexes nothing and calls
+    # is_null, whose own flags decide, so on its decorator the option that
+    # shows is the cache: off, nothing reaches the cache directory from any of
+    # the three, and on, each of the three leaves an index there.
     checked = _run(CHECK_BOUNDS, _env(tmp_path / "checked", {"cache": False, "boundscheck": True}), tmp_path)
     assert checked.returncode == 0 and checked.stdout.split() == ["IndexError", "IndexError"], checked.stderr
     unchecked = _run(CHECK_BOUNDS, _env(tmp_path / "unchecked", {"cache": False}), tmp_path)
     assert unchecked.returncode == 0 and unchecked.stdout.split() == ["returned", "returned"], unchecked.stderr
+    assert _index_files(tmp_path / "checked") == [] and _index_files(tmp_path / "unchecked") == []
+    cached = _run(CHECK_BOUNDS, _env(tmp_path / "cached", {"cache": True}), tmp_path)
+    assert cached.returncode == 0 and cached.stdout.split() == ["returned", "returned"], cached.stderr
+    indexes = _index_files(tmp_path / "cached")
+    assert len(indexes) == 3, indexes
+    for function in ("is_null-", "unpack_booleans", "is_null_struct"):
+        assert any(function in name for name in indexes), (function, indexes)
