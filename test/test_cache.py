@@ -307,6 +307,11 @@ CHECK_BOUNDS = (
     "print(' '.join(outcomes))\n"
 )
 
+SHOW_NOGIL = (
+    "from numbarrow.core.is_null import is_null, unpack_booleans, is_null_struct\n"
+    "print(' '.join(str(f.targetoptions.get('nogil')) for f in (is_null, unpack_booleans, is_null_struct)))\n"
+)
+
 
 def test_jit_options_reach_the_is_null_decorators(tmp_path):
     # The options test imported only the viewers, so hard-coding the options
@@ -315,7 +320,10 @@ def test_jit_options_reach_the_is_null_decorators(tmp_path):
     # functions that index a bitmap; is_null_struct indexes nothing and calls
     # is_null, whose own flags decide, so on its decorator the option that
     # shows is the cache: off, nothing reaches the cache directory from any of
-    # the three, and on, each of the three leaves an index there.
+    # the three, and on, each of the three leaves an index there. An option
+    # that shows on none of them, nogil, is read back from the three
+    # dispatchers, so a decorator forwarding only the two that show is caught
+    # as well.
     checked = _run(CHECK_BOUNDS, _env(tmp_path / "checked", {"cache": False, "boundscheck": True}), tmp_path)
     assert checked.returncode == 0 and checked.stdout.split() == ["IndexError", "IndexError"], checked.stderr
     unchecked = _run(CHECK_BOUNDS, _env(tmp_path / "unchecked", {"cache": False}), tmp_path)
@@ -327,3 +335,5 @@ def test_jit_options_reach_the_is_null_decorators(tmp_path):
     assert len(indexes) == 3, indexes
     for function in ("is_null-", "unpack_booleans", "is_null_struct"):
         assert any(function in name for name in indexes), (function, indexes)
+    forwarded = _run(SHOW_NOGIL, _env(tmp_path / "nogil", {"cache": False, "nogil": True}), tmp_path)
+    assert forwarded.returncode == 0 and forwarded.stdout.split() == ["True", "True", "True"], forwarded.stderr

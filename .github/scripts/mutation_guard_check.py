@@ -729,6 +729,13 @@ MUTATIONS = [
         ' and func.__name__ != "unpack_booleans"})(func)',
     ),
     (
+        'the decorators stop forwarding any option but cache and boundscheck',
+        'numbarrow/core/configurations.py',
+        '            return njit(signature, **jit_options)(func)',
+        '            return njit(signature, **{key: value for key, value in jit_options.items()'
+        ' if key in ("cache", "boundscheck")})(func)',
+    ),
+    (
         'the repeated-name check stops looking inside a map',
         'numbarrow/core/mapinarrow_factory.py',
         '            repeated.extend(_repeated_names([arrow_type.key_field, arrow_type.item_field]))',
