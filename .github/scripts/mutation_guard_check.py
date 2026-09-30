@@ -218,6 +218,27 @@ MUTATIONS = [
         "@jit_with_options(None)",
     ),
     (
+        "is_null's decorator stops reading the options",
+        "numbarrow/core/is_null.py",
+        '@jit_with_options(boolean(int64, Array(uint8, 1, "C", readonly=True)))',
+        '@__import__("numba").njit(boolean(int64, Array(uint8, 1, "C", readonly=True)), cache=False)',
+    ),
+    (
+        "unpack_booleans' decorator stops reading the options",
+        "numbarrow/core/is_null.py",
+        '@jit_with_options(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)))',
+        '@__import__("numba").njit(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)), '
+        'cache=False)',
+    ),
+    (
+        "is_null_struct's decorator stops reading the options",
+        "numbarrow/core/is_null.py",
+        '@jit_with_options(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
+        '                          Optional(Array(uint8, 1, "C", readonly=True))))',
+        '@__import__("numba").njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
+        '                          Optional(Array(uint8, 1, "C", readonly=True))), cache=False)',
+    ),
+    (
         "viewers stop getting a cache name of their own",
         "numbarrow/utils/utils.py",
         '    viewer.__qualname__ = f"{numpy_array_from_ptr_factory.__qualname__}.<locals>.{name}"',
@@ -699,6 +720,20 @@ MUTATIONS = [
         'numbarrow/core/configurations.py',
         '            cache_failed = isinstance(error, OSError) or "no locator available" in str(error)',
         '            cache_failed = True',
+    ),
+    (
+        'the cache option stops reaching unpack_booleans while every other option does',
+        'numbarrow/core/configurations.py',
+        '            return njit(signature, **jit_options)(func)',
+        '            return njit(signature, **{**jit_options, "cache": jit_options.get("cache")'
+        ' and func.__name__ != "unpack_booleans"})(func)',
+    ),
+    (
+        'the decorators stop forwarding any option but cache and boundscheck',
+        'numbarrow/core/configurations.py',
+        '            return njit(signature, **jit_options)(func)',
+        '            return njit(signature, **{key: value for key, value in jit_options.items()'
+        ' if key in ("cache", "boundscheck")})(func)',
     ),
     (
         'the repeated-name check stops looking inside a map',
