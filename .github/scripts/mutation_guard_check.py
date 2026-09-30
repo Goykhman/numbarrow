@@ -218,12 +218,25 @@ MUTATIONS = [
         "@jit_with_options(None)",
     ),
     (
+        "is_null's decorator stops reading the options",
+        "numbarrow/core/is_null.py",
+        '@jit_with_options(boolean(int64, Array(uint8, 1, "C", readonly=True)))',
+        '@__import__("numba").njit(boolean(int64, Array(uint8, 1, "C", readonly=True)), cache=False)',
+    ),
+    (
+        "unpack_booleans' decorator stops reading the options",
+        "numbarrow/core/is_null.py",
+        '@jit_with_options(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)))',
+        '@__import__("numba").njit(Array(bool_, 1, "C")(int64, int64, Array(uint8, 1, "C", readonly=True)), '
+        'cache=False)',
+    ),
+    (
         "is_null_struct's decorator stops reading the options",
         "numbarrow/core/is_null.py",
         '@jit_with_options(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
         '                          Optional(Array(uint8, 1, "C", readonly=True))))',
         '@__import__("numba").njit(boolean(int64, Optional(Array(uint8, 1, "C", readonly=True)),\n'
-        '                          Optional(Array(uint8, 1, "C", readonly=True))), cache=True)',
+        '                          Optional(Array(uint8, 1, "C", readonly=True))), cache=False)',
     ),
     (
         "viewers stop getting a cache name of their own",
