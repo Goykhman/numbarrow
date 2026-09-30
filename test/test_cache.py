@@ -288,10 +288,15 @@ def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(
             path.chmod(0o755)
 
 
+# The bitmap is the first byte of an array that holds every byte the calls
+# reach, so without bounds checking they read past the bitmap and stay inside
+# memory the array owns. Behind a one-byte array of its own they read whatever
+# followed it on the heap, and where that was an unmapped page the child died
+# of an access violation, as it did once on Windows.
 CHECK_BOUNDS = (
     "import numpy as np\n"
     "from numbarrow.core.is_null import is_null, unpack_booleans\n"
-    "bitmap = np.zeros(1, dtype=np.uint8)\n"
+    "bitmap = np.zeros(100000 // 8 + 1, dtype=np.uint8)[:1]\n"
     "outcomes = []\n"
     "for call in (lambda: is_null(100000, bitmap), lambda: unpack_booleans(0, 100000, bitmap)):\n"
     "    try:\n"
