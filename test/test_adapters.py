@@ -1,3 +1,11 @@
+"""Tests of the handlers in numbarrow.core.adapters that arrow_array_adapter dispatches each array type to.
+
+The tests cover the boolean, date32, date64 and timestamp handlers, empty and large string columns, and struct
+columns whose fields are boolean, string, uint8, temporal or of a type with more than two ``buffers()``. They check
+the values and the bitmaps, and that a temporal handler reads each value at its own unit and keeps a zero-length
+column's bitmap. ``test_arrow_array_utils.py`` covers the adapters that these handlers call, and ``test_offset.py``
+covers sliced columns.
+"""
 import numpy as np
 import pyarrow as pa
 import pytest
@@ -10,6 +18,7 @@ from numbarrow.core.is_null import is_null
 
 
 def test_arrow_array_adapter_1():
+    """Check that a bool column unpacks to a numpy bool array, and that its bitmap marks the null."""
     a = pa.array([True, None, False, True, False], type=pa.bool_())
     bitmap, data = arrow_array_adapter(a)
     assert data.dtype == np.bool_
@@ -20,6 +29,7 @@ def test_arrow_array_adapter_1():
 
 
 def test_arrow_array_adapter_2():
+    """Check that a date32 column adapts to ``datetime64[D]`` values, and that its bitmap marks the null."""
     d0 = date(2012, 7, 4)
     d1 = date(2012, 12, 6)
     d3 = date(2013, 6, 11)
@@ -34,6 +44,7 @@ def test_arrow_array_adapter_2():
 
 
 def test_arrow_array_adapter_3():
+    """Check that a date64 column adapts to ``datetime64[ms]`` values, and that its bitmap marks the null."""
     d0 = np.datetime64("2012-07-04T10:11:06.123", "ms")
     d2 = np.datetime64("2012-12-06T13:08:09.97", "ms")
     d3 = np.datetime64("2013-06-11T23:45:11.1", "ms")
@@ -48,6 +59,7 @@ def test_arrow_array_adapter_3():
 
 
 def test_arrow_array_adapter_4():
+    """Check that a ``timestamp[us, UTC]`` column adapts to naive ``datetime64`` values in UTC, with its null marked."""
     d0 = datetime(2012, 7, 4, 10, 11, 6, tzinfo=tz.tzutc())
     d1 = datetime(2012, 12, 6, 4, 6, 59, tzinfo=tz.tzutc())
     a = pa.array([d0, d1, None], type=pa.timestamp("us", "UTC"))
@@ -72,10 +84,12 @@ def test_large_str_array():
 
 
 def test_bool_struct_child_every_bit_pattern():
-    # A boolean child is bit-packed. Read at one byte per element it spans
-    # eight times its own buffer, so the values are wrong and the read runs
-    # past the end. Every pattern up to twelve elements is checked because the
-    # all-False-after-index-0 patterns happen to survive the wrong stride.
+    """Check every bit pattern of a boolean struct field, from one to twelve elements.
+
+    A boolean field is bit-packed. A reader that takes one byte per element covers eight times the buffer, so it
+    reads wrong values and runs past the end. Patterns that are False after the first element read correctly even
+    then, so the test covers every pattern rather than a sample.
+    """
     for n in range(1, 13):
         for pattern in range(1 << n):
             vals = [bool((pattern >> i) & 1) for i in range(n)]
@@ -93,9 +107,10 @@ def test_bool_struct_child_matches_the_standalone_child():
 
 
 def test_multi_buffer_struct_children_adapt_or_raise_a_typed_error():
-    # Every child type whose Arrow layout uses more than two buffers. Each must
-    # either adapt or name itself in the error; "too many values to unpack"
-    # names neither the field nor the type.
+    """Check that a struct field with more than two ``buffers()`` adapts or raises an error naming its type.
+
+    Python's own "too many values to unpack" would name neither the field nor its type.
+    """
     adapts = {"string": pa.string(), "large_string": pa.large_string()}
     refuses = {
         "binary": pa.binary(), "large_binary": pa.large_binary(),
@@ -112,15 +127,14 @@ def test_multi_buffer_struct_children_adapt_or_raise_a_typed_error():
         arr = pa.array([None], type=pa.struct([("f", child_ty)]))
         with pytest.raises(NotImplementedError) as excinfo:
             arrow_array_adapter(arr)
-        # Not `"f" in message`: the letter f appears in almost any message.
-        # Asserted without a disjunction on the field name: every message form
-        # here carries the type, and `or "'f'" in ...` let the type be dropped
-        # from the struct-field message with the suite staying green.
+        # The assertion looks for the type, not the field name: the letter f appears in almost any message, and every
+        # message here names the type. An assertion that also accepted the quoted name 'f' would pass a message that
+        # left the type out.
         assert str(child_ty) in str(excinfo.value), name
 
 
 def test_struct_with_a_string_field():
-    # The shape PySpark produces for struct<name: string, id: bigint>.
+    # PySpark sends a struct<name: string, id: bigint> column in this shape.
     arr = pa.array([{"name": "a", "id": 1}, {"name": "bb", "id": 2}],
                    type=pa.struct([("name", pa.string()), ("id", pa.int64())]))
     _, _, datas = arrow_array_adapter(arr)
@@ -160,9 +174,11 @@ if __name__ == "__main__":
 
 
 def test_a_zero_length_temporal_column_keeps_its_bitmap_presence():
-    # The temporal handlers took the bitmap from the cast, and a zero-length
-    # cast drops the validity buffer, so the documented None-only-without-a-
-    # buffer rule broke for date32, date64 and timestamp columns.
+    """Check that a zero-length temporal column with a validity buffer gets an empty bitmap rather than None.
+
+    A cast of a zero-length array drops the validity buffer, so the temporal handlers take the bitmap from the source
+    column instead of the cast. The bitmap is None only for a column without a validity buffer.
+    """
     for arrow_type, source_type in ((pa.date32(), pa.int32()), (pa.date64(), pa.int64()),
                                     (pa.timestamp("us", "UTC"), pa.int64())):
         source = pa.array([1, None], type=source_type).cast(arrow_type).slice(1, 0)
@@ -172,8 +188,11 @@ def test_a_zero_length_temporal_column_keeps_its_bitmap_presence():
 
 
 def test_the_64bit_date_view_refuses_a_unit_that_is_not_the_arrays_own():
-    # The docstring promised a cast to any unit and the body reinterpreted the
-    # int64 payload, so timestamp[ms] viewed as datetime64[s] landed in 51971.
+    """Check that the date64 and timestamp view refuses a unit other than the array's own, and any other type.
+
+    The function views the int64 values without rescaling them, so another unit would misplace every value:
+    ``timestamp[ms]`` viewed as ``datetime64[s]`` lands in the year 51971.
+    """
     from numbarrow.core.adapters import cast_64bit_date_arrow_to_numpy_array
     stamps = pa.array([datetime(2020, 1, 1, 12)], type=pa.timestamp("ms"))
     _, data = cast_64bit_date_arrow_to_numpy_array(stamps, np.dtype("datetime64[ms]"))
@@ -182,18 +201,19 @@ def test_the_64bit_date_view_refuses_a_unit_that_is_not_the_arrays_own():
         cast_64bit_date_arrow_to_numpy_array(stamps, np.dtype("datetime64[s]"))
     with pytest.raises(ValueError, match="not a date64 or timestamp"):
         cast_64bit_date_arrow_to_numpy_array(pa.array([1], type=pa.int64()), np.dtype("datetime64[s]"))
-    # A time64 and a duration carry a unit as well, and the refusal tested
-    # only for one, so an hour of the day and a ninety-second span were
-    # viewed as instants on 1970-01-01.
+    # A time64 and a duration carry a unit too, but their values are a time of day and an elapsed span, not instants.
+    # Viewed as datetime64, an hour of the day and a ninety-second span would land on 1970-01-01.
     for clocked in (pa.array([3_600_000_000], type=pa.time64("us")), pa.array([90_000], type=pa.duration("ms"))):
         with pytest.raises(ValueError, match="not a date64 or timestamp"):
             cast_64bit_date_arrow_to_numpy_array(clocked, np.dtype(f"datetime64[{clocked.type.unit}]"))
 
 
 def test_a_timestamp_is_read_at_its_own_unit():
-    # Every test that read a timestamp value used microseconds, so adapting
-    # every unit as datetime64[us] passed the suite while a millisecond column
-    # read as 1970.
+    """Check that a timestamp of each unit adapts to ``datetime64`` of that unit and reads back the same instant.
+
+    The test covers all four units, because a handler that read every unit as microseconds would still pass at
+    microseconds, while a millisecond column read that way lands in 1970.
+    """
     instant = datetime(2020, 9, 13, 12, 26, 40)
     for unit in ("s", "ms", "us", "ns"):
         _, data = arrow_array_adapter(pa.array([instant], type=pa.timestamp(unit)))

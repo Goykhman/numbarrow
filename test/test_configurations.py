@@ -1,3 +1,12 @@
+"""Tests of how ``numbarrow.core.configurations`` reads ``NUMBARROW_JIT_OPTIONS``, and of the fallback in
+``jit_with_options`` that compiles without a cache where numba cannot cache.
+
+The tests of ``get_jit_options`` set the variable with ``monkeypatch`` and call the function in this process, because
+it reads the environment on every call. One test imports the module in a child process, because the module-level
+``jit_options`` is read once, at the first import. The fallback tests replace numba's ``njit`` with a stub that raises,
+so they need no archive and no read-only directory. ``test_cache.py`` runs the fallback against real archives and
+read-only directories, and checks that the options reach the compiled functions.
+"""
 import json
 import os
 import re
@@ -35,8 +44,7 @@ def test_anything_that_is_not_a_json_object_is_rejected(monkeypatch, value):
 
 @pytest.mark.parametrize("value", ['{"cache": "false"}', '{"cache": 0}', '{"cache": null}'])
 def test_a_cache_value_that_is_not_a_boolean_is_rejected(monkeypatch, value):
-    # numba reads any non-empty string as true, so '{"cache": "false"}' left
-    # caching on.
+    # numba reads any non-empty string as true, so '{"cache": "false"}' would leave caching on.
     monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", value)
     with pytest.raises(ValueError, match="cache"):
         get_jit_options()
@@ -44,29 +52,30 @@ def test_a_cache_value_that_is_not_a_boolean_is_rejected(monkeypatch, value):
 
 @pytest.mark.parametrize("value", ['{"boundscheck": "false"}', '{"nogil": "true"}', '{"parallel": "false"}'])
 def test_a_string_for_any_other_option_is_rejected(monkeypatch, value):
-    # The same reading: '{"boundscheck": "false"}' turned bounds checking on.
+    # numba reads these strings the same way, so '{"boundscheck": "false"}' would turn bounds checking on.
     monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", value)
     with pytest.raises(ValueError, match=re.escape(json.loads(value).popitem()[0])):
         get_jit_options()
 
 
 def test_the_two_string_options_are_passed_through(monkeypatch):
+    """Check that ``error_model`` and ``inline``, the two options that numba takes as strings, keep their values."""
     monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", '{"error_model": "numpy", "inline": "never", "cache": false}')
     assert get_jit_options() == {"error_model": "numpy", "inline": "never", "cache": False}
 
 
 def test_an_explicit_object_replaces_the_default(monkeypatch):
-    # Documented rather than merged: '{}' turns caching off.
+    # The object replaces the default instead of extending it, so '{}' turns caching off.
     monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", "{}")
     assert get_jit_options() == {}
 
 
 def test_importing_with_an_empty_value_uses_the_default():
-    # jit_options is computed when the module is imported, so the value has to
-    # be in the environment before the interpreter starts.
+    # The module reads jit_options once, at its first import, and this process has already imported it, so a child
+    # process imports the module with the empty value set.
     src = "import json; from numbarrow.core.configurations import jit_options; print(json.dumps(jit_options))"
-    # PYTHONPATH names the tree under test: from any cwd but the checkout root
-    # the child would otherwise import whichever numbarrow it finds installed.
+    # PYTHONPATH points the child at the tree under test. A child started outside the checkout root would otherwise
+    # import whatever numbarrow its interpreter has installed.
     env = dict(os.environ, NUMBARROW_JIT_OPTIONS="", PYTHONPATH=str(Path(__file__).resolve().parent.parent))
     out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr
@@ -74,8 +83,8 @@ def test_importing_with_an_empty_value_uses_the_default():
 
 
 def test_the_refusal_names_the_requirement_and_shows_the_value(monkeypatch):
-    # One message for both failures told a value that was valid JSON that it
-    # must be valid JSON, and showed neither the value nor the rule.
+    """Check that each refusal shows the value and says which rule it breaks: the value is not valid JSON, or it is
+    valid JSON but not an object."""
     monkeypatch.setenv("NUMBARROW_JIT_OPTIONS", "[1, 2]")
     with pytest.raises(ValueError, match=r"JSON object.*'\[1, 2\]' is valid JSON but a list"):
         get_jit_options()
@@ -85,13 +94,15 @@ def test_the_refusal_names_the_requirement_and_shows_the_value(monkeypatch):
 
 
 def test_a_runtime_error_other_than_numbas_no_locator_one_propagates(monkeypatch):
-    # The fallback is narrowed to numba's "no locator available", and nothing
-    # tested the narrowing: with the term dropped, every RuntimeError at
-    # decoration compiled uncached behind a warning about the cache.
+    """Check that ``jit_with_options`` compiles without a cache after numba's "no locator available"
+    ``RuntimeError``, and lets any other ``RuntimeError`` at decoration propagate. Without that distinction, an error
+    unrelated to the cache would compile uncached behind a warning about the cache."""
     from numbarrow.core import configurations
     options_seen = []
 
     def njit_raising_once(message):
+        """Return a stand-in for numba's ``njit`` that records the options of each call in ``options_seen``, raises
+        ``RuntimeError(message)`` at its first decoration, and returns the function unchanged after that."""
         def njit(*signature, **options):
             def decorate(func):
                 options_seen.append(options)
@@ -114,13 +125,18 @@ def test_a_runtime_error_other_than_numbas_no_locator_one_propagates(monkeypatch
 
 
 def test_a_cache_write_that_fails_at_decoration_compiles_uncached_only_when_caching_is_on(monkeypatch):
-    # numba takes a .zip's cache location unchecked, so there the failure is
-    # the first save's OSError and not the no-locator RuntimeError, and the
-    # import died on it. With caching off no cache is involved, and the error
-    # is the caller's to see.
+    """Check that an ``OSError`` at decoration compiles without a cache, with a warning that shows the error, when
+    caching is on, and propagates when caching is off.
+
+    From version 0.61, numba takes the user's cache directory for a ``.zip`` without checking that it can write there.
+    The failure then comes from numba's first save as an ``OSError``, such as ``PermissionError``, not as the
+    no-locator ``RuntimeError``, and without the fallback it fails the import. With caching off, the error has nothing
+    to do with a cache, and the caller sees it.
+    """
     from numbarrow.core import configurations
     options_seen = []
 
+    # The stub raises at its first decoration whatever the options, and at every decoration with caching on.
     def njit(*signature, **options):
         def decorate(func):
             options_seen.append(options)

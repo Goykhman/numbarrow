@@ -1,3 +1,9 @@
+"""Fixtures and helpers that several test files share.
+
+``spark`` is a session-scoped fixture that starts one local SparkSession with Arrow enabled. A test that takes it is
+skipped where Spark cannot run, and fails instead when ``NUMBARROW_REQUIRE_SPARK`` is ``1``. ``Wrapped`` is a minimal
+extension type for the tests of code that unwraps an extension type to reach its storage.
+"""
 import os
 import shutil
 import sys
@@ -7,11 +13,10 @@ import pytest
 
 
 class Wrapped(pa.ExtensionType):
-    """An extension type over any storage, for the tests that look through one.
+    """An extension type over any storage type, for the tests of code that unwraps an extension type.
 
-    ``pa.opaque`` would do from pyarrow 17; this exists on every pyarrow the
-    matrix runs, so the guards that unwrap an extension type are exercised on
-    each of them.
+    pyarrow 18 and later provide ``pa.opaque`` for this, but CI also runs older pyarrow versions. This class works on
+    every version, so the code that unwraps an extension type is tested on each pyarrow that CI runs.
     """
 
     def __init__(self, storage_type):
@@ -26,30 +31,31 @@ class Wrapped(pa.ExtensionType):
 
 
 def spark_leg_required():
-    """True when a Spark leg that cannot run must fail the run rather than skip it.
+    """Return True when a Spark test that cannot run must fail instead of being skipped.
 
-    Every Spark or JVM failure below turns into a skip, which keeps a machine
-    without java useful but also means that losing every end-to-end test is a
-    green run. A CI cell that is expected to run Spark sets
-    NUMBARROW_REQUIRE_SPARK=1 and gets a failure that says why instead.
+    The ``spark`` fixture skips its tests wherever Spark cannot run, so a machine without Java can still run the rest
+    of the suite. A run that loses every end-to-end test would then still pass. A CI job that is expected to run Spark
+    sets ``NUMBARROW_REQUIRE_SPARK`` to ``1``, and each Spark test then fails with the reason. Any other value leaves
+    the skips in place. ``test_mapinarrow_spark.py`` reads this function too, so that a missing pyspark or pandas
+    fails the collection of that file instead of skipping it.
     """
     return os.environ.get("NUMBARROW_REQUIRE_SPARK") == "1"
 
 
 def skip_or_fail(reason):
+    """Skip the current test with ``reason``, or fail it with the reason when ``spark_leg_required()`` is true."""
     if spark_leg_required():
         pytest.fail("NUMBARROW_REQUIRE_SPARK=1 but " + reason, pytrace=False)
     pytest.skip(reason)
 
 
 def spark_unavailable_reason():
-    """Reason a SparkSession cannot start here, or None when one can."""
+    """Return the reason a SparkSession cannot start here, or None when one can."""
     if sys.platform not in ("linux", "darwin"):
         return "spark tests run on linux and macos only, this platform is %s" % sys.platform
-    # Mirrors how pyspark picks a java binary: a non-empty JAVA_HOME wins
-    # outright and is never checked against the filesystem, so a JAVA_HOME
-    # pointing nowhere fails even when java is on PATH. Only an unset
-    # JAVA_HOME falls back to PATH.
+    # The check follows Spark's launcher script, bin/spark-class, in choosing a java binary. A non-empty JAVA_HOME
+    # wins, and the script never checks that JAVA_HOME/bin/java exists, so a JAVA_HOME that points nowhere fails even
+    # when java is on PATH. An unset or empty JAVA_HOME falls back to the java on PATH.
     java_home = os.environ.get("JAVA_HOME")
     if java_home:
         runner = os.path.join(java_home, "bin", "java")
@@ -57,12 +63,10 @@ def spark_unavailable_reason():
             return "JAVA_HOME is set but %s is not executable" % runner
     elif shutil.which("java") is None:
         return "JAVA_HOME is unset and there is no java on PATH"
-    # The arrow path runs pyspark's own dependency checks, and those import
-    # distutils, which PEP 632 removed from the standard library in 3.12 and
-    # which only setuptools supplies there. Run the very checks the tests will
-    # hit rather than approximating them: a stand-in for the dependency can
-    # pass while the real check fails, which is exactly what a bare
-    # `import distutils` did.
+    # pyspark's Arrow path runs its own dependency checks, which import distutils. PEP 632 removed distutils from the
+    # standard library in Python 3.12, and setuptools is its only supplier there. The checks also require pandas and
+    # pyarrow at minimum versions. A stand-in, such as a bare import of distutils, can pass where the real checks
+    # fail, so this function calls the checks themselves.
     try:
         from pyspark.sql.pandas.utils import (
             require_minimum_pandas_version,
@@ -76,15 +80,13 @@ def spark_unavailable_reason():
 
 
 def arrow_transport_unusable(session):
-    """Reason spark's own arrow transport cannot run here, or None when it can.
+    """Return the reason Spark's own Arrow transport fails here, or None when it works.
 
-    An unsupported java breaks the jvm half of the transport rather than
-    anything on the python side: the arrow jars pyspark bundles reach for a
-    `java.nio.DirectByteBuffer` constructor that a newer jvm no longer
-    provides, and every batch then dies in `MemoryUtil` before numbarrow sees
-    the data. Provoke it with a round trip that carries no numbarrow in it, so
-    the jvm is measured rather than inferred from its version number, and so a
-    failure here is never read as one of ours.
+    An unsupported JVM breaks the JVM half of the transport, not the Python half. The Arrow jars that pyspark bundles
+    call a ``java.nio.DirectByteBuffer`` constructor that Java 17 has and newer JVMs, such as Java 21, lack, so on such
+    a JVM every batch fails in Arrow's ``MemoryUtil`` before numbarrow sees any data. The check runs a round trip with
+    no numbarrow code in it. It tests the JVM itself instead of judging by its version number, and a failure here
+    cannot be mistaken for a numbarrow defect.
     """
     def identity(batches):
         for batch in batches:
@@ -100,18 +102,24 @@ def arrow_transport_unusable(session):
 
 @pytest.fixture(scope="session")
 def spark():
+    """A local SparkSession with Arrow enabled, shared by every test of the run and stopped at its end.
+
+    Each test that takes the fixture is skipped where Spark cannot run here, or fails when ``spark_leg_required()`` is
+    true.
+    """
     reason = spark_unavailable_reason()
     if reason is not None:
         skip_or_fail(reason)
-    # Imported here rather than at module scope so a missing pyspark skips
-    # these tests instead of aborting collection for the whole suite.
+    # pyspark is imported here and not at the top of conftest.py, which pytest imports for every test. A top-level
+    # import would stop the collection of the whole suite where pyspark is missing. In that case the checks above have
+    # already skipped or failed the test.
     from pyspark.sql import SparkSession
-    # Workers launch whatever python3 PATH resolves to unless this is set,
-    # and that interpreter cannot import numbarrow.
+    # Spark starts its Python workers with PYSPARK_PYTHON, or with the python3 on PATH when that is unset, and that
+    # interpreter may not have numbarrow installed. The workers and the driver both use the interpreter that runs the
+    # tests.
     os.environ["PYSPARK_PYTHON"] = sys.executable
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
-    # Bind the driver to loopback rather than letting spark pick whichever
-    # interface the hostname resolves to.
+    # The tests bind Spark's driver to the loopback address, and keep a SPARK_LOCAL_IP that the caller has set.
     os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
     session = (
         SparkSession

@@ -1,3 +1,12 @@
+"""Tests of the array adapters in numbarrow.utils.arrow_array_utils, called directly and through arrow_array_adapter.
+
+The tests cover string, struct, list-of-struct, fixed-width and boolean arrays: whole, sliced to an offset, and at
+length zero. They check that the data comes back read-only and the bitmap as a copy the caller owns. They also check
+that a view keeps its Arrow buffer alive after the caller drops the source, and that a refusal names an unsupported
+array's type without its values. Three tests run a child interpreter: one under ``python -O``, and two where a defect
+would crash the process. ``test_adapters.py`` checks the values of the boolean and temporal adapters,
+``test_offset.py`` checks sliced columns, and ``test_is_null.py`` checks the bitmap readers.
+"""
 import gc
 import os
 import random
@@ -17,14 +26,13 @@ from numbarrow.utils.arrow_array_utils import (
 )
 from numbarrow.core.is_null import is_null
 
-# The tree under test, named to every child interpreter: from any cwd but the
-# checkout root the child would otherwise import whichever numbarrow it finds
-# installed, and these tests would validate a different copy.
+# The checkout root on PYTHONPATH makes a child interpreter import the numbarrow under test. Without it, a child that
+# starts in any other directory imports the installed numbarrow, which may be another copy.
 CHILD_ENV = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent))
 
 
 def owner_of(array):
-    """Walk an array's base chain and return the pyarrow object backing it."""
+    """Return the first pyarrow Buffer or Array in an array's base chain, or None if the first eight links hold none."""
     node = array
     for _ in range(8):
         node = node.obj if isinstance(node, memoryview) else getattr(node, "base", None)
@@ -36,18 +44,21 @@ def owner_of(array):
 
 
 def test_create_str_array():
+    """Check that create_str_array returns every value, an empty string at the null slot, and a bitmap marking it."""
     pa_a = pa.array(["first", "second", None, "third", "fourth element", "f"], type=pa.string())
     bitmap, np_a = create_str_array(pa_a)
     ref = ["first", "second", "", "third", "fourth element", "f"]
     assert is_null(2, bitmap) and all(not is_null(i, bitmap) for i in range(len(pa_a)) if i != 2)
-    # zip() stops at the shorter side, so a truncated result used to pass.
     assert len(np_a) == len(ref)
     assert list(np_a) == ref
 
 
 def test_create_str_array_long_with_null():
-    # Bitmap spans two bytes once the array has 9+ elements, so this pins
-    # that the copy guard never calls bool() on a multi-byte bitmap.
+    """Check a string column of ten values, whose bitmap spans two bytes, at offset 0 and at offset 1.
+
+    numpy raises ``ValueError`` on the truth value of an array of more than one element. Code that tests the bitmap
+    with ``bool()`` therefore fails on these bitmaps, although it passes on a bitmap of one byte.
+    """
     vals = ["s%d" % i for i in range(9)] + [None]
     bitmap, np_a = create_str_array(pa.array(vals, type=pa.string()))
     assert is_null(9, bitmap) and all(not is_null(i, bitmap) for i in range(9))
@@ -58,15 +69,19 @@ def test_create_str_array_long_with_null():
 
 
 def test_create_str_array_all_null_bitmap_is_a_copy():
-    # An all-null bitmap byte is zero (falsy); the copy must still happen
-    # so the returned bitmap owns its memory instead of viewing the Arrow
-    # buffer, which the caller may let die.
+    """Check that the bitmap of an all-null string column is a copy, not a view over the Arrow validity buffer.
+
+    Every byte of an all-null bitmap is zero, so code that copies only a bitmap that tests true skips the copy here. A
+    view reads freed memory once the caller drops the source array. The test checks the base: a copy has none, and a
+    slice of the view has the view as its base.
+    """
     bitmap, np_a = create_str_array(pa.array([None] * 8, type=pa.string()))
     assert all(is_null(i, bitmap) for i in range(8))
     assert bitmap.base is None
 
 
 def test_structured_array_adapter():
+    """Check a struct of an int32 and a float64 field: no struct bitmap, and each field's own bitmap and values."""
     indices = pa.array([14, 89, None, 105], type=pa.int32())
     ratios = pa.array([1.41, None, 1.72, 9.99], type=pa.float64())
     struct_array = pa.StructArray.from_arrays([indices, ratios], ["indices", "ratios"])
@@ -85,6 +100,7 @@ def test_structured_array_adapter():
 
 
 def test_uniform_arrow_array_adapter_1():
+    """Check the values and the bitmap of an int32 column with one null, read through the uniform adapter."""
     a = pa.array([141, None, 172, 314, 271], type=pa.int32())
     bitmap, data = uniform_arrow_array_adapter(a)
     assert data[0] == 141 and data[2] == 172 and data[3] == 314 and data[4] == 271
@@ -109,9 +125,8 @@ def test_short_offset_zero_slice_does_not_hand_back_the_parents_bits():
 
 
 def test_bitmap_never_aliases_arrow_memory():
-    # Checked by mutating rather than by walking .base: a view built over a raw
-    # address also has no pyarrow object in its base chain, so a base-chain
-    # assertion would pass against the very code this guards.
+    # The test writes through the bitmap rather than walk its base chain. A view built over a raw address has no
+    # pyarrow object in its base chain either, so a check of the chain cannot tell such a view from a copy.
     for offset in (0, 1, 3, 8, 16):
         source = pa.array([1, None, 3, 4, 5, 6, 7, 8, 9, 10, None, 12, 13, 14, 15, 16, 17, 18],
                           type=pa.int64())
@@ -131,10 +146,12 @@ def test_bitmap_survives_the_source_being_dropped():
 
 
 def test_the_offset_bitmap_owns_exactly_the_bytes_it_returns():
-    # The offset path returns np.packbits' output directly, which is only
-    # correct because the bits handed to it were padded to a whole number of
-    # bytes, so it already produces exactly (length + 7) // 8 of them and owns
-    # them. Changing the padding would silently return a longer bitmap.
+    """Check that the offset path returns exactly ``(length + 7) // 8`` bytes, in an array that owns them.
+
+    The offset path returns the output of ``np.packbits`` unchanged. packbits fills a partial last byte with zero bits
+    and returns a new array, so the result has the right length and no base. A longer result, or a slice of the
+    packbits output, fails here.
+    """
     for n in (9, 16, 17, 33, 64, 65, 129):
         for offset in (1, 3, 7, 8):
             if offset >= n:
@@ -147,13 +164,17 @@ def test_the_offset_bitmap_owns_exactly_the_bytes_it_returns():
 
 
 def test_the_offset_bitmap_survives_the_source_being_dropped():
-    # Same guarantee as the offset-0 path, reached a different way: nothing
-    # Arrow-owned backs this one, so it holds without a copy.
+    """Check that a bitmap from the offset path keeps its bits after the source array is dropped.
+
+    The offset-0 path copies its bitmap. The offset path builds a new one with ``np.packbits``, so no Arrow memory backs
+    it and it needs no copy.
+    """
     source = pa.array([1, None, 3, 4, 5, None, 7, 8, 9, 10], type=pa.int64())
     bitmap = create_bitmap(source.buffers()[0], 3, 6)
     before = bitmap.tolist()
     del source
     gc.collect()
+    # These arrays can take over the memory of the dropped source, which a bitmap that viewed it would then read.
     filler = [pa.array(list(range(64)), type=pa.int64()) for _ in range(200)]
     after = bitmap.tolist()
     del filler
@@ -161,6 +182,12 @@ def test_the_offset_bitmap_survives_the_source_being_dropped():
 
 
 def test_sliced_list_returns_only_its_own_rows():
+    """Check that a list column built over part of a child array returns the elements of its own rows only.
+
+    ``ListArray.values`` is the whole child array and ignores the list's offset, so for each producer below it also
+    holds elements that belong to no row of the column. The adapter bounds it by the first and last of the column's
+    offsets.
+    """
     rows = [[{"v": 10}, {"v": 11}], [{"v": 20}, {"v": 21}], [{"v": 30}, {"v": 31}]]
     ty = pa.list_(pa.struct([("v", pa.int64())]))
     larr = pa.array(rows, type=ty)
@@ -172,8 +199,8 @@ def test_sliced_list_returns_only_its_own_rows():
         "RecordBatch.slice().column()": table.to_batches()[0].slice(1, 2).column("c"),
         "to_batches(max_chunksize)": table.to_batches(max_chunksize=2)[1].column("c"),
         "ListArray.from_arrays": pa.ListArray.from_arrays(pa.array([2, 4, 6], pa.int32()), larr.values),
-        # Every producer above is a trailing slice, where offsets[n] happens to
-        # equal len(values), so the upper bound of the slice is never tested.
+        # Each producer above ends at the last row, where offsets[n] equals len(values), so none of them tests the
+        # upper bound. The next two end before the last row.
         "middle row only": larr.slice(1, 1),
         "leading two rows": larr.slice(0, 2),
     }
@@ -184,9 +211,10 @@ def test_sliced_list_returns_only_its_own_rows():
 
 
 def test_sliced_list_sees_the_slice_null_count_not_the_parent_s():
-    # The guard must read the slice's own null count. A slice that still
-    # contains the null row is refused; one that excludes it adapts normally,
-    # which also keeps the offset handling this case was written to cover.
+    """Check that the refusal of a null row reads the null count of the slice, not of its parent.
+
+    The slice that contains the null row is refused. The slice that excludes it adapts, at offset 2.
+    """
     ty = pa.list_(pa.struct([("v", pa.int64())]))
     larr = pa.array([[{"v": 1}], None, [{"v": 3}]], type=ty)
     with pytest.raises(NotImplementedError, match="null row"):
@@ -196,24 +224,26 @@ def test_sliced_list_sees_the_slice_null_count_not_the_parent_s():
 
 
 def test_a_trailing_nul_is_refused_rather_than_truncated():
-    # numpy pads a short |U element with NUL, so a trailing NUL in the value is
-    # indistinguishable from that padding: "ab\x00" used to come back as "ab".
-    # The element index is asserted, not just the phrase: a wide batch is
-    # unusable if the message points at the wrong element, and matching only on
-    # "ends in a NUL" leaves a hard-coded index undetected.
+    """Check that a string ending in NUL is refused with its element's index, and that other strings with NULs adapt.
+
+    The pattern includes the element's index, because a message that points at the wrong element is no help on a wide
+    batch. A match on the phrase alone would miss an index written into the message as a constant.
+    """
+    # numpy pads a short element of a |U array with NUL, so it cannot tell a trailing NUL in a value from that padding:
+    # "ab\x00" stored in a |U array reads back as "ab".
     for values, index_ in ((["ab\x00", "abc"], 0), (["ab\x00\x00"], 0), (["ok", "x\x00"], 1)):
         pattern = rf"element {index_} of a {len(values)}-element string array"
         with pytest.raises(ValueError, match=pattern):
             arrow_array_adapter(pa.array(values, type=pa.string()))
         with pytest.raises(ValueError, match=pattern):
             arrow_array_adapter(pa.array(values, type=pa.large_string()))
-    # Leading and interior NULs are representable and stay supported.
+    # A leading or an interior NUL is not padding, so those values adapt unchanged.
     _, data = arrow_array_adapter(pa.array(["a\x00b", "\x00ab", "abc"], type=pa.string()))
     assert data.tolist() == ["a\x00b", "\x00ab", "abc"]
-    # A null slot is never decoded, so dead bytes ending in NUL do not trip it.
-    # Built with pc.if_else, which leaves the masked-out bytes in the buffer:
-    # .take() emits a byte-EMPTY null slot (offsets [0, 0, 2]), so the guard
-    # short-circuits on non_empty and the `live` term is never reached.
+    # The adapter never decodes a null slot, so a masked-out value that ends in NUL is not refused. pc.if_else builds
+    # the column because it leaves the masked-out bytes in the data buffer. take() would give the null slot no bytes
+    # (offsets [0, 0, 2]). The `non_empty` term alone would then keep the slot out of the check, and the case would not
+    # test the `live` term.
     masked = pc.if_else(pa.array([False, True]),
                         pa.array(["ab\x00", "ok"], type=pa.string()),
                         pa.scalar(None, pa.string()))
@@ -232,8 +262,10 @@ def test_plain_list_raises_a_typed_error():
 
 
 def test_plain_list_raises_the_same_typed_error_under_dash_O():
-    # The old guard was a bare assert, which -O strips; the input then reached
-    # a struct-field loop and raised a TypeError about pyarrow.lib.DataType.
+    """Check that a list of non-struct elements raises ``NotImplementedError`` under ``python -O`` as well.
+
+    ``-O`` strips assert statements, so the refusal must be an explicit raise.
+    """
     src = (
         "import pyarrow as pa\n"
         "from numbarrow.core.adapters import arrow_array_adapter\n"
@@ -242,22 +274,22 @@ def test_plain_list_raises_the_same_typed_error_under_dash_O():
         "except NotImplementedError as exc:\n"
         "    print('typed', 'int64' in str(exc))\n"
     )
+    # -O applies to a whole interpreter, so the case runs in a child.
     out = subprocess.run([sys.executable, "-O", "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.stdout.strip() == "typed True", out
 
 
 def test_map_column_still_adapts():
-    # pa.MapArray is a pa.ListArray whose values are a key/value StructArray,
-    # so the struct guard must let it through.
+    # pa.MapArray is a subclass of pa.ListArray whose values are a StructArray of keys and values, so the check that a
+    # list holds structs lets a map through.
     m = pa.array([[("a", 1), ("b", 2)]], type=pa.map_(pa.string(), pa.int64()))
     _, _, datas = arrow_array_adapter(m)
     assert datas["value"].tolist() == [1, 2]
 
 
 def test_unsupported_arrow_type_names_itself():
-    # Matches the arrow type name and the map that would have to gain it. The
-    # pre-fix message named the numpy class, so a bare "float" match passed
-    # against the very code this guards.
+    # pyarrow names this type "float", and numpy names its class float32. The word boundary after "float" matches the
+    # Arrow name only. The rest of the pattern requires the name of the dictionary that would need an entry for it.
     with pytest.raises(ValueError, match=r"float\b.*arrow_to_numpy_dtypes"):
         uniform_arrow_array_adapter(pa.array([1.0, 2.0], type=pa.float32()))
 
@@ -296,9 +328,12 @@ def test_adapter_result_keeps_the_arrow_buffer_alive():
 
 
 def test_adapter_result_survives_an_unbound_source():
-    # The source is never bound to a name, so it is collectable the moment the
-    # adapter returns. A view that owns nothing reads freed memory: correct at
-    # tiny sizes, wrong in the middle, and a segfault once large enough.
+    """Check that adapted data stays correct when the source array is never bound to a name.
+
+    pyarrow can free such a source as soon as the adapter returns. A view that does not keep its buffer alive then
+    reads freed memory, which can give the right values, wrong values or a crash, depending on the size of the
+    allocation.
+    """
     src = (
         "import numpy as np, pyarrow as pa\n"
         "from numbarrow.core.adapters import arrow_array_adapter\n"
@@ -307,15 +342,16 @@ def test_adapter_result_survives_an_unbound_source():
         "    assert data.tolist() == list(range(n)), n\n"
         "print('ok')\n"
     )
+    # A child interpreter runs the sizes, so that a crash fails this test rather than end the test run.
     out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.returncode == 0 and out.stdout.strip() == "ok", (out.returncode, out.stderr[-400:])
 
 
 def test_zero_length_list_array_with_null_buffers():
-    # The Arrow spec lets a zero-length array carry null buffers and pyarrow's
-    # own full validation accepts one. Indexing a null offsets buffer
-    # segfaults rather than raising, which would take the whole process down,
-    # so this runs out of process.
+    """Check that a zero-length list column whose validity and offsets buffers are null adapts to empty fields.
+
+    pyarrow's full validation accepts such an array.
+    """
     src = (
         "import pyarrow as pa\n"
         "from numbarrow.core.adapters import arrow_array_adapter\n"
@@ -327,6 +363,8 @@ def test_zero_length_list_array_with_null_buffers():
         "assert datas['v'].tolist() == []\n"
         "print('ok')\n"
     )
+    # Reading an element of a null offsets buffer crashes the process with a segmentation fault, so the case runs in a
+    # child interpreter.
     out = subprocess.run([sys.executable, "-c", src], capture_output=True, text=True, env=CHILD_ENV)
     assert out.returncode == 0 and out.stdout.strip() == "ok", (out.returncode, out.stderr[-300:])
 
@@ -343,9 +381,11 @@ def test_zero_length_list_array_shapes():
 
 
 def test_every_adapter_path_returns_a_read_only_result():
-    # The contract must not depend on which Arrow type the caller passed. bool,
-    # string, large_string and date32 allocate fresh numpy arrays rather than
-    # viewing the Arrow buffer, and all four came back writable.
+    """Check that adapted data is read-only whatever the Arrow type.
+
+    The bool, string, large_string and date32 adapters allocate new numpy arrays rather than view the Arrow buffer. A
+    new array is writable unless the adapter clears its flag.
+    """
     cases = {
         "int32": pa.array([1, 2], type=pa.int32()),
         "int64": pa.array([1, 2], type=pa.int64()),
@@ -364,8 +404,8 @@ def test_every_adapter_path_returns_a_read_only_result():
 
 
 def test_read_only_holds_within_one_struct_column():
-    # The split used to land inside a single column: an int64 field read-only
-    # and a string field writable.
+    # A struct column adapts each field through the adapter of its type: the int64 field becomes a view and the string
+    # field a new array. Both come back read-only.
     arr = pa.array([{"i": 1, "s": "a"}],
                    type=pa.struct([("i", pa.int64()), ("s", pa.string())]))
     _, _, datas = arrow_array_adapter(arr)
@@ -373,10 +413,11 @@ def test_read_only_holds_within_one_struct_column():
 
 
 def test_read_only_holds_for_an_empty_array():
-    # The contract must not depend on the batch's length either. Every
-    # fixed-width and string path returns a fresh np.empty for a zero-length
-    # array, and each of those came back writable while its non-empty
-    # counterpart did not.
+    """Check that adapted data is read-only for a zero-length array too, as a column and as a struct field.
+
+    For a zero-length array, each fixed-width, boolean and string adapter returns a new array, which is writable
+    unless the adapter clears its flag.
+    """
     cases = {
         "int32": pa.array([], type=pa.int32()),
         "int64": pa.array([], type=pa.int64()),
@@ -390,7 +431,7 @@ def test_read_only_holds_for_an_empty_array():
     writable = [name for name, arr in cases.items()
                 if arrow_array_adapter(arr)[1].flags.writeable]
     assert writable == []
-    # ...and through a struct column, which reaches the same paths per field.
+    # A struct column adapts each field through the same adapters.
     empty_struct = pa.StructArray.from_arrays(
         [pa.array([], type=pa.int64()), pa.array([], type=pa.string())], ["i", "s"])
     _, _, datas = arrow_array_adapter(empty_struct)
@@ -398,9 +439,11 @@ def test_read_only_holds_for_an_empty_array():
 
 
 def test_unsupported_type_errors_name_the_type_without_the_data():
-    # Both messages used to interpolate the array itself, whose repr carries
-    # every value it holds: unbounded in size and a copy of the caller's data
-    # in whatever log catches the traceback.
+    """Check that a refusal names the array's type and leaves out its values.
+
+    An array's repr carries every value it holds. A message that interpolated the array would grow with the data and
+    copy the caller's values into any log that records the traceback.
+    """
     rows = [[i, i + 1] for i in range(500)]
     with pytest.raises(NotImplementedError) as excinfo:
         arrow_array_adapter(pa.array(rows, type=pa.list_(pa.int64())))
@@ -415,12 +458,9 @@ def test_unsupported_type_errors_name_the_type_without_the_data():
     assert "binary" in message
     assert len(message) < 200
 
-    # `"abcdef" not in message` cannot fail on a binary array: pyarrow renders
-    # its elements as hex, so the interpolating message did not contain it
-    # either, which left `len(message) < 200` doing all the work. A length
-    # bound is not a content bound: at three elements the interpolating message
-    # was 132 chars and passed every assertion above. decimal128 renders
-    # human-readably, so it discriminates at any size.
+    # The binary case cannot check content: pyarrow renders binary values in hex, so "abcdef" is absent even from a
+    # message that interpolates the array. A length bound misses a short array, because three interpolated values keep
+    # such a message under 200 characters. decimal128 renders its values as written, so this case checks the content.
     with pytest.raises(NotImplementedError) as excinfo:
         arrow_array_adapter(
             pa.array([Decimal("1234567890.12")] * 3, type=pa.decimal128(20, 2)))
@@ -431,8 +471,8 @@ def test_unsupported_type_errors_name_the_type_without_the_data():
 
 
 def test_bytes_under_a_null_slot_are_not_decoded():
-    # pc.if_else leaves the masked-out value's bytes in place, so decoding the
-    # slot hands back a value the caller explicitly masked out.
+    # pc.if_else leaves the masked-out value's bytes in the data buffer. Decoding the null slot would return "SECRET",
+    # a value the caller masked out.
     values = pa.array(["keepme", "SECRET"], type=pa.string())
     masked = pa.compute.if_else(pa.array([True, False]), values, pa.scalar(None, pa.string()))
     assert masked.to_pylist() == ["keepme", None]
@@ -449,11 +489,13 @@ def test_width_ignores_a_wide_value_under_a_null_slot():
 
 
 def test_a_zero_length_array_with_null_buffers_adapts_like_its_empty_twin():
-    # The Arrow spec lets a zero-length array carry null buffers and pyarrow's
-    # own full validation accepts one, so it is the same logical array as the
-    # one with 0-byte buffers and has to get the same answer. pyarrow refuses
-    # to build the non-empty version of this shape, so length 0 is the only way
-    # a null data buffer can reach an adapter at all.
+    """Check that a zero-length array with null buffers adapts like the same array with empty buffers.
+
+    Each null-buffered array passes pyarrow's full validation and holds no values, as its twin does, so the two must
+    adapt alike. pyarrow refuses to build the non-empty version of this shape, as
+    test_pyarrow_refuses_a_non_empty_array_with_no_data_buffer checks, so a pyarrow caller can pass a null data buffer
+    to an adapter only at length zero.
+    """
     cases = [
         (pa.Array.from_buffers(pa.int64(), 0, [None, None]),
          pa.array([], type=pa.int64())),
@@ -471,17 +513,17 @@ def test_a_zero_length_array_with_null_buffers_adapts_like_its_empty_twin():
         assert bitmap is want_bitmap is None, null_buffered.type
         assert data.dtype == want_data.dtype, null_buffered.type
         assert len(data) == 0, null_buffered.type
-        # Read-only on this path too, so the contract does not depend on
-        # whether the batch happened to be empty.
+        # The zero-length result is read-only like a non-empty one.
         assert not data.flags.writeable, null_buffered.type
 
 
 def test_a_non_empty_all_null_array_carries_both_buffers_and_adapts():
-    # The complement of the zero-length case above. An all-null array is not a
-    # buffer-less one: pyarrow allocates the values buffer whatever the validity
-    # bitmap says, so a fully null column arrives with both buffers present and
-    # never reaches the missing-data-buffer guard. Sliced as well, where the
-    # values the adapter must skip sit before the start of the logical array.
+    """Check that a non-empty all-null array, whole or sliced, has both buffers and adapts to a full-length result.
+
+    pyarrow allocates a values buffer for an all-null array whatever its bitmap says, so a fully null column never
+    reaches the adapters' guard for a missing data buffer. In the sliced cases, the adapter skips the values before and
+    after the slice.
+    """
     cases = [
         (pa.nulls(5, type=pa.int64()), np.dtype(np.int64)),
         (pa.nulls(5, type=pa.float64()), np.dtype(np.float64)),
@@ -496,17 +538,18 @@ def test_a_non_empty_all_null_array_carries_both_buffers_and_adapts():
         assert all(is_null(i, bitmap) for i in range(len(arr))), arr.type
         assert data.dtype == want_dtype, arr.type
         assert len(data) == len(arr), arr.type
-        # Only the shape is pinned. The bytes under a null slot belong to no
-        # logical value, so what they happen to hold is not part of the answer.
+        # The test does not check the values. The bytes under a null slot belong to no value, so their content is not
+        # part of the answer.
         assert not data.flags.writeable, arr.type
 
 
 def test_pyarrow_refuses_a_non_empty_array_with_no_data_buffer():
-    # What keeps the missing-data-buffer branch out of reach of a pyarrow
-    # caller, asserted rather than assumed. The adapters keep the guard because
-    # a foreign producer can still hand that shape over the C Data Interface; if
-    # pyarrow ever starts building it, the branch becomes reachable from an
-    # ordinary array and turns from a typed error into a wrong refusal.
+    """Check that pyarrow refuses to build a non-empty int64 or bool array without a data buffer.
+
+    This refusal keeps the adapters' guard for a missing data buffer out of reach of a pyarrow caller. pyarrow 14.0.0
+    and 24.0.0 also refuse the shape when they import an array through the C Data Interface. If pyarrow starts to
+    build it, this test fails, and the guard becomes reachable from pyarrow.
+    """
     for ty in (pa.int64(), pa.bool_()):
         validity = pa.nulls(5, type=ty).buffers()[0]
         with pytest.raises(pa.ArrowInvalid, match="Missing values buffer"):
@@ -514,24 +557,24 @@ def test_pyarrow_refuses_a_non_empty_array_with_no_data_buffer():
 
 
 def test_a_non_array_reaching_the_dispatcher_still_raises_not_implemented():
-    # The fallback is the base singledispatch implementation, so it receives
-    # anything that is not a registered Array. A pa.Scalar and a pa.Field have
-    # a type but no length; building the message with len() turned the
-    # documented NotImplementedError into a TypeError that escaped any caller
-    # wrapping this in `except NotImplementedError`.
+    """Check that the dispatcher raises ``NotImplementedError`` for an object that is not a pyarrow Array.
+
+    The dispatcher's base implementation receives every object whose type has no registered adapter. A pa.Scalar and
+    a pa.Field have an Arrow type but no length. A list, an ndarray and a str have a length but no Arrow type, and None
+    and an int have neither. A message that read a missing attribute would raise ``TypeError`` or ``AttributeError``
+    instead, which escapes a caller that catches ``NotImplementedError``.
+    """
     for obj in (pa.scalar(5, pa.int64()), pa.field("f", pa.int64())):
         with pytest.raises(NotImplementedError, match="int64"):
             arrow_array_adapter(obj)
-    # The mirror case: an object that is not a pyarrow type at all has a length
-    # but no `type`, and reading it raised AttributeError past the same caller.
     for obj in ([1, 2, 3], np.array([1, 2, 3]), "abc", None, 7):
         with pytest.raises(NotImplementedError, match="not a pyarrow Array"):
             arrow_array_adapter(obj)
 
 
 def test_repeated_struct_field_names_raise_a_typed_error():
-    # Arrow permits them; keying by name cannot represent them, and
-    # StructArray.field(name) raised a bare KeyError naming nothing.
+    # Arrow allows a struct to repeat a field name. The adapter returns the fields in dictionaries keyed by name, which
+    # cannot hold both, so it refuses such a struct.
     dup = pa.StructArray.from_arrays(
         [pa.array([1, 2], type=pa.int64()), pa.array([3, 4], type=pa.int64())], ["v", "v"])
     with pytest.raises(NotImplementedError, match="repeated field names"):
@@ -547,12 +590,12 @@ def test_boolean_offset_crossing_a_byte_boundary():
 
 
 def test_the_boolean_view_covers_the_offset_as_well_as_the_length(monkeypatch):
-    # The values alone cannot catch an undersized view: unpack_booleans is
-    # @njit with an explicit signature, so numba does not bounds-check it and
-    # the read runs off the end of the view into the still-valid pyarrow buffer,
-    # returning the right answer. Sizing the view from the length alone, which
-    # ignores the offset, therefore leaves every value assertion green. So the
-    # size the adapter asks for is recorded and checked directly.
+    """Check that the boolean adapter's view of the packed bits covers the offset as well as the length.
+
+    The values cannot show an undersized view. numba compiles unpack_booleans without bounds checking by default, so a
+    read past the end of the view continues into the pyarrow buffer, which is still valid, and returns the right
+    values. The test therefore records the size the adapter asks the uint8 viewer for, and checks it.
+    """
     from numbarrow.core import adapters
 
     sizes = []
@@ -570,17 +613,18 @@ def test_the_boolean_view_covers_the_offset_as_well_as_the_length(monkeypatch):
         sliced = arr.slice(offset)
         _, data = arrow_array_adapter(sliced)
         assert data.tolist() == values[offset:], offset
-        # The bits sit at their absolute positions in the buffer, so the view
-        # has to reach the last one: ceil((offset + length) / 8).
+        # The bits lie at their absolute positions in the buffer, so the view must reach the last of them:
+        # ceil((offset + length) / 8) bytes.
         want = (sliced.offset + len(sliced) + 7) // 8
         assert sizes[0] == want, (offset, sizes[0], want)
 
 
 def test_a_zero_length_array_whose_offset_points_past_its_buffer_adapts():
-    # The shape the zero-length early return exists for. np.frombuffer would
-    # raise a bare "buffer is smaller than requested size (0)" naming neither
-    # the array nor the type; every other zero-length array in the suite has a
-    # buffer big enough for the read, so nothing else reaches the branch.
+    """Check that a zero-length int64 array whose offset points past its empty buffer adapts to an empty result.
+
+    np.frombuffer refuses an offset past the end of a buffer with a bare ``ValueError`` that names neither the array
+    nor its type. The adapter therefore returns early for a zero-length array, before it reads the buffer.
+    """
     arr = pa.Array.from_buffers(pa.int64(), 0, [None, pa.py_buffer(b"")], offset=2)
     arr.validate(full=True)
     bitmap, data = arrow_array_adapter(arr)
@@ -591,10 +635,11 @@ def test_a_zero_length_array_whose_offset_points_past_its_buffer_adapts():
 
 
 def test_create_bitmap_owns_its_memory_on_the_offset_path():
-    # create_bitmap's docstring promises the result always owns its memory. The
-    # all-null test next to it uses an offset-0 array, so it pins only that
-    # path; a slice of the packbits array on the offset path keeps its parent
-    # alive and went unnoticed.
+    """Check that create_bitmap returns an array that owns its memory on the offset path.
+
+    test_create_str_array_all_null_bitmap_is_a_copy covers the offset-0 path. On the offset path, a slice of the
+    ``np.packbits`` output would have that output as its base and keep it alive.
+    """
     buf = pa.py_buffer(bytes([0xB5, 0x6C, 0xF0]))
     bitmap = create_bitmap(buf, 3, 13)
     assert bitmap.base is None
@@ -602,10 +647,13 @@ def test_create_bitmap_owns_its_memory_on_the_offset_path():
 
 
 def test_result_is_read_only_whatever_the_buffer_provenance():
-    # np.frombuffer reports read-only only for buffers pyarrow marks immutable,
-    # which is true after an IPC round trip and false for a locally built
-    # array. The result must not differ between the two, or a UDF compiles in a
-    # unit test and fails on a real Spark batch.
+    """Check that adapted data is read-only both for a locally built array and for the same array read back from IPC.
+
+    np.frombuffer makes a read-only view only of a buffer that pyarrow marks immutable. A buffer read from an Arrow IPC
+    stream is immutable, and a locally built one is mutable. Spark sends mapInArrow its batches through Arrow IPC.
+    numba types a read-only array differently from a writable one, so a UDF that compiles against a local batch could
+    fail on a Spark batch if the two differed.
+    """
     col = pa.array([10, 20, 30, 40], type=pa.int64())
     batch = pa.RecordBatch.from_arrays([col], names=["v"])
     sink = pa.BufferOutputStream()
@@ -620,10 +668,11 @@ def test_result_is_read_only_whatever_the_buffer_provenance():
 
 
 def test_the_read_only_flag_cannot_be_flipped_back():
-    # A flag is the caller's to flip: `data.flags.writeable = True` used to
-    # succeed on a view over a locally built array, and a store through it then
-    # changed the source Arrow array. pyarrow's own to_numpy(zero_copy_only=True)
-    # refuses the flip, and so does a view whose base is a read-only memoryview.
+    """Check that a caller cannot make an adapted view writable and change the source Arrow array through it.
+
+    numpy refuses to set ``WRITEABLE`` on an array whose base is read-only. Each view rests on a pyarrow buffer that
+    exports its memory read-only, so the flip fails as it does on pyarrow's own ``to_numpy(zero_copy_only=True)``.
+    """
     views = {
         "int64": pa.array([1, 2, 3], type=pa.int64()),
         "float64": pa.array([1.5, 2.5], type=pa.float64()),
@@ -641,15 +690,15 @@ def test_the_read_only_flag_cannot_be_flipped_back():
 
 
 def test_a_bool_array_is_refused_by_the_uniform_adapter():
-    # Arrow packs booleans one bit per element, so there is no uniform view.
-    # The old dtype lookup succeeded and returned wrong values.
+    # Arrow packs booleans one bit per element, and a view of one byte per element reads wrong values. The uniform
+    # adapter refuses a bool array; the dispatcher sends one to the boolean adapter, which unpacks the bits.
     with pytest.raises(ValueError, match="bool"):
         uniform_arrow_array_adapter(pa.array([True, False, True], type=pa.bool_()))
 
 
 def test_multi_buffer_types_name_themselves_in_the_uniform_adapter():
-    # Resolved before the buffers are unpacked, so a three-buffer layout
-    # reports its type instead of "too many values to unpack".
+    # The uniform adapter looks the type up before it unpacks the buffers, so an array with more than two buffers
+    # fails with its type in the message rather than with "too many values to unpack".
     for arrow_ty, values in [(pa.string(), ["a"]), (pa.binary(), [b"a"]),
                              (pa.list_(pa.int64()), [[1]])]:
         with pytest.raises(ValueError) as excinfo:
@@ -666,10 +715,12 @@ if __name__ == "__main__":
 
 
 def test_a_list_row_of_a_different_length_is_refused():
-    # The result is the flattened elements with no offsets, so element i only
-    # maps back to a row when every row is the same length. An empty row and a
-    # ragged row break that exactly as a null row does, and used to be answered
-    # with silently misaligned data: three rows came back as two elements.
+    """Check that a list column whose rows differ in length is refused, and that rows of equal length adapt.
+
+    The adapter returns the flattened elements without offsets. An element maps back to its row only when every row
+    has the same length. An empty row or a row of another length breaks that as a null row does: the three rows of the
+    first case would flatten to two elements.
+    """
     ty = pa.list_(pa.struct([("v", pa.int64())]))
     for rows in (
         [[{"v": 1}], [], [{"v": 3}]],
@@ -678,17 +729,19 @@ def test_a_list_row_of_a_different_length_is_refused():
     ):
         with pytest.raises(NotImplementedError, match="not all the same length"):
             arrow_array_adapter(pa.array(rows, type=ty))
-    # Uniform rows of width > 1 stay supported: 2 rows of 2 is well defined.
+    # Rows of equal length still adapt when each holds more than one element: two rows of two map back exactly.
     _, _, datas = arrow_array_adapter(
         pa.array([[{"v": 1}, {"v": 2}], [{"v": 3}, {"v": 4}]], type=ty))
     assert datas["v"].tolist() == [1, 2, 3, 4]
 
 
 def test_a_struct_level_null_hides_its_child_value_from_the_string_adapter():
-    # A row null at the struct layer leaves its child's own bitmap untouched, so
-    # the string adapter used to treat the hidden bytes as a live value: it
-    # refused the batch over a trailing NUL no caller can observe, and sized the
-    # column's width from a value no caller can observe.
+    """Check that the adapter ignores a string hidden by a struct-level null when it checks NULs and sizes the column.
+
+    A row that is null at the struct level leaves the child's own bitmap unchanged, so the child's data still holds
+    the hidden value. No caller can see that value: its trailing NUL is no reason to refuse the batch, and its 200
+    characters are no measure of the column's width.
+    """
     ty = pa.struct([("s", pa.string())])
     hidden_nul = pa.StructArray.from_arrays(
         [pa.array(["ok", "bad\x00", "fine"], type=pa.string())], ["s"],
@@ -704,8 +757,7 @@ def test_a_struct_level_null_hides_its_child_value_from_the_string_adapter():
     assert datas["s"].dtype == np.dtype("<U2"), (
         "width must come from observable values, not from one hidden under a "
         "struct-level null")
-    # The two validity layers stay separate: this function reports the field's
-    # own bitmap and the struct's, and is_null_struct takes both.
+    # The adapter still returns the struct's bitmap and the field's own bitmap separately, as is_null_struct takes them.
     struct_bitmap, bitmaps, _ = arrow_array_adapter(hidden_wide)
     assert struct_bitmap is not None
     assert bitmaps["s"] is None, "the field itself has no nulls of its own"
@@ -713,10 +765,13 @@ def test_a_struct_level_null_hides_its_child_value_from_the_string_adapter():
 
 
 def test_an_empty_element_never_indexes_the_neighbour_s_dead_bytes():
-    # `non_empty` keeps an empty element out of the trailing-NUL scan. Without
-    # it, or with `>=` instead of `>`, the empty element's last byte index walks
-    # backwards into the previous element, or to -1 which numpy wraps to the end
-    # of the span, and the guard fires on an empty string.
+    """Check that an empty string is not refused over a NUL in bytes outside it.
+
+    Computed as its end minus one, an empty element's last byte is the byte before its start: the previous element's
+    last byte, or -1 for the first element, which numpy reads as the last byte of the data. Here that byte is the NUL
+    that ends the masked-out value under the null slot. The ``non_empty`` term keeps empty elements out of the
+    trailing-NUL check, and this test fails with ``>=`` in place of its ``>``.
+    """
     masked = pc.if_else(pa.array([True, False]),
                         pa.array(["", "ab\x00"], type=pa.string()),
                         pa.scalar(None, pa.string()))
@@ -728,10 +783,12 @@ def test_an_empty_element_never_indexes_the_neighbour_s_dead_bytes():
 
 
 def test_a_live_empty_element_is_not_judged_by_the_span_s_first_byte():
-    # `last_byte` is 0 for an empty element, so without the `non_empty` term in
-    # the trailing-NUL scan an empty value is judged by the FIRST byte of the
-    # span. When the column's first value begins with a NUL, that byte is 0 and
-    # every live empty string in the column is refused.
+    """Check that a valid empty string is not refused when the column's data starts with a NUL byte.
+
+    ``last_byte`` is 0 for an empty element, the first byte of the data. If the trailing-NUL check lacked its
+    ``non_empty`` term, it would judge an empty value by that byte. A column whose first value starts with a NUL would
+    then have every valid empty string refused.
+    """
     arr = pa.array(["\x00x", ""], type=pa.string())
     bounds = np.frombuffer(memoryview(arr.buffers()[2]), dtype=np.uint8)
     assert bounds[0] == 0, "this test needs the span to start with a NUL byte"
@@ -740,9 +797,12 @@ def test_a_live_empty_element_is_not_judged_by_the_span_s_first_byte():
 
 
 def test_a_ragged_map_raises_as_the_readme_says():
-    # A MapArray is a ListArray, so the same-length contract binds it too. The
-    # README documents this explicitly because a ragged map is the usual shape
-    # and it used to be answered with entries no row could claim.
+    """Check that a map column whose rows hold different numbers of entries is refused, and a uniform one adapts.
+
+    A MapArray is a ListArray, so the rule that every row has the same length binds a map column too. Rows of
+    different lengths are the usual shape of a map column, and the flattened entries could not say which row each
+    entry belongs to.
+    """
     ragged = pa.array([[("a", 1), ("b", 2)], [("c", 3)]],
                       type=pa.map_(pa.string(), pa.int64()))
     with pytest.raises(NotImplementedError, match="not all the same length"):
@@ -754,9 +814,12 @@ def test_a_ragged_map_raises_as_the_readme_says():
 
 
 def test_the_base_of_a_view_cannot_be_released_from_under_it():
-    # np.frombuffer kept only a wrapper of the memoryview it was handed as
-    # .base, and a caller who released it, dropped the source and read the
-    # view read freed memory.
+    """Check that a view's base has no ``release()``, and that the view keeps its data once the source is dropped.
+
+    Given a memoryview, np.frombuffer keeps another memoryview as the array's base, and its ``release()`` drops the
+    hold on the source buffer. A caller who released that base and dropped the source would read freed memory. The
+    adapter gives np.frombuffer a pyarrow buffer instead, which has no ``release()``.
+    """
     n = 1 << 16
 
     def view():
@@ -769,6 +832,8 @@ def test_the_base_of_a_view_cannot_be_released_from_under_it():
     with pytest.raises(ValueError, match="WRITEABLE"):
         data.flags.writeable = True
     gc.collect()
+    # Buffers of the source's size, filled with 0xA5, can take over its freed memory, so a view of that memory would
+    # read changed values.
     junk = [pa.allocate_buffer(n * 8) for _ in range(6)]
     for buffer in junk:
         np.frombuffer(buffer, dtype=np.uint8)[:] = 0xA5

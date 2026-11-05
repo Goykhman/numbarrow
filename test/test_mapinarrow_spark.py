@@ -1,3 +1,14 @@
+"""End-to-end tests of ``make_mapinarrow_func`` through ``mapInArrow`` in a local Spark session.
+
+In ``mapInArrow``, Spark sends each partition's rows to Python as Arrow batches and reads the returned batches back in
+the JVM. The tests run a jitted UDF over a joined DataFrame that has a list-of-struct column and a null. They check that
+the null row of a struct column, the bitmap key of a null-free column, a struct field named like a column, and the
+nulls of a :class:`Nullable` all survive that transport. They also check that a numeric column fails in the JVM when
+its type differs from the declared numeric type, and that a Spark ``StructType`` is refused as ``output_schema``.
+pytest skips the module without pyspark or pandas. The ``spark`` fixture in ``conftest.py`` skips a test when Spark
+cannot start or its Arrow transport fails. With ``NUMBARROW_REQUIRE_SPARK=1``, each of these cases fails instead of
+skipping. ``test_mapinarrow_factory.py`` tests the factory on batches built in Python.
+"""
 import numpy as np
 import pytest
 
@@ -10,7 +21,7 @@ from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
 from test.conftest import spark_leg_required
 
 if spark_leg_required():
-    # A missing pyspark is then a collection error, not a silent skip.
+    # With NUMBARROW_REQUIRE_SPARK=1, a missing pyspark or pandas fails collection instead of skipping the module.
     import pandas  # noqa: F401
     import pyspark  # noqa: F401
 else:
@@ -40,6 +51,11 @@ def create_entities_df(spark):
 
 
 def create_data_df(spark):
+    """Return each entity's three ``(index, magnitude)`` rows as one list-of-struct column, ``data``.
+
+    The DataFrame has two partitions by id and a ``partition_id`` column. Entity 101888 has a null magnitude at index
+    905.
+    """
     data_schema = StructType([
         StructField("id", StringType()),
         StructField("index", IntegerType()),
@@ -72,10 +88,9 @@ def join_data(spark):
     return data_df.join(entities_df, on=["id", "partition_id"])
 
 
-# Every array numbarrow hands a UDF is a view over an Arrow buffer the UDF does
-# not own, so the parameters are declared readonly. A readonly parameter accepts
-# a writable array as well, while a writable one rejects a readonly array at
-# compile time.
+# The data arrays the factory passes to a UDF are read-only, whether they view an Arrow buffer or are copies, so the
+# signature declares each array parameter readonly. A readonly array type accepts a writable array too, such as the
+# bitmap here. A writable array type makes numba refuse a read-only argument when the function is called.
 bitmap_a_ty = Array(uint8, 1, "C", readonly=True)
 
 size_a_ty = Array(int64, 1, "C", readonly=True)
@@ -113,7 +128,7 @@ def calculate(
 
 
 def main(data_dict: dict, bitmap_dict: dict, broadcasts: dict):
-    # `data` is a list-of-struct column, so its fields sit under its own name.
+    # data is a list-of-struct column, so data_dict holds its fields under data_dict["data"].
     res = calculate(
         data_dict["size"],
         data_dict["coordinate"],
@@ -137,10 +152,11 @@ def collect_intensities(spark):
 
 
 def test_mapinarrow_round_trips_every_entity(spark):
+    """Every entity comes back from ``mapInArrow`` with the intensity that ``calculate`` gives it."""
     intensities = collect_intensities(spark)
-    # `calculate` reads index_a[i] for row i while index_a is the flattened
-    # list child array, so an entity is scored with whichever of the three
-    # index values sits at its own position within its batch.
+    # calculate reads index_a[i] for entity i, but index_a is the flattened child of the list column. An entity is
+    # therefore scored with whichever index value sits at its own position in its batch, so the test accepts each of
+    # the three values that every entity holds.
     expected = {
         "101888": (137 * 0.56, 12.4 * 13.6),
         "102": (141 * 0.12, 14.5 * 14.8 * 15.1),
@@ -158,10 +174,13 @@ def test_mapinarrow_round_trips_every_entity(spark):
 
 
 def test_null_magnitude_is_excluded_from_the_product(spark):
+    """The null magnitude of entity 101888 is left out of the product of its magnitudes.
+
+    ``calculate`` skips a magnitude that the bitmap marks null. Spark leaves 0.0 under the null, so reading it as a
+    value would make the product zero, and the scale would drop to the bare index.
+    """
     intensities = collect_intensities(spark)
-    # 101888 carries a null magnitude at index 905. Reading it as a value
-    # rather than skipping it on the bitmap would fold a zero into the
-    # product and collapse the intensity to zero.
+    # The product holds only the two valid magnitudes, 12.4 and 13.6.
     area = 137 * 0.56
     scale = np.sqrt(12.4 * 13.6) / 121.0
     candidates = [area * (index + scale) * 10 ** (-4) for index in (904, 905, 906)]
@@ -169,8 +188,7 @@ def test_null_magnitude_is_excluded_from_the_product(spark):
         np.isclose(intensities["101888"], candidate, rtol=1e-12, atol=0.0)
         for candidate in candidates
     )
-    # Reading the null as a value folds a zero into the product, so the scale
-    # collapses to the bare index. `> 0.0` could not fail and did not say this.
+    # A zero in the product would leave the bare index as the scale.
     collapsed = [area * index * 10 ** (-4) for index in (904, 905, 906)]
     assert not any(
         np.isclose(intensities["101888"], candidate, rtol=1e-9, atol=0.0)
@@ -179,12 +197,13 @@ def test_null_magnitude_is_excluded_from_the_product(spark):
 
 
 def test_struct_null_row_survives_the_arrow_transport(spark):
-    # Spark's own Arrow writer nulls the child of a null struct row, so the
-    # field's bitmap alone sees this row and the fold changes nothing here:
-    # this is the end-to-end check that a struct null reaches the UDF through
-    # the transport at all. The fold is pinned where the child carries no
-    # null of its own, by test_both_null_layers_are_folded_together and its
-    # siblings in test_mapinarrow_factory.py.
+    """A null row of a struct column reaches the UDF through Spark as a null in its field's bitmap.
+
+    Spark's Arrow writer also sets the child null under a null struct row, so the field's own validity shows the row
+    before the factory folds in the struct's validity. ``test_struct_null_row_reaches_the_udf`` and
+    ``test_both_null_layers_are_folded_together`` in ``test_mapinarrow_factory.py`` test that fold on a child that is
+    valid under the null struct row.
+    """
     schema = StructType([
         StructField("id", StringType()),
         StructField("point", StructType([StructField("v", LongType())])),
@@ -208,10 +227,12 @@ def test_struct_null_row_survives_the_arrow_transport(spark):
 
 
 def test_null_free_batch_still_carries_its_bitmap_key(spark):
-    # The Arrow IPC reader normalises null_count == 0 to validity=None, so a
-    # batch that happens to contain no nulls arrives with no validity buffer.
-    # The key must still be there, or a job passes on one batch and raises
-    # KeyError on the next batch of the same schema.
+    """A column with no null in its batch still has a key in ``bitmap_dict`` when it comes through Spark.
+
+    pyarrow's IPC reader drops the validity buffer of a column whose ``null_count`` is 0, so the column arrives with
+    no bitmap. Without the key, a UDF that indexes ``bitmap_dict`` would pass on a batch with nulls and raise
+    ``KeyError`` on a null-free batch of the same schema.
+    """
     schema = StructType([StructField("id", StringType()), StructField("magnitude", DoubleType())])
     df = spark.createDataFrame([("a", 1.0), ("b", 2.0), ("c", 3.0)], schema)
 
@@ -227,9 +248,10 @@ def test_null_free_batch_still_carries_its_bitmap_key(spark):
 
 
 def test_a_struct_field_sharing_a_column_name_reaches_the_udf_through_spark(spark):
-    # Four ordinary Spark StructTypes convert to this shape: a top-level column
-    # and a struct field sharing a name. The field sits under its column, so
-    # both arrive, each under its own key.
+    """A column ``id`` and a struct field ``order.id`` both reach the UDF through Spark, each under its own key.
+
+    ``data_dict`` holds the field under its struct column, as ``data_dict["order"]["id"]``.
+    """
     schema = StructType([
         StructField("id", LongType()),
         StructField("order", StructType([
@@ -247,9 +269,11 @@ def test_a_struct_field_sharing_a_column_name_reaches_the_udf_through_spark(spar
 
 
 def test_nullable_carries_nulls_back_through_spark(spark):
-    # A bare array carries no nulls out, so a row of (1, None, None, None) came
-    # back (1, 0, 0.0, ''), the placeholders under its nulls. Nullable carries
-    # each column's validity out, and Spark's Arrow transport carries it back.
+    """``Nullable`` columns of long, double and string values carry their nulls back through Spark.
+
+    As bare arrays, the row ``(1, None, None, None)`` would come back ``(1, 0, 0.0, '')``, the values that the UDF
+    receives under the nulls.
+    """
     schema = StructType([
         StructField("id", LongType()), StructField("n", LongType()),
         StructField("x", DoubleType()), StructField("s", StringType()),
@@ -269,10 +293,14 @@ def test_nullable_carries_nulls_back_through_spark(spark):
 
 
 def test_a_column_of_another_accessor_family_fails_whatever_its_width(spark):
-    # The docstring said only a width mismatch fails, so an operator chasing
-    # UnsupportedOperationException was told the types could not be the cause.
-    # float64 and int64 are both 64 bits wide and neither reads through the
-    # other's accessor.
+    """A numeric column whose Arrow type differs from its declared Spark type fails in the JVM, whatever its width.
+
+    Spark wraps each returned Arrow vector in an accessor for the vector's type, and reads it with the getter of the
+    column's declared type, such as ``getLong`` for ``LongType``. An accessor without that getter throws
+    ``UnsupportedOperationException``. float64 and int64 are both 64 bits wide, and neither reads through the other's
+    accessor; int32 under ``LongType`` fails the same way. The test also asserts the two phrases of
+    ``make_mapinarrow_func``'s docstring that state this.
+    """
     doc = " ".join(make_mapinarrow_func.__doc__.split())
     assert "read through the accessor of another family fails in the JVM" in doc
     assert "float64 under ``LongType`` and int64 under ``DoubleType``" in doc
@@ -298,10 +326,12 @@ def test_a_column_of_another_accessor_family_fails_whatever_its_width(spark):
 
 
 def test_a_spark_struct_type_as_output_schema_is_refused():
-    # The schema mapInArrow takes and the factory's own output_schema share a
-    # name and are not the same thing, and the Spark one carries .names too,
-    # so it reached the first batch and died on a field's missing .type. No
-    # session is needed to hand one to the factory.
+    """A Spark ``StructType`` passed as ``output_schema`` raises ``TypeError`` when the function is made.
+
+    ``mapInArrow`` takes a ``StructType`` as its output schema, while the factory's ``output_schema`` is a
+    ``pyarrow.Schema``. Without the check, the factory would fail on a field without ``.type``, with an error that
+    names neither the parameter nor the type it needs. The test needs pyspark's types but no Spark session.
+    """
     schema = StructType([StructField("n", LongType())])
     with pytest.raises(TypeError, match="output_schema must be a pyarrow.Schema, not a StructType"):
         make_mapinarrow_func(lambda d, b, br: {}, output_schema=schema)
