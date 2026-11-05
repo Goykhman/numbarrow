@@ -182,9 +182,10 @@ def test_an_inferred_datetime64_column_comes_back_as_the_docs_say():
     assert ("a ``datetime64`` array comes back a naive ``timestamp`` of its unit, with a multiplier such as "
             "``datetime64[5s]`` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
             "unit comes back ``date32``, a unit finer than a nanosecond is refused") in FACTORY_DOC
-    assert ("a `datetime64` output becomes a naive timestamp of its unit, with a multiplier such as "
-            "`datetime64[5s]` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
-            "unit becomes `date32`, a unit finer than a nanosecond is refused") in README_TEXT
+    assert ("a `datetime64` output becomes a timestamp of the same unit, without a time zone. A unit with a "
+            "multiplier, such as `datetime64[5s]`, is converted to its base unit, and an hour or minute unit to "
+            "seconds. A day, week, month or year unit becomes `date32`. A unit finer than a nanosecond raises "
+            "`TypeError`.") in README_TEXT
     days = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
     column = _inferred_output_column(days)
     assert column.type == pa.date32()

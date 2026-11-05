@@ -4,58 +4,47 @@ numbarrow.core.adapters
 Overview
 ++++++++
 
-Type-dispatched adapters that convert PyArrow arrays into NumPy arrays
-for use in Numba ``@njit`` compiled functions.
+numba cannot compile a function that takes a ``pyarrow.Array``. :func:`~numbarrow.core.adapters.arrow_array_adapter`
+converts such an array into a pair of numpy arrays, ``(bitmap, data)``, that an ``@njit`` function can take: the
+validity bitmap that marks the null rows, and the values. Call it outside jitted code, once per array, and pass the
+results to the jitted function:
 
-Uses ``functools.singledispatch`` to route each PyArrow array type to a
-handler that extracts the underlying data buffer as a NumPy view (where
-possible) and the validity bitmap as a uint8 array.
+.. code-block:: python
 
-Supported types:
+    import pyarrow as pa
+    from numbarrow.core.adapters import arrow_array_adapter
 
-- ``BooleanArray`` (requires copy due to bit-packed layout)
-- ``Int32Array``, ``Int64Array``, ``DoubleArray``, ``UInt8Array`` (zero-copy view)
-- ``Date32Array`` (copy: int32 days → datetime64[D])
-- ``Date64Array`` (zero-copy view as datetime64[ms])
-- ``TimestampArray`` (zero-copy view as datetime64[unit])
-- ``StringArray``, ``LargeStringArray`` (tuple of bitmap and a copy of data into a
-  fixed-width NumPy Unicode array, whose width counts characters)
-- ``StructArray`` (returns a 3-tuple: the struct-level validity bitmap, then bitmaps
-  and data as two dicts keyed by field name)
-- ``ListArray`` of structs (delegates to the StructArray adapter, honouring the list
-  array's own offset; any other element type raises ``NotImplementedError``). The
-  elements are flattened and no offsets are returned, so a null outer row can be
-  neither reported nor placed in the element-to-row mapping; a list column whose
-  ``null_count`` is non-zero raises ``NotImplementedError``.
+    bitmap, data = arrow_array_adapter(pa.array([1.5, None, 4.0]))
+    print(bitmap, data)   # [5] [1.5 0.  4. ]
 
-A row that is null as a whole carries no validity bits in its fields, so the
-struct-level bitmap is the only record of it. Pass both layers to
-``numbarrow.core.is_null.is_null_struct``.
+``bitmap`` is a ``uint8`` array with one bit per row, set for a valid row. In the example, ``[5]`` is ``0b101``: rows
+0 and 2 are valid, and row 1 is null. ``bitmap`` is ``None`` when the array has no validity buffer, the Arrow memory
+that marks its nulls, so code that reads a bitmap must accept ``None`` as well as an array. ``data`` is a read-only
+numpy array. For a fixed-width type such as ``int64``, ``float64`` or a timestamp, it is a view of the Arrow buffer,
+and it keeps that buffer alive. For booleans, ``date32`` values and strings, which numpy stores differently, it is a
+copy.
 
-A string value whose last character is NUL raises ``ValueError``: numpy's
-fixed-width ``|U`` dtype pads with NUL, so a trailing NUL cannot be told from
-padding and would come back silently truncated. Leading and interior NULs are
-preserved.
+A ``StructArray`` converts to a 3-tuple instead: the struct's own bitmap, then two dicts keyed by field name, one of
+field bitmaps and one of field data. A ``ListArray`` whose elements are structs converts to the same 3-tuple, over the
+elements of all its rows, and its first item marks null elements rather than null rows. The adapter keeps the struct's
+bitmap apart from the field bitmaps, so pass both to :func:`~numbarrow.core.is_null.is_null_struct`.
+:func:`~numbarrow.core.mapinarrow_factory.make_mapinarrow_func` combines them for the function it calls instead.
 
-Returned data arrays are read-only. The views are over Arrow buffers the
-caller does not own and cannot be made writable, which is also why pyarrow's
-own ``to_numpy(zero_copy_only=True)`` refuses to hand out a writable one; the
-copies, booleans, ``date32`` and strings, start read-only as well, so the
-contract does not depend on the type, though a caller who flips the flag on a
-copy writes into memory that is their own. Declare numba signatures that
-receive them with ``readonly=True``, which accepts writable arrays too.
-Returned bitmaps own their memory and are writable.
+The function accepts the array classes that the README lists, and their subclasses. A ``MapArray``, for example, is a
+``ListArray`` of structs with the fields ``key`` and ``value``, and it converts as one. Any other array, and any object
+that is not a pyarrow array, raises ``NotImplementedError`` with the type in the message.
 
-A bitmap is ``None`` when the array carries no validity buffer and a uint8
-array otherwise, which is not the same as having no nulls: ``slice``, ``take``,
-``filter`` and ``fill_null`` keep an all-valid buffer, and Arrow IPC, which is
-what Spark's transport uses, drops one when a batch has no nulls. Declare a
-bitmap parameter ``Optional`` in an eager numba signature, or it compiles on
-one batch and raises ``No matching definition`` on the next.
+The README's `Supported Types`_ section has the table of classes and what each becomes. Its subsections cover what code
+that reads the results must handle: `nulls and validity bitmaps`_, `strings`_, `timestamps and time zones`_,
+`structs, lists of structs and maps`_, `read-only arrays`_ and `explicit signatures`_.
 
-A ``TimestampArray`` adapts by its unit alone, so a zoned and a naive timestamp
-holding the same int64 adapt to the same ``datetime64``, as pyarrow's
-``to_numpy`` does; the zone is not reported.
+.. _Supported Types: https://github.com/Goykhman/numbarrow#supported-types
+.. _nulls and validity bitmaps: https://github.com/Goykhman/numbarrow#nulls-and-validity-bitmaps
+.. _strings: https://github.com/Goykhman/numbarrow#strings
+.. _timestamps and time zones: https://github.com/Goykhman/numbarrow#timestamps-and-time-zones
+.. _structs, lists of structs and maps: https://github.com/Goykhman/numbarrow#structs-lists-of-structs-and-maps
+.. _read-only arrays: https://github.com/Goykhman/numbarrow#read-only-arrays
+.. _explicit signatures: https://github.com/Goykhman/numbarrow#explicit-signatures
 
 Module
 ++++++

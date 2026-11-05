@@ -4,64 +4,60 @@ numbarrow.core.mapinarrow_factory
 Overview
 ++++++++
 
-Factory for PySpark ``mapInArrow`` UDF functions. Bridges PySpark's
-Arrow-based batch processing with Numba JIT-compiled functions by
-converting each ``pyarrow.RecordBatch`` column through the adapter
-layer before passing data to a user-supplied computation function.
+PySpark's `mapInArrow
+<https://spark.apache.org/docs/3.5.7/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.mapInArrow.html>`_
+runs a Python function on an iterator of Arrow record batches and expects an iterator of batches back.
+:func:`~numbarrow.core.mapinarrow_factory.make_mapinarrow_func` builds that function from a simpler one of yours,
+``main_func(data_dict, bitmap_dict, broadcasts)``. ``main_func`` receives the columns of each batch as numpy arrays in
+dicts, and it returns a dict of output columns:
 
-Usage::
+.. code-block:: python
 
+    import pyarrow as pa
     from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
 
-    def my_func(data_dict, bitmap_dict, broadcasts):
-        # data_dict:   {name: np.ndarray} for a uniform column, or
-        #              {name: {field: np.ndarray}} for a struct column
-        # bitmap_dict: the same shape, each leaf a uint8 bitmap or None where
-        #              the column carries no validity buffer; for a struct
-        #              column the struct-level validity is folded into each
-        #              field's bitmap
-        # broadcasts:  {key: value}
-        result = data_dict["input_col"] * broadcasts["scale"]
-        # result is null wherever input_col is, so input_col's bitmap goes out
-        # with it; a bare array would carry no nulls out, and a result with
-        # nulls of its own packs them: np.packbits(valid, bitorder="little")
-        return {"output_col": Nullable(result, bitmap_dict["input_col"])}
 
-    udf = make_mapinarrow_func(my_func, broadcasts={"scale": 1.5})
-    df_in = ...           # caller-provided PySpark DataFrame
-    output_schema = ...   # caller-provided PySpark StructType
-    df_out = df_in.mapInArrow(udf, output_schema)
+    def main_func(data_dict, bitmap_dict, broadcasts):
+        doubled = data_dict["value"] * broadcasts["factor"]
+        return {"doubled": Nullable(doubled, bitmap_dict["value"])}
 
-Every name in ``data_dict`` is also a key of ``bitmap_dict``, so a batch that
-happens to contain no nulls is indexable exactly like one that does.
 
-On the way out a bare array carries no nulls: a row that came in null goes out
-valid, holding whatever the UDF computed from the placeholder under the null,
-which is ``0``, ``0.0`` or ``''`` in a batch from Spark.
-``Nullable(data, bitmap)`` carries nulls out, the bitmap being in the layout
-``bitmap_dict`` hands out. A result that is null exactly where one input
-column is, as in the example, passes that column's bitmap through,
-``Nullable(result, bitmap_dict[column])``, or ``bitmap_dict[column][field]``
-for a struct field; any other result builds its own, for instance
-``np.packbits(valid, bitorder="little")`` from a boolean array ``valid``. A
-packed bitmap carries no row count, so a bitmap the batch handed out is
-accepted only on a column of the length it covers, the batch's rows for a
-column's own bitmap and the flattened elements for a struct field's; one that
-resizes the column needs a bitmap of its own.
+    udf = make_mapinarrow_func(main_func, broadcasts={"factor": 2.0})
+    batch = pa.RecordBatch.from_pydict({"value": [1.5, None, 4.0]})
+    print(next(udf(iter([batch]))).column("doubled").to_pylist())  # [3.0, None, 8.0]
 
-For a ``StructArray`` column the struct-level validity is folded into each
-field's bitmap, so a row that is null as a whole is visible to one ``is_null``
-call per field. For a ``ListArray`` of structs the fold covers the flattened
-struct elements, NOT the outer list rows: a null outer row can be reported
-nowhere and also shifts the element-to-row mapping, so a list column whose
-``null_count`` is non-zero raises ``NotImplementedError``.
+:class:`~numbarrow.core.mapinarrow_factory.Nullable` pairs an output column with a validity bitmap, here the bitmap of
+the input column ``value``, so that ``doubled`` is null where ``value`` is null. A plain numpy array in the returned
+dict becomes a column without nulls, except for a ``NaT``, which pyarrow reads as null. The example passes no
+``output_schema``, so numbarrow infers the type of each output column from its values. In Spark, pass the same
+``udf`` to ``df.mapInArrow(udf, "doubled double")``. The built function takes any iterator of record batches, so a
+test can call it without Spark, as the example does.
 
-A struct or list-of-struct column's fields sit under the column's own name,
-``data_dict[column][field]``, so a field never shares a namespace with another
-column or with another struct's fields.
+For each batch, the built function converts every column of the batch with
+:func:`~numbarrow.core.adapters.arrow_array_adapter`, or only the columns that the ``input_columns`` parameter names.
+It then calls ``main_func`` once, with three dicts:
 
-See ``test_mapinarrow_spark.py`` in the `test suite
-<https://github.com/Goykhman/numbarrow/tree/main/test>`_ for a complete runnable example.
+- ``data_dict`` maps each column's name to its numpy data. A struct column, or a list of structs, maps to a dict of
+  its fields: ``data_dict["point"]["x"]`` is the field ``x`` of the column ``point``.
+- ``bitmap_dict`` has the same keys in every batch and holds the validity bitmaps, or ``None`` where a column has no
+  validity buffer.
+- ``broadcasts`` is the dict given to ``make_mapinarrow_func``.
+
+For a struct column, ``bitmap_dict`` differs from what ``arrow_array_adapter`` returns. The adapter returns the
+struct's own bitmap apart from the bitmaps of its fields, for :func:`~numbarrow.core.is_null.is_null_struct` to read
+both. ``bitmap_dict`` holds no bitmap for the struct itself. numbarrow combines it into the bitmap of each field, which
+then also marks the rows where the whole struct is null. One :func:`~numbarrow.core.is_null.is_null` call per field is
+therefore enough.
+
+The README's `PySpark mapInArrow`_ section shows a complete Spark job. Its subsections explain how to
+`return nulls`_, why columns `bind by position`_ unless the ``output_schema`` parameter binds them by name, and how
+numbarrow chooses the `types of the output columns`_. The reference below documents the parameters and the errors
+that ``make_mapinarrow_func`` raises.
+
+.. _PySpark mapInArrow: https://github.com/Goykhman/numbarrow#pyspark-mapinarrow
+.. _return nulls: https://github.com/Goykhman/numbarrow#returning-nulls
+.. _bind by position: https://github.com/Goykhman/numbarrow#columns-bind-by-position-not-by-name
+.. _types of the output columns: https://github.com/Goykhman/numbarrow#output-column-types
 
 Module
 ++++++
