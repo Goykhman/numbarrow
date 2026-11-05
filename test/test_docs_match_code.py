@@ -157,7 +157,7 @@ def test_the_truncations_the_docstring_admits_for_a_list_are_the_ones_it_makes()
     """Check that a list truncates a fraction into ``int64`` and a sub-second timestamp into a seconds unit without an
     error, the two truncations that the factory docstring admits for a list."""
     assert "goes through ``pa.array``'s sequence converter" in FACTORY_DOC
-    assert ("from a list alone, a fraction into an integer type and a timestamp unit change "
+    assert ("from a sequence of Python objects alone, a fraction into an integer type and a timestamp unit change "
             "that drops digits") in FACTORY_DOC
     assert _one_output_column([1.5], pa.int64()).to_pylist() == [1]
     assert _one_output_column([SUB_SECOND], pa.timestamp("s")).to_pylist() == [

@@ -441,8 +441,9 @@ date reads as days. A column whose Arrow type provides another getter fails with
 
 ## Compilation and the cache
 
-numbarrow compiles `is_null` and its other bitmap functions when your program first imports one of its modules, and
-the functions that read Arrow buffers when a conversion first needs them. numba's own default is not to cache, but
+numbarrow compiles `is_null` and its other bitmap functions when your program first imports
+`numbarrow.core.is_null`, which the adapters and `make_mapinarrow_func` import, and it compiles the functions that
+read Arrow buffers when a conversion first needs them. numba's own default is not to cache, but
 numbarrow asks numba to cache the compiled code on disk, so that a later process loads the code instead of compiling
 it again. numba writes the cache beside numbarrow's modules if it can, and otherwise to the user cache directory.
 [`NUMBA_CACHE_DIR`][cache-dir] overrides both, and [numba's documentation][numba-cache] describes the locations.
@@ -467,9 +468,9 @@ caching on.
 
 ### Set both variables before numba is imported
 
-numbarrow reads `NUMBARROW_JIT_OPTIONS` when your program first imports one of its modules, and numba reads
-`NUMBA_CACHE_DIR` when numba is imported. Another library may import numba before numbarrow does. Set both variables
-before the process imports either one.
+numbarrow reads `NUMBARROW_JIT_OPTIONS` when your program first imports `numbarrow.core.configurations`, which every
+numbarrow module that compiles code imports, and numba reads `NUMBA_CACHE_DIR` when numba is imported. Another
+library may import numba before numbarrow does. Set both variables before the process imports either one.
 
 A cache directory set after numba is imported takes effect late, or not at all. It misses at least the first function
 numbarrow compiles. If the cache that numba found at import already holds numbarrow's compiled code, the new directory

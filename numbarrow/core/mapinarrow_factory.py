@@ -836,10 +836,12 @@ def make_mapinarrow_func(
 
         - a timestamp into ``date32`` or ``date64``;
         - a float into a narrower float, which overflows to ``inf``;
-        - from an ndarray or a :class:`pyarrow.Array`, a timestamp into ``time32`` or ``time64``, which drops the date;
-        - from an ndarray or a :class:`pyarrow.Array`, a number into ``bool``, which is true for anything but zero;
-        - and, from a list alone, a fraction into an integer type and a timestamp unit change that drops digits, which
-          the sequence converter truncates.
+        - from a datetime ndarray or a :class:`pyarrow.Array`, a timestamp into ``time32`` or ``time64``, which drops
+          the date;
+        - from a numeric ndarray or a :class:`pyarrow.Array`, a number into ``bool``, which is true for anything but
+          zero;
+        - and, from a sequence of Python objects alone, a fraction into an integer type and a timestamp unit change that
+          drops digits, which the sequence converter truncates.
 
         A float under a ``decimal`` type is refused on both routes of ``pa.array``: the sequence converter takes an int
         or a :class:`decimal.Decimal`, and the typed converter refuses a float dtype. A float :class:`pyarrow.Array` is
