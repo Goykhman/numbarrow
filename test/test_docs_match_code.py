@@ -137,7 +137,9 @@ def test_the_refusals_hold_for_the_shapes_the_docstring_names_them_for():
     # The docstring anchored its promise to pa.array without saying that
     # pa.array has two converters: the typed one raises on these two, and the
     # sequence converter a list goes through truncates both without a word.
-    assert "For an ndarray of a numeric or datetime dtype, or a :class:`pyarrow.Array`" in FACTORY_DOC
+    assert "an ndarray of a numeric or datetime dtype goes through ``pa.array``'s typed converter" in FACTORY_DOC
+    assert ("Both raise :class:`pyarrow.ArrowInvalid` for an integer out of the declared type's range, a float with "
+            "a fraction into an integer type, and a timestamp unit change that drops digits") in FACTORY_DOC
     with pytest.raises(pa.ArrowInvalid):
         _one_output_column(np.array([1.5]), pa.int64())
     with pytest.raises(pa.ArrowInvalid):
@@ -179,9 +181,10 @@ def test_an_inferred_datetime64_column_comes_back_as_the_docs_say():
     # Both sentences promised a timestamp of the array's unit for every unit,
     # and pa.array infers date32 for the day one, which the round-trip test's
     # own drift table admits by leaving date32 out of it.
-    assert ("a ``datetime64`` array comes back a naive ``timestamp`` of its unit, with a multiplier such as "
-            "``datetime64[5s]`` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
-            "unit comes back ``date32``, a unit finer than a nanosecond is refused") in FACTORY_DOC
+    assert ("A ``datetime64`` array comes back a naive ``timestamp`` of its unit after the conversion above, so "
+            "``datetime64[5s]`` comes back ``timestamp[s]`` and an hour or minute unit comes back in seconds. A day, "
+            "week, month or year unit comes back ``date32``.") in FACTORY_DOC
+    assert "A unit finer than a nanosecond raises :class:`TypeError`" in FACTORY_DOC
     assert ("a `datetime64` output becomes a timestamp of the same unit, without a time zone. A unit with a "
             "multiplier, such as `datetime64[5s]`, is converted to its base unit, and an hour or minute unit to "
             "seconds. A day, week, month or year unit becomes `date32`. A unit finer than a nanosecond raises "
