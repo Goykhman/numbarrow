@@ -54,6 +54,16 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Set up Java
+      # Spark 3.5 runs on java 8, 11 and 17. ubuntu-26.04, which ubuntu-latest
+      # moves to in November 2026, has java 25 as its default jvm, and a Spark
+      # session fails to start on it. On java 21 the arrow jars pyspark 3.5.7
+      # bundles find no java.nio.DirectByteBuffer(long, int) constructor, so
+      # every arrow batch fails. The Spark leg pins java 17.
+      uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: "17"
     - name: Test with pytest
       # The Spark leg skips itself wherever it cannot run, so losing every
       # end-to-end test would be a green run. The linux cells have a jvm that
