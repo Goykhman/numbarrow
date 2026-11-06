@@ -1,0 +1,338 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.adapters &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/core/adapters.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.adapters</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.core.adapters</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""The adapters that turn pyarrow arrays into numpy arrays for numba-compiled code.</span>
+
+<span class="sd">:func:`arrow_array_adapter` takes a pyarrow array and returns its validity bitmap and its values as numpy arrays, which</span>
+<span class="sd">an ``@njit`` function can take as arguments. It dispatches on the class of the array, with</span>
+<span class="sd">:func:`functools.singledispatch`, to a handler registered in this module. The values of an ``int32``, ``int64``,</span>
+<span class="sd">``float64``, ``uint8``, ``date64`` or timestamp array come back as a view of the Arrow buffer. Booleans, ``date32``</span>
+<span class="sd">values and strings are copied, because numpy lays them out differently. :func:`cast_64bit_date_arrow_to_numpy_array`</span>
+<span class="sd">is the ``datetime64`` view that the ``date64`` and timestamp handlers share, and</span>
+<span class="sd">:mod:`numbarrow.utils.arrow_array_utils` holds the functions that adapt numeric, string, struct and list arrays.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pa</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">singledispatch</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.is_null</span><span class="w"> </span><span class="kn">import</span> <span class="n">unpack_booleans</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.utils.arrow_array_utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">create_bitmap</span><span class="p">,</span> <span class="n">create_str_array</span><span class="p">,</span> <span class="n">structured_array_adapter</span><span class="p">,</span>
+    <span class="n">structured_list_array_adapter</span><span class="p">,</span> <span class="n">type_repr</span><span class="p">,</span> <span class="n">uniform_arrow_array_adapter</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.utils.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">arrays_viewers</span>
+
+
+<div class="viewcode-block" id="cast_64bit_date_arrow_to_numpy_array">
+<a class="viewcode-back" href="../../../numbarrow.core.adapters.html#numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cast_64bit_date_arrow_to_numpy_array</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span><span class="p">,</span> <span class="n">np_dtype</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the bitmap of a ``date64`` or timestamp array and a ``datetime64`` view of its values, without a copy.</span>
+
+<span class="sd">    Both types hold one int64 per value, as ``datetime64`` does, so the function views the Arrow buffer. ``np_dtype``</span>
+<span class="sd">    must be ``datetime64`` at the array's own unit: ``ms`` for a ``date64``, and the unit of the type for a timestamp. A</span>
+<span class="sd">    view cannot rescale the values, so any other ``np_dtype`` raises ``ValueError``. So does an array of another type,</span>
+<span class="sd">    a ``time64`` or a ``duration`` included. The view is read-only, and the bitmap is None if the array has no validity</span>
+<span class="sd">    buffer.</span>
+<span class="sd">    """</span>
+    <span class="n">np_dtype</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">np_dtype</span><span class="p">)</span>
+    <span class="c1"># A time64 or a duration array has a unit as well, but its values are a time of day or an elapsed span, not</span>
+    <span class="c1"># instants. Viewed as datetime64, they would fall on 1970-01-01, so the type is checked, not the presence of a unit.</span>
+    <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_date64</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">type</span><span class="p">):</span>
+        <span class="n">unit</span> <span class="o">=</span> <span class="s2">"ms"</span>
+    <span class="k">elif</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_timestamp</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">type</span><span class="p">):</span>
+        <span class="n">unit</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">type</span><span class="o">.</span><span class="n">unit</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2"> is not a date64 or timestamp type"</span><span class="p">)</span>
+    <span class="c1"># A view reads the int64 values as they are, so at another unit every value would name the wrong instant: noon on</span>
+    <span class="c1"># 2020-01-01 as a timestamp[ms], viewed as datetime64[s], falls in the year 51971.</span>
+    <span class="k">if</span> <span class="n">np_dtype</span> <span class="o">!=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="sa">f</span><span class="s2">"datetime64[</span><span class="si">{</span><span class="n">unit</span><span class="si">}</span><span class="s2">]"</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2"> holds </span><span class="si">{</span><span class="n">unit</span><span class="si">}</span><span class="s2"> instants, which view as datetime64[</span><span class="si">{</span><span class="n">unit</span><span class="si">}</span><span class="s2">], not as </span><span class="si">{</span><span class="n">np_dtype</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">int64_array</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">int64</span><span class="p">())</span>
+    <span class="c1"># The cast reinterprets the buffer without copying it, which the assert checks. A cast of a zero-length array need</span>
+    <span class="c1"># not keep the source's buffers, and an empty array has nothing to copy, so the check skips it.</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="n">int64_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">address</span> <span class="o">==</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">address</span><span class="p">,</span> <span class="s2">"got copied"</span>
+    <span class="n">bitmap</span><span class="p">,</span> <span class="n">int64_data</span> <span class="o">=</span> <span class="n">uniform_arrow_array_adapter</span><span class="p">(</span><span class="n">int64_array</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">):</span>
+        <span class="c1"># The cast of a zero-length array drops its validity buffer. The bitmap comes from the source instead, so that</span>
+        <span class="c1"># it is None only if the source has no validity buffer.</span>
+        <span class="n">bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">0</span><span class="p">],</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">int64_data</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np_dtype</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">data</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="n">int64_data</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="s2">"got copied"</span>
+    <span class="k">return</span> <span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span></div>
+
+
+
+<div class="viewcode-block" id="arrow_array_adapter">
+<a class="viewcode-back" href="../../../numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter">[docs]</a>
+<span class="nd">@singledispatch</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">arrow_array_adapter</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the validity bitmap and the values of a pyarrow array as numpy arrays for numba-compiled code.</span>
+
+<span class="sd">    The function dispatches on the class of ``pa_array``, and a subclass of a registered class takes that class's</span>
+<span class="sd">    handler: a ``MapArray`` adapts as the ``ListArray`` of key and value structs that it is. For the following classes,</span>
+<span class="sd">    the result is ``(bitmap, data)``:</span>
+
+<span class="sd">    - An ``Int32Array``, ``Int64Array``, ``DoubleArray`` or ``UInt8Array`` gives a view of its values.</span>
+<span class="sd">    - A ``Date64Array`` or ``TimestampArray`` gives a ``datetime64`` view at its own unit, ``ms`` for a ``date64``. A</span>
+<span class="sd">      timestamp's time zone is dropped: the values are the UTC instants that Arrow stores, as pyarrow's ``to_numpy``</span>
+<span class="sd">      returns them.</span>
+<span class="sd">    - A ``BooleanArray`` gives a copy as ``bool_``, and a ``Date32Array`` a copy as ``datetime64[D]``.</span>
+<span class="sd">    - A ``StringArray`` or ``LargeStringArray`` gives a copy as a fixed-width numpy unicode array, as many characters</span>
+<span class="sd">      wide as its longest non-null value, and at least one. The width differs from one array to the next, as between</span>
+<span class="sd">      two batches of a Spark column, so compile a numba function that takes the strings lazily, without a signature.</span>
+
+<span class="sd">    For a ``StructArray``, and for a ``ListArray`` whose elements are structs, the result is</span>
+<span class="sd">    ``(struct_bitmap, bitmaps, datas)``: the struct's own bitmap, then two dicts that map each field's name to the</span>
+<span class="sd">    field's bitmap and to its values, each adapted as above. A field's bitmap need not mark the struct's null rows, so</span>
+<span class="sd">    pass it with ``struct_bitmap`` to :func:`~numbarrow.core.is_null.is_null_struct`. For a list array, the values are</span>
+<span class="sd">    the elements of all its rows in order, without the offsets that separate the rows.</span>
+
+<span class="sd">    A bitmap is None if the array has no validity buffer, and every value is then valid. Otherwise it is a writable</span>
+<span class="sd">    uint8 array that owns its memory, with the bit of element 0 first, even for a slice. An array without nulls can</span>
+<span class="sd">    still have a validity buffer: a ``slice``, ``take`` or ``filter`` of an array that has one keeps it. An array read</span>
+<span class="sd">    from Arrow IPC, the format of Spark's ``mapInArrow`` batches, has none if it has no nulls. A numba signature should</span>
+<span class="sd">    therefore declare a bitmap parameter ``Optional``.</span>
+
+<span class="sd">    Every data array is read-only, a copy as well as a view, so declare it with ``readonly=True`` in a numba signature.</span>
+<span class="sd">    A view keeps the Arrow buffer that it reads alive.</span>
+
+<span class="sd">    Any other object raises ``NotImplementedError`` with a message that names its type. A ``ChunkedArray``, such as a</span>
+<span class="sd">    ``Table`` column, and a pyarrow scalar raise it too, with a message that says what to pass instead. The functions</span>
+<span class="sd">    that adapt strings, structs and lists refuse some values, such as a string that ends in a NUL character or a list</span>
+<span class="sd">    array whose rows differ in length. :func:`~numbarrow.utils.arrow_array_utils.create_str_array`,</span>
+<span class="sd">    :func:`~numbarrow.utils.arrow_array_utils.structured_array_adapter` and</span>
+<span class="sd">    :func:`~numbarrow.utils.arrow_array_utils.structured_list_array_adapter` list the values they refuse.</span>
+<span class="sd">    """</span>
+    <span class="c1"># This base implementation receives every object that matches no registered class. Its message describes the</span>
+    <span class="c1"># object without interpolating it, because the repr of an array holds every value: the message would grow with the</span>
+    <span class="c1"># array and put the caller's data into any log that records the traceback.</span>
+    <span class="c1">#</span>
+    <span class="c1"># The object may lack an attribute that the message reads. A pa.Field has a type but no length, and a list or an</span>
+    <span class="c1"># ndarray has a length but no type. Each attribute is therefore read with a check. Reading a missing one would</span>
+    <span class="c1"># raise AttributeError or TypeError while the message is built, instead of the NotImplementedError that the</span>
+    <span class="c1"># docstring promises, and a caller that catches NotImplementedError would not catch it.</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pa_array</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">ChunkedArray</span><span class="p">):</span>
+        <span class="c1"># A ChunkedArray, such as a Table column, has a type and a length. The generic message would describe it as an</span>
+        <span class="c1"># array of a type that is supported, and never mention the chunks, so this message names them and the remedies.</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Not implemented for a ChunkedArray of </span><span class="si">{</span><span class="n">pa_array</span><span class="o">.</span><span class="n">num_chunks</span><span class="si">}</span><span class="s2"> chunks of type "</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2">: pass one chunk, or combine_chunks() first"</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pa_array</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">Scalar</span><span class="p">):</span>
+        <span class="c1"># A scalar is one row of a column. The generic message cannot describe every scalar: reading the length of a</span>
+        <span class="c1"># null list scalar raises TypeError, and a struct or map scalar has a length, so it would read as an</span>
+        <span class="c1"># unsupported array of a type that is supported.</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Not implemented for a </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> of type </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2">: "</span>
+            <span class="sa">f</span><span class="s2">"pass the Array, not one of its rows"</span>
+        <span class="p">)</span>
+    <span class="n">arrow_type</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">pa_array</span><span class="p">,</span> <span class="s2">"type"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">DataType</span><span class="p">):</span>
+        <span class="c1"># A pandas DataFrame or a numpy record array with a column named "type" returns that column for the attribute,</span>
+        <span class="c1"># so only a pyarrow DataType counts as a type.</span>
+        <span class="n">described</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, which is not a pyarrow Array"</span>
+    <span class="k">elif</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">pa_array</span><span class="p">,</span> <span class="s2">"__len__"</span><span class="p">):</span>
+        <span class="n">described</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"an array of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span><span class="si">}</span><span class="s2"> elements of type </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">described</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> of type </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span>
+    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Not implemented for </span><span class="si">{</span><span class="n">described</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">BooleanArray</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">BooleanArray</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the bitmap and a read-only ``bool_`` copy of the values.</span>
+
+<span class="sd">    Arrow packs boolean values one bit per value, as it packs a validity bitmap, and numpy stores a ``bool_`` in a</span>
+<span class="sd">    byte, so numpy cannot view the Arrow buffer.</span>
+<span class="sd">    """</span>
+    <span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">data_buf</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()</span>
+    <span class="n">num_of_bool_elements</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">num_of_bool_elements</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1"># pyarrow's full validation accepts a zero-length array without a data buffer. There is nothing to unpack, and</span>
+        <span class="c1"># the result is the same as for a zero-length array with a data buffer.</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="mi">0</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">)</span>
+        <span class="n">data</span><span class="o">.</span><span class="n">flags</span><span class="o">.</span><span class="n">writeable</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">data</span>
+    <span class="k">if</span> <span class="n">data_buf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># pyarrow refuses to build a non-empty array without a data buffer, and pyarrow 14 and 24 also refuse one</span>
+        <span class="c1"># imported through the Arrow C Data Interface. The check is a guard for a pyarrow that does not: the handler</span>
+        <span class="c1"># then raises ValueError, instead of the AttributeError that reading the address of None would raise.</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"bool array of length </span><span class="si">{</span><span class="n">num_of_bool_elements</span><span class="si">}</span><span class="s2"> has no data buffer"</span><span class="p">)</span>
+    <span class="n">data_buf_p</span> <span class="o">=</span> <span class="n">data_buf</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">total_bits</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span> <span class="o">+</span> <span class="n">num_of_bool_elements</span>
+    <span class="n">num_of_bytes</span> <span class="o">=</span> <span class="p">(</span><span class="n">total_bits</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+    <span class="n">packed_boolean_data_viewer</span> <span class="o">=</span> <span class="n">arrays_viewers</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">]</span>
+    <span class="n">packed_boolean_data</span> <span class="o">=</span> <span class="n">packed_boolean_data_viewer</span><span class="p">(</span><span class="n">data_buf_p</span><span class="p">,</span> <span class="n">num_of_bytes</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">unpack_booleans</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="n">num_of_bool_elements</span><span class="p">,</span> <span class="n">packed_boolean_data</span><span class="p">)</span>
+    <span class="n">bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">))</span>
+    <span class="c1"># The unpacked values are a new array, made read-only all the same, so that the data array is read-only whatever</span>
+    <span class="c1"># the Arrow type.</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">flags</span><span class="o">.</span><span class="n">writeable</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span>
+
+
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">Date32Array</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Date32Array</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the bitmap and a read-only ``datetime64[D]`` copy of the values.</span>
+
+<span class="sd">    A ``date32`` value is the number of days since 1970-01-01 as an int32, and numpy's ``datetime64`` is an int64, so</span>
+<span class="sd">    the values are converted, not viewed.</span>
+<span class="sd">    """</span>
+    <span class="n">int32_array</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">int32</span><span class="p">())</span>
+    <span class="c1"># The cast reinterprets the buffer without copying it, which the assert checks. A cast of a zero-length array need</span>
+    <span class="c1"># not keep the source's buffers, so the check skips it.</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="n">int32_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">address</span> <span class="o">==</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">address</span><span class="p">,</span> <span class="s2">"got copied"</span>
+    <span class="n">bitmap</span><span class="p">,</span> <span class="n">int32_data</span> <span class="o">=</span> <span class="n">uniform_arrow_array_adapter</span><span class="p">(</span><span class="n">int32_array</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">):</span>
+        <span class="c1"># As in cast_64bit_date_arrow_to_numpy_array, the cast of a zero-length array drops its validity buffer, so the</span>
+        <span class="c1"># bitmap comes from the source.</span>
+        <span class="n">bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">0</span><span class="p">],</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">int32_data</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"datetime64[D]"</span><span class="p">))</span>
+    <span class="c1"># astype copies the values into new memory, which the assert checks. numpy can give two empty arrays the same</span>
+    <span class="c1"># address, so the check skips a zero-length array.</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="n">int32_data</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span> <span class="o">!=</span> <span class="n">data</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span>
+    <span class="n">data</span><span class="o">.</span><span class="n">flags</span><span class="o">.</span><span class="n">writeable</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span>
+
+
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">Date64Array</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Date64Array</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">cast_64bit_date_arrow_to_numpy_array</span><span class="p">(</span><span class="n">pa_array</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">"datetime64[ms]"</span><span class="p">))</span>
+
+
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">lib</span><span class="o">.</span><span class="n">DoubleArray</span><span class="p">)</span>
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">Int32Array</span><span class="p">)</span>
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">Int64Array</span><span class="p">)</span>
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">UInt8Array</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">lib</span><span class="o">.</span><span class="n">DoubleArray</span> <span class="o">|</span> <span class="n">pa</span><span class="o">.</span><span class="n">Int32Array</span> <span class="o">|</span> <span class="n">pa</span><span class="o">.</span><span class="n">Int64Array</span> <span class="o">|</span> <span class="n">pa</span><span class="o">.</span><span class="n">UInt8Array</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">uniform_arrow_array_adapter</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+
+
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">ListArray</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">ListArray</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">structured_list_array_adapter</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+
+
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">structured_array_adapter</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+
+
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">LargeStringArray</span><span class="p">)</span>
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">StringArray</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StringArray</span> <span class="o">|</span> <span class="n">pa</span><span class="o">.</span><span class="n">LargeStringArray</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">create_str_array</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+
+
+<span class="nd">@arrow_array_adapter</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">TimestampArray</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">TimestampArray</span><span class="p">):</span>
+    <span class="n">timestamp_type</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">TimestampType</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">type</span>
+    <span class="n">timestamp_unit</span> <span class="o">=</span> <span class="n">timestamp_type</span><span class="o">.</span><span class="n">unit</span>
+    <span class="k">return</span> <span class="n">cast_64bit_date_arrow_to_numpy_array</span><span class="p">(</span><span class="n">pa_array</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="sa">f</span><span class="s2">"datetime64[</span><span class="si">{</span><span class="n">timestamp_unit</span><span class="si">}</span><span class="s2">]"</span><span class="p">))</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

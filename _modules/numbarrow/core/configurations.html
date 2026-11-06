@@ -1,0 +1,229 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.configurations &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/core/configurations.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.configurations</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.core.configurations</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""numbarrow's njit options, and the decorator that compiles numbarrow's functions with them.</span>
+
+<span class="sd">:func:`get_jit_options` reads the options from the ``NUMBARROW_JIT_OPTIONS`` environment variable, and ``jit_options``</span>
+<span class="sd">holds what it returned when this module was first imported. Every function that numbarrow compiles goes through</span>
+<span class="sd">:func:`jit_with_options`, which passes ``jit_options`` to numba's ``njit``. If numba cannot cache a function, the</span>
+<span class="sd">decorator compiles it without a cache and warns.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+
+
+<span class="c1">#: The text that begins the ``ValueError`` message for a ``NUMBARROW_JIT_OPTIONS`` value that is not a JSON object.</span>
+<span class="n">invalid_jit_options_err</span> <span class="o">=</span> <span class="p">(</span>
+<span class="w">    </span><span class="sd">"""NUMBARROW_JIT_OPTIONS must be a JSON object, e.g., export NUMBARROW_JIT_OPTIONS='{"cache": false}'"""</span>
+<span class="p">)</span>
+
+
+<div class="viewcode-block" id="get_jit_options">
+<a class="viewcode-back" href="../../../numbarrow.core.configurations.html#numbarrow.core.configurations.get_jit_options">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_jit_options</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return the njit options that ``NUMBARROW_JIT_OPTIONS`` sets, or ``{"cache": True}`` if it is unset or empty.</span>
+
+<span class="sd">    The variable holds a JSON object, whose entries numbarrow passes to ``njit`` as keyword arguments, unchanged::</span>
+
+<span class="sd">        export NUMBARROW_JIT_OPTIONS='{"cache": false}'</span>
+
+<span class="sd">    The object replaces the default instead of adding to it, so ``'{}'`` turns caching off. A value that is not a JSON</span>
+<span class="sd">    object raises ``ValueError``. So does a ``"cache"`` that is not ``true`` or ``false``, and a string for any option</span>
+<span class="sd">    but ``"error_model"`` and ``"inline"``, the two options that take a string. numba reads a non-empty string as true</span>
+<span class="sd">    for a boolean option, so ``{"boundscheck": "false"}`` would turn bounds checks on.</span>
+
+<span class="sd">    The function reads the variable each time it is called. The decorators use ``jit_options`` instead, which holds</span>
+<span class="sd">    what the function returned when this module was first imported.</span>
+
+<span class="sd">    The key under which numba's on-disk cache stores compiled code does not include the options that the code was</span>
+<span class="sd">    compiled with. A run that asks for other options therefore loads the code that an earlier run cached:</span>
+<span class="sd">    ``{"cache": true, "boundscheck": true}`` over a cache filled under the default options loads code without bounds</span>
+<span class="sd">    checks. Point ``NUMBA_CACHE_DIR`` at a new directory when an option changes.</span>
+<span class="sd">    """</span>
+    <span class="n">as_str</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"NUMBARROW_JIT_OPTIONS"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">as_str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">"cache"</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">as_json</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">as_str</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">invalid_jit_options_err</span><span class="si">}</span><span class="s2">; </span><span class="si">{</span><span class="n">as_str</span><span class="si">!r}</span><span class="s2"> is not valid JSON: </span><span class="si">{</span><span class="n">error</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="kc">None</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">as_json</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">invalid_jit_options_err</span><span class="si">}</span><span class="s2">; </span><span class="si">{</span><span class="n">as_str</span><span class="si">!r}</span><span class="s2"> is valid JSON but a </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">as_json</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, not an object"</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="s2">"cache"</span> <span class="ow">in</span> <span class="n">as_json</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">as_json</span><span class="p">[</span><span class="s2">"cache"</span><span class="p">],</span> <span class="nb">bool</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">'NUMBARROW_JIT_OPTIONS "cache" must be true or false, not </span><span class="si">{</span><span class="n">as_json</span><span class="p">[</span><span class="s2">"cache"</span><span class="p">]</span><span class="si">!r}</span><span class="s1">: numba reads any '</span>
+            <span class="sa">f</span><span class="s2">"non-empty string as true"</span>
+        <span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">as_json</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"error_model"</span><span class="p">,</span> <span class="s2">"inline"</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">'NUMBARROW_JIT_OPTIONS "</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s1">" cannot be the string </span><span class="si">{</span><span class="n">value</span><span class="si">!r}</span><span class="s1">: numba reads any non-empty string '</span>
+                <span class="sa">f</span><span class="s1">'as true, and only "error_model" and "inline" take a string'</span>
+            <span class="p">)</span>
+    <span class="k">return</span> <span class="n">as_json</span></div>
+
+
+
+<span class="c1">#: The njit options that :func:`jit_with_options` passes to numba: what :func:`get_jit_options` returned when this</span>
+<span class="c1">#: module was first imported.</span>
+<span class="n">jit_options</span> <span class="o">=</span> <span class="n">get_jit_options</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="jit_with_options">
+<a class="viewcode-back" href="../../../numbarrow.core.configurations.html#numbarrow.core.configurations.jit_with_options">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">jit_with_options</span><span class="p">(</span><span class="n">signature</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a decorator that compiles a function for ``signature`` with numba's ``njit`` and ``jit_options``.</span>
+
+<span class="sd">    numba compiles the function when the decorator is applied, because the signature is given. If caching is on and</span>
+<span class="sd">    numba cannot cache the function, the decorator compiles it without a cache and issues a ``RuntimeWarning``. That</span>
+<span class="sd">    happens for a read-only install, where numba can write neither in numbarrow's own directory nor in the user's</span>
+<span class="sd">    cache directory, unless ``NUMBA_CACHE_DIR`` names a directory that it can write. It also happens for an import</span>
+<span class="sd">    from an archive, such as an ``.egg`` that ``spark-submit --py-files`` puts on the workers' path, or a ``.whl`` or</span>
+<span class="sd">    ``.pyz`` file placed on ``sys.path``. From version 0.61, numba caches a module imported from a ``.zip`` and writes</span>
+<span class="sd">    the cache to the user's cache directory. The decorator then warns only if that directory cannot be written.</span>
+
+<span class="sd">    The warning names a way to a cache. For a source file on disk, that is ``NUMBA_CACHE_DIR`` set to a writable</span>
+<span class="sd">    directory. numba ignores ``NUMBA_CACHE_DIR`` for a module in an archive, so there the warning names an unpacked</span>
+<span class="sd">    install or a ``.zip`` instead. In either case, ``NUMBARROW_JIT_OPTIONS='{"cache": false}'`` turns caching off and</span>
+<span class="sd">    silences the warning. Any other error propagates, and so does every error with caching off.</span>
+<span class="sd">    """</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">decorate</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">njit</span><span class="p">(</span><span class="n">signature</span><span class="p">,</span> <span class="o">**</span><span class="n">jit_options</span><span class="p">)(</span><span class="n">func</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">RuntimeError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+            <span class="c1"># numba looks for a cache directory that it can write when the function is decorated, and raises</span>
+            <span class="c1"># RuntimeError with "no locator available" if it finds none. For a .zip, numba 0.61 and later take the</span>
+            <span class="c1"># user's cache directory without that check, and the first save into it raises OSError instead. That save</span>
+            <span class="c1"># happens during the decoration too, because numba compiles a function with an explicit signature at once.</span>
+            <span class="n">cache_failed</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">"no locator available"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
+            <span class="c1"># Another RuntimeError, or any error with caching off, is not the cache's and propagates. The decorator</span>
+            <span class="c1"># treats every OSError as the cache's; if one has another cause, the compilation without a cache below</span>
+            <span class="c1"># raises it again.</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">cache_failed</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cache"</span><span class="p">):</span>
+                <span class="k">raise</span>
+            <span class="n">silence</span> <span class="o">=</span> <span class="s2">"NUMBARROW_JIT_OPTIONS='{</span><span class="se">\"</span><span class="s2">cache</span><span class="se">\"</span><span class="s2">: false}' to turn caching off and silence this warning"</span>
+            <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">inspect</span><span class="o">.</span><span class="n">getfile</span><span class="p">(</span><span class="n">func</span><span class="p">)):</span>
+                <span class="n">remedy</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"Set NUMBA_CACHE_DIR to a writable directory, or </span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># numba reads NUMBA_CACHE_DIR only for a function whose source file is on disk. For a module in an</span>
+                <span class="c1"># archive, the warning names an unpacked install or a .zip instead. numba 0.61 and later cache a module</span>
+                <span class="c1"># from an archive only if a part of its path ends in .zip, so a .whl, .pyz or .egg is not cached,</span>
+                <span class="c1"># although each is a zip file.</span>
+                <span class="n">remedy</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="s2">"NUMBA_CACHE_DIR has no effect here, because the source is not a file on disk: to cache, "</span>
+                    <span class="s2">"install numbarrow unpacked or import it from a .zip, which numba 0.61 and later cache in the "</span>
+                    <span class="sa">f</span><span class="s2">"user's cache directory. Set </span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+                <span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"numba cannot cache </span><span class="si">{</span><span class="n">func</span><span class="o">.</span><span class="vm">__qualname__</span><span class="si">}</span><span class="s2"> here (</span><span class="si">{</span><span class="n">error</span><span class="si">}</span><span class="s2">); it compiles without a cache. </span><span class="si">{</span><span class="n">remedy</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+                <span class="ne">RuntimeWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="n">njit</span><span class="p">(</span><span class="n">signature</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="o">**</span><span class="n">jit_options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">})(</span><span class="n">func</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">decorate</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

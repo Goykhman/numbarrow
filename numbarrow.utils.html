@@ -1,0 +1,306 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.utils &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/numbarrow.utils.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="numbarrow.core.configurations" href="numbarrow.core.configurations.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">API reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.adapters.html">numbarrow.core.adapters</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.is_null.html">numbarrow.core.is_null</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.mapinarrow_factory.html">numbarrow.core.mapinarrow_factory</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.configurations.html">numbarrow.core.configurations</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbarrow.utils</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#numbarrow-utils-utils">numbarrow.utils.utils</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#overview">Overview</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#numbarrow-utils-arrow-array-utils">numbarrow.utils.arrow_array_utils</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#id1">Overview</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">API reference</a></li>
+      <li class="breadcrumb-item active">numbarrow.utils</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbarrow.utils.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbarrow-utils">
+<h1>numbarrow.utils<a class="headerlink" href="#numbarrow-utils" title="Link to this heading"></a></h1>
+<p>The two modules of this package hold the code that <a class="reference internal" href="numbarrow.core.adapters.html"><span class="doc">numbarrow.core.adapters</span></a> is built on. Most programs need
+neither: <a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> chooses the right conversion, and the arrays it returns
+stay valid for as long as the caller holds them.</p>
+<section id="numbarrow-utils-utils">
+<h2>numbarrow.utils.utils<a class="headerlink" href="#numbarrow-utils-utils" title="Link to this heading"></a></h2>
+<section id="overview">
+<h3>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h3>
+<p>The functions of this module let compiled code view raw memory as a numpy array. The dict <code class="docutils literal notranslate"><span class="pre">arrays_viewers</span></code> maps a
+numpy dtype to a jitted function, called a viewer, that takes a memory address and an element count. The viewer returns
+a numpy array of that dtype over the memory at the address, without a copy. The adapters pass a viewer the <code class="docutils literal notranslate"><span class="pre">address</span></code>
+of a <code class="docutils literal notranslate"><span class="pre">pyarrow.Buffer</span></code>, such as a validity buffer or the offsets of a string array, and they return copies, never the
+viewer’s array itself. <code class="docutils literal notranslate"><span class="pre">arrays_viewers</span></code> compiles a viewer the first time its dtype is requested and keeps it for the
+rest of the process.</p>
+<p>A viewer’s array does not own its memory, does not keep that memory alive, and is not read-only. The array is valid
+only while that memory stays allocated, and a write through it changes the memory.
+<a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> returns read-only arrays that stay valid while you hold them: a
+view that keeps its Arrow buffer alive, or a copy that owns its memory. Use the adapter unless your code manages the
+memory itself.</p>
+<p id="module-numbarrow.utils.utils">Compiled functions, called viewers, that return a numpy array over the memory at a raw address without a copy.</p>
+<p>A viewer takes an address, such as <code class="docutils literal notranslate"><span class="pre">pyarrow.Buffer.address</span></code>, and a number of elements, and returns a one-dimensional
+numpy array of one dtype over the memory there. <a class="reference internal" href="#numbarrow.utils.utils.numpy_array_from_ptr_factory" title="numbarrow.utils.utils.numpy_array_from_ptr_factory"><code class="xref py py-func docutils literal notranslate"><span class="pre">numpy_array_from_ptr_factory()</span></code></a> compiles the viewer for a dtype,
+and <code class="docutils literal notranslate"><span class="pre">arrays_viewers</span></code> keeps one viewer per key, such as <code class="docutils literal notranslate"><span class="pre">np.uint8</span></code>, compiled the first time the key is requested. The
+array that a viewer returns does not keep the memory alive, and it is writable. The adapters in
+<a class="reference internal" href="#module-numbarrow.utils.arrow_array_utils" title="numbarrow.utils.arrow_array_utils"><code class="xref py py-mod docutils literal notranslate"><span class="pre">numbarrow.utils.arrow_array_utils</span></code></a> and <a class="reference internal" href="numbarrow.core.adapters.html#module-numbarrow.core.adapters" title="numbarrow.core.adapters"><code class="xref py py-mod docutils literal notranslate"><span class="pre">numbarrow.core.adapters</span></code></a> therefore use viewers only to read
+validity bitmaps, packed booleans and string offsets, and they return copies, never the views themselves.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.utils.utils.numpy_array_from_ptr_factory">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.utils.utils.</span></span><span class="sig-name descname"><span class="pre">numpy_array_from_ptr_factory</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dtype_</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/utils/utils.html#numpy_array_from_ptr_factory"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.utils.numpy_array_from_ptr_factory" title="Link to this definition"></a></dt>
+<dd><p>Compile and return the viewer for <code class="docutils literal notranslate"><span class="pre">dtype_</span></code>: a function that views the memory at an address as a numpy array.</p>
+<p>The viewer takes <code class="docutils literal notranslate"><span class="pre">(ptr_as_int,</span> <span class="pre">sz)</span></code>, typed <code class="docutils literal notranslate"><span class="pre">intp</span></code> and <code class="docutils literal notranslate"><span class="pre">int64</span></code>, and returns a one-dimensional C-contiguous
+array of <code class="docutils literal notranslate"><span class="pre">sz</span></code> elements of <code class="docutils literal notranslate"><span class="pre">dtype_</span></code> that starts at the address <code class="docutils literal notranslate"><span class="pre">ptr_as_int</span></code>. <code class="docutils literal notranslate"><span class="pre">dtype_</span></code> is anything that
+<code class="docutils literal notranslate"><span class="pre">numpy.dtype</span></code> accepts and numba supports, a structured dtype included; the object dtype fails to compile. The
+factory compiles the viewer under numbarrow’s jit options, as
+<a class="reference internal" href="numbarrow.core.configurations.html#numbarrow.core.configurations.jit_with_options" title="numbarrow.core.configurations.jit_with_options"><code class="xref py py-func docutils literal notranslate"><span class="pre">jit_with_options()</span></code></a> describes, and each call builds a new viewer;
+<code class="docutils literal notranslate"><span class="pre">arrays_viewers</span></code> builds one per key and keeps it.</p>
+<p>The viewer copies nothing. Its array views the memory at the address without keeping that memory alive, and the
+array is writable. Reading it after the memory is freed is undefined behavior, and a write through it changes the
+memory. <a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> is the supported way to view an Arrow array, because
+it returns read-only arrays that keep their Arrow buffers alive.</p>
+</dd></dl>
+
+</section>
+</section>
+<section id="numbarrow-utils-arrow-array-utils">
+<h2>numbarrow.utils.arrow_array_utils<a class="headerlink" href="#numbarrow-utils-arrow-array-utils" title="Link to this heading"></a></h2>
+<section id="id1">
+<h3>Overview<a class="headerlink" href="#id1" title="Link to this heading"></a></h3>
+<p>This module holds the conversions that <a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> calls for numeric, string,
+struct and list arrays. <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.uniform_arrow_array_adapter" title="numbarrow.utils.arrow_array_utils.uniform_arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">uniform_arrow_array_adapter()</span></code></a> views an array of
+fixed-width values, and <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.create_str_array" title="numbarrow.utils.arrow_array_utils.create_str_array"><code class="xref py py-func docutils literal notranslate"><span class="pre">create_str_array()</span></code></a> copies a string array into
+fixed-width Unicode. <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.structured_array_adapter" title="numbarrow.utils.arrow_array_utils.structured_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">structured_array_adapter()</span></code></a> converts a struct array field
+by field, and <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.structured_list_array_adapter" title="numbarrow.utils.arrow_array_utils.structured_list_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">structured_list_array_adapter()</span></code></a> converts a list of structs. Each
+of them copies the validity bitmap with <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.create_bitmap" title="numbarrow.utils.arrow_array_utils.create_bitmap"><code class="xref py py-func docutils literal notranslate"><span class="pre">create_bitmap()</span></code></a>, which takes an Arrow
+buffer, an offset and a length rather than an array.</p>
+<p>Each of the four conversions takes the pyarrow array directly, but <code class="docutils literal notranslate"><span class="pre">arrow_array_adapter</span></code> is the function to call: it
+chooses the conversion by the class of the array and accepts every supported type. The reference below documents what
+each function returns and what it raises.</p>
+<p id="module-numbarrow.utils.arrow_array_utils">Functions that adapt pyarrow arrays of several layouts to numpy arrays, and helpers for readable error messages.</p>
+<p><a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> picks one of these adapters by the type of the array it is given.
+Each adapter returns the array’s data and its validity bitmap: a uint8 array of one bit per element, which
+<a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null" title="numbarrow.core.is_null.is_null"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null()</span></code></a> reads, or None for an array without one. <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.uniform_arrow_array_adapter" title="numbarrow.utils.arrow_array_utils.uniform_arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">uniform_arrow_array_adapter()</span></code></a>
+views fixed-width data without a copy, and <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.create_str_array" title="numbarrow.utils.arrow_array_utils.create_str_array"><code class="xref py py-func docutils literal notranslate"><span class="pre">create_str_array()</span></code></a> copies strings into a fixed-width Unicode array.
+<a class="reference internal" href="#numbarrow.utils.arrow_array_utils.structured_array_adapter" title="numbarrow.utils.arrow_array_utils.structured_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">structured_array_adapter()</span></code></a> and <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.structured_list_array_adapter" title="numbarrow.utils.arrow_array_utils.structured_list_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">structured_list_array_adapter()</span></code></a> adapt a struct array and a list of structs
+field by field. <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.create_bitmap" title="numbarrow.utils.arrow_array_utils.create_bitmap"><code class="xref py py-func docutils literal notranslate"><span class="pre">create_bitmap()</span></code></a> copies a validity bitmap. <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.type_repr" title="numbarrow.utils.arrow_array_utils.type_repr"><code class="xref py py-func docutils literal notranslate"><span class="pre">type_repr()</span></code></a>, <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.renamed" title="numbarrow.utils.arrow_array_utils.renamed"><code class="xref py py-func docutils literal notranslate"><span class="pre">renamed()</span></code></a> and
+<a class="reference internal" href="#numbarrow.utils.arrow_array_utils.MissingKeyError" title="numbarrow.utils.arrow_array_utils.MissingKeyError"><code class="xref py py-class docutils literal notranslate"><span class="pre">MissingKeyError</span></code></a> keep the error messages of numbarrow short and readable.</p>
+<dl class="py exception">
+<dt class="sig sig-object py" id="numbarrow.utils.arrow_array_utils.MissingKeyError">
+<em class="property"><span class="pre">exception</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbarrow.utils.arrow_array_utils.</span></span><span class="sig-name descname"><span class="pre">MissingKeyError</span></span><a class="reference internal" href="_modules/numbarrow/utils/arrow_array_utils.html#MissingKeyError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.arrow_array_utils.MissingKeyError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">KeyError</span></code></p>
+<p>A <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> whose message prints as written, without the quotes that a plain <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> adds.</p>
+<p>A plain <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> prints the repr of its one argument, so a sentence raised through it prints inside a second
+pair of quotes, and a sentence that holds quotes of its own can print with backslashes before them.
+<code class="docutils literal notranslate"><span class="pre">except</span> <span class="pre">KeyError</span></code> still catches a <code class="docutils literal notranslate"><span class="pre">MissingKeyError</span></code>; only the printed message differs. With no argument or with
+several, it prints as a plain <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> does.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.utils.arrow_array_utils.create_bitmap">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.utils.arrow_array_utils.</span></span><span class="sig-name descname"><span class="pre">create_bitmap</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bitmap_buf</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Buffer</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">offset</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">length</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/utils/arrow_array_utils.html#create_bitmap"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.arrow_array_utils.create_bitmap" title="Link to this definition"></a></dt>
+<dd><p>Copy the validity bits of <code class="docutils literal notranslate"><span class="pre">length</span></code> elements, from element <code class="docutils literal notranslate"><span class="pre">offset</span></code> on, into a new uint8 array.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bitmap_buf</span></code> is an Arrow validity buffer, such as <code class="docutils literal notranslate"><span class="pre">array.buffers()[0]</span></code>, and <code class="docutils literal notranslate"><span class="pre">offset</span></code> and <code class="docutils literal notranslate"><span class="pre">length</span></code> are
+usually the array’s own. A <code class="docutils literal notranslate"><span class="pre">bitmap_buf</span></code> of <code class="docutils literal notranslate"><span class="pre">None</span></code> means that the array carries no validity buffer, and the
+result is then <code class="docutils literal notranslate"><span class="pre">None</span></code>. Otherwise the result holds one bit per element, from the least significant bit of its first
+byte on: bit <code class="docutils literal notranslate"><span class="pre">i</span></code> is 1 if element <code class="docutils literal notranslate"><span class="pre">offset</span> <span class="pre">+</span> <span class="pre">i</span></code> is valid, that is, not null, and 0 if it is null. This is the
+layout that <a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null" title="numbarrow.core.is_null.is_null"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null()</span></code></a> reads. The result has <code class="docutils literal notranslate"><span class="pre">(length</span> <span class="pre">+</span> <span class="pre">7)</span> <span class="pre">//</span> <span class="pre">8</span></code> bytes, none for a
+<code class="docutils literal notranslate"><span class="pre">length</span></code> of 0, and the bits after the last element have no defined value. The result owns its memory, so it stays
+correct after the Arrow array is freed. It is writable, and a write to it leaves the Arrow array unchanged.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.utils.arrow_array_utils.create_str_array">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.utils.arrow_array_utils.</span></span><span class="sig-name descname"><span class="pre">create_str_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_str_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StringArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">LargeStringArray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/numbarrow/utils/arrow_array_utils.html#create_str_array"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.arrow_array_utils.create_str_array" title="Link to this definition"></a></dt>
+<dd><p>Copy a string array into a read-only numpy array of fixed-width Unicode strings; return <code class="docutils literal notranslate"><span class="pre">(bitmap,</span> <span class="pre">data)</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bitmap</span></code> is the array’s validity bitmap from <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.create_bitmap" title="numbarrow.utils.arrow_array_utils.create_bitmap"><code class="xref py py-func docutils literal notranslate"><span class="pre">create_bitmap()</span></code></a>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if the array carries no validity
+buffer. <code class="docutils literal notranslate"><span class="pre">data</span></code> holds one string per element, and an empty string for a null element. Its width is the length, in
+characters, of the longest valid value, and at least one. Every element takes four bytes per character of that
+width, so one long value makes the whole array large. The bytes under a null element are never decoded and do not
+count toward the width.</p>
+<p><code class="docutils literal notranslate"><span class="pre">ValueError</span></code> is raised if a valid value is not UTF-8, if a valid value ends in a NUL character, and if a non-empty
+array lacks its offsets or data buffer. numpy pads a shorter value with NUL characters, so a value’s trailing NUL
+would be lost; a NUL at the start or in the middle of a value is kept.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.utils.arrow_array_utils.renamed">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.utils.arrow_array_utils.</span></span><span class="sig-name descname"><span class="pre">renamed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">exc</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Exception</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">prefix</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Exception</span></span></span><a class="reference internal" href="_modules/numbarrow/utils/arrow_array_utils.html#renamed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.arrow_array_utils.renamed" title="Link to this definition"></a></dt>
+<dd><p>Return a new exception whose message is <code class="docutils literal notranslate"><span class="pre">prefix</span></code>, a colon and the message of <code class="docutils literal notranslate"><span class="pre">exc</span></code>.</p>
+<p>A <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> that is not a pyarrow error comes back as a <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.MissingKeyError" title="numbarrow.utils.arrow_array_utils.MissingKeyError"><code class="xref py py-class docutils literal notranslate"><span class="pre">MissingKeyError</span></code></a>, because a <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> prints
+the repr of its argument, and one rebuilt from that text would quote the message twice. Otherwise the result keeps
+the class of <code class="docutils literal notranslate"><span class="pre">exc</span></code> if <code class="docutils literal notranslate"><span class="pre">exc</span></code> is a pyarrow error, or if its class is exactly <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>, <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>,
+<code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> or <code class="docutils literal notranslate"><span class="pre">OverflowError</span></code>; each of these can be built from one string. Any other exception, a
+subclass of those four included, comes back as a <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>. A class such as <code class="docutils literal notranslate"><span class="pre">UnicodeDecodeError</span></code>, whose
+constructor takes five arguments, would raise a second error while the result is built, and the prefix would be
+lost. Raise the result <code class="docutils literal notranslate"><span class="pre">from</span> <span class="pre">exc</span></code> to keep the original traceback.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.utils.arrow_array_utils.structured_array_adapter">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.utils.arrow_array_utils.</span></span><span class="sig-name descname"><span class="pre">structured_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">struct_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StructArray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/numbarrow/utils/arrow_array_utils.html#structured_array_adapter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.arrow_array_utils.structured_array_adapter" title="Link to this definition"></a></dt>
+<dd><p>Adapt a struct array field by field; return <code class="docutils literal notranslate"><span class="pre">(struct_bitmap,</span> <span class="pre">bitmaps,</span> <span class="pre">datas)</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">struct_bitmap</span></code> is the validity bitmap of the struct’s rows, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if the struct carries no validity
+buffer. <code class="docutils literal notranslate"><span class="pre">bitmaps</span></code> and <code class="docutils literal notranslate"><span class="pre">datas</span></code> map each field name, in field order, to the field’s validity bitmap and its data,
+adapted by <a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> as an array of the field’s type. A field’s bitmap
+marks only the field’s own nulls, and it is <code class="docutils literal notranslate"><span class="pre">None</span></code> if the field carries no validity buffer. A row that is null as
+a whole need not be marked in a field’s bitmap, so pass both bitmaps to
+<a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null_struct" title="numbarrow.core.is_null.is_null_struct"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null_struct()</span></code></a>. Under such a row, a string field holds an empty string, and any
+other field holds whatever its buffer holds there.</p>
+<p>A field’s data is a read-only view of the field’s buffer if the field holds int32, int64, float64, uint8, date64 or
+timestamp values; the int64 values of a date64 or timestamp field need no conversion to <code class="docutils literal notranslate"><span class="pre">datetime64</span></code>. The data is
+a read-only copy for three kinds of field: numbarrow unpacks the bits of a boolean field,
+turns the int32 days of a date32 field into <code class="docutils literal notranslate"><span class="pre">datetime64[D]</span></code>, and copies a string field into fixed-width Unicode.</p>
+<p><code class="docutils literal notranslate"><span class="pre">TypeError</span></code> is raised if <code class="docutils literal notranslate"><span class="pre">struct_array</span></code> is not a <code class="docutils literal notranslate"><span class="pre">pyarrow.StructArray</span></code>. <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> is raised
+for repeated field names and for a field of a union type. A <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code>, <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>, <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>
+or pyarrow error from the adapter of a field, such as the error for an unsupported type, is raised again through
+<a class="reference internal" href="#numbarrow.utils.arrow_array_utils.renamed" title="numbarrow.utils.arrow_array_utils.renamed"><code class="xref py py-func docutils literal notranslate"><span class="pre">renamed()</span></code></a>, with <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">field</span> <span class="pre">'&lt;name&gt;'</span></code> and a colon in front of its message. A field that adapts but is
+itself a struct, a list of structs or a map raises <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.utils.arrow_array_utils.structured_list_array_adapter">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.utils.arrow_array_utils.</span></span><span class="sig-name descname"><span class="pre">structured_list_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">list_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ListArray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/numbarrow/utils/arrow_array_utils.html#structured_list_array_adapter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.arrow_array_utils.structured_list_array_adapter" title="Link to this definition"></a></dt>
+<dd><p>Adapt a list array of structs whose rows all have one length; return <code class="docutils literal notranslate"><span class="pre">(struct_bitmap,</span> <span class="pre">bitmaps,</span> <span class="pre">datas)</span></code>.</p>
+<p>The result is what <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.structured_array_adapter" title="numbarrow.utils.arrow_array_utils.structured_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">structured_array_adapter()</span></code></a> returns for the elements of all the array’s rows, in row order,
+so a field’s data is a view or a copy as that function describes. The result carries no offsets: element <code class="docutils literal notranslate"><span class="pre">k</span></code> of
+row <code class="docutils literal notranslate"><span class="pre">r</span></code> is at index <code class="docutils literal notranslate"><span class="pre">r</span> <span class="pre">*</span> <span class="pre">width</span> <span class="pre">+</span> <span class="pre">k</span></code>, where <code class="docutils literal notranslate"><span class="pre">width</span></code> is the common row length. <code class="docutils literal notranslate"><span class="pre">struct_bitmap</span></code> therefore marks
+null elements, not null rows. A <code class="docutils literal notranslate"><span class="pre">pyarrow.MapArray</span></code> is a list array whose elements are key and value structs, so
+it adapts to the two fields <code class="docutils literal notranslate"><span class="pre">key</span></code> and <code class="docutils literal notranslate"><span class="pre">value</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">TypeError</span></code> is raised if <code class="docutils literal notranslate"><span class="pre">list_array</span></code> is not a <code class="docutils literal notranslate"><span class="pre">pyarrow.ListArray</span></code>. <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> is raised if its
+elements are not structs, if a row is null, and if the rows differ in length, an empty row among longer ones
+included. Without offsets, the order of the elements alone cannot say which row an element belongs to.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.utils.arrow_array_utils.type_repr">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.utils.arrow_array_utils.</span></span><span class="sig-name descname"><span class="pre">type_repr</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arrow_type</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="_modules/numbarrow/utils/arrow_array_utils.html#type_repr"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.arrow_array_utils.type_repr" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">str(arrow_type)</span></code>; if it is longer than <code class="docutils literal notranslate"><span class="pre">TYPE_REPR_WIDTH</span></code> characters, cut it there and add a note.</p>
+<p>The note counts the characters cut and, for a struct type, the struct’s fields. A message that quotes a pyarrow type
+grows with the schema: the text of a struct of a thousand fields with short names runs to about 13,000 characters,
+and a message that long fills every log that records the traceback. A type whose text fits within the width, such
+as a struct of a few fields, comes back unchanged.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.utils.arrow_array_utils.uniform_arrow_array_adapter">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.utils.arrow_array_utils.</span></span><span class="sig-name descname"><span class="pre">uniform_arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Array</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/numbarrow/utils/arrow_array_utils.html#uniform_arrow_array_adapter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.utils.arrow_array_utils.uniform_arrow_array_adapter" title="Link to this definition"></a></dt>
+<dd><p>View the data of a fixed-width array as a read-only numpy array, without a copy; return <code class="docutils literal notranslate"><span class="pre">(bitmap,</span> <span class="pre">data)</span></code>.</p>
+<p>The array’s type must be one that <code class="docutils literal notranslate"><span class="pre">arrow_to_numpy_dtypes</span></code> maps to a numpy dtype: float64, int32, int64 or uint8.
+Any other type raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>, a boolean one included, because Arrow stores one bit per boolean value.
+A non-empty array without a data buffer raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> as well. <code class="docutils literal notranslate"><span class="pre">bitmap</span></code> is the array’s validity bitmap
+from <a class="reference internal" href="#numbarrow.utils.arrow_array_utils.create_bitmap" title="numbarrow.utils.arrow_array_utils.create_bitmap"><code class="xref py py-func docutils literal notranslate"><span class="pre">create_bitmap()</span></code></a>, or <code class="docutils literal notranslate"><span class="pre">None</span></code> if the array carries no validity buffer. <code class="docutils literal notranslate"><span class="pre">data</span></code> views the array’s data
+buffer from the array’s offset on, and it keeps that buffer alive.</p>
+<p><code class="docutils literal notranslate"><span class="pre">data</span></code> is read-only, because Arrow arrays are immutable, and its <code class="docutils literal notranslate"><span class="pre">WRITEABLE</span></code> flag cannot be set. pyarrow’s own
+<code class="docutils literal notranslate"><span class="pre">Array.to_numpy(zero_copy_only=True)</span></code> returns the same kind of view. A slice or reshape of <code class="docutils literal notranslate"><span class="pre">data</span></code> that an
+<code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> function returns is a new array whose flag can be set, and a store through it then changes the Arrow
+array. Declare a numba signature that receives <code class="docutils literal notranslate"><span class="pre">data</span></code> with <code class="docutils literal notranslate"><span class="pre">readonly=True</span></code>; such a signature accepts writable
+arrays as well.</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbarrow.core.configurations.html" class="btn btn-neutral float-left" title="numbarrow.core.configurations" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

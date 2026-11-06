@@ -1,0 +1,240 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.adapters &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/numbarrow.core.adapters.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbarrow.core.is_null" href="numbarrow.core.is_null.html" />
+    <link rel="prev" title="API reference" href="modules.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">API reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbarrow.core.adapters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbarrow.core.adapters">Module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.adapters.arrow_array_adapter"><code class="docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array"><code class="docutils literal notranslate"><span class="pre">cast_64bit_date_arrow_to_numpy_array()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.is_null.html">numbarrow.core.is_null</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.mapinarrow_factory.html">numbarrow.core.mapinarrow_factory</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.configurations.html">numbarrow.core.configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.utils.html">numbarrow.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">API reference</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.adapters</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbarrow.core.adapters.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbarrow-core-adapters">
+<h1>numbarrow.core.adapters<a class="headerlink" href="#numbarrow-core-adapters" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>numba cannot compile a function that takes a <code class="docutils literal notranslate"><span class="pre">pyarrow.Array</span></code>. <a class="reference internal" href="#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a>
+converts such an array into a pair of numpy arrays, <code class="docutils literal notranslate"><span class="pre">(bitmap,</span> <span class="pre">data)</span></code>, that an <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> function can take: the
+validity bitmap that marks the null rows, and the values. Call it outside jitted code, once per array, and pass the
+results to the jitted function:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.adapters</span><span class="w"> </span><span class="kn">import</span> <span class="n">arrow_array_adapter</span>
+
+<span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">arrow_array_adapter</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.5</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">]))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>   <span class="c1"># [5] [1.5 0.  4. ]</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">bitmap</span></code> is a <code class="docutils literal notranslate"><span class="pre">uint8</span></code> array with one bit per row, set for a valid row. In the example, <code class="docutils literal notranslate"><span class="pre">[5]</span></code> is <code class="docutils literal notranslate"><span class="pre">0b101</span></code>: rows
+0 and 2 are valid, and row 1 is null. <code class="docutils literal notranslate"><span class="pre">bitmap</span></code> is <code class="docutils literal notranslate"><span class="pre">None</span></code> when the array has no validity buffer, the Arrow memory
+that marks its nulls, so code that reads a bitmap must accept <code class="docutils literal notranslate"><span class="pre">None</span></code> as well as an array. <code class="docutils literal notranslate"><span class="pre">data</span></code> is a read-only
+numpy array. For a fixed-width type such as <code class="docutils literal notranslate"><span class="pre">int64</span></code>, <code class="docutils literal notranslate"><span class="pre">float64</span></code> or a timestamp, it is a view of the Arrow buffer,
+and it keeps that buffer alive. For booleans, <code class="docutils literal notranslate"><span class="pre">date32</span></code> values and strings, which numpy stores differently, it is a
+copy.</p>
+<p>A <code class="docutils literal notranslate"><span class="pre">StructArray</span></code> converts to a 3-tuple instead: the struct’s own bitmap, then two dicts keyed by field name, one of
+field bitmaps and one of field data. A <code class="docutils literal notranslate"><span class="pre">ListArray</span></code> whose elements are structs converts to the same 3-tuple, over the
+elements of all its rows, and its first item marks null elements rather than null rows. The adapter keeps the struct’s
+bitmap apart from the field bitmaps, so pass both to <a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null_struct" title="numbarrow.core.is_null.is_null_struct"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null_struct()</span></code></a>.
+<a class="reference internal" href="numbarrow.core.mapinarrow_factory.html#numbarrow.core.mapinarrow_factory.make_mapinarrow_func" title="numbarrow.core.mapinarrow_factory.make_mapinarrow_func"><code class="xref py py-func docutils literal notranslate"><span class="pre">make_mapinarrow_func()</span></code></a> combines them for the function it calls instead.</p>
+<p>The function accepts the array classes that the README lists, and their subclasses. A <code class="docutils literal notranslate"><span class="pre">MapArray</span></code>, for example, is a
+<code class="docutils literal notranslate"><span class="pre">ListArray</span></code> of structs with the fields <code class="docutils literal notranslate"><span class="pre">key</span></code> and <code class="docutils literal notranslate"><span class="pre">value</span></code>, and it converts as one. Any other array, and any object
+that is not a pyarrow array, raises <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> with the type in the message.</p>
+<p>The README’s <a class="reference external" href="https://github.com/Goykhman/numbarrow#supported-types">Supported Types</a> section has the table of classes and what each becomes. Its subsections cover what code
+that reads the results must handle: <a class="reference external" href="https://github.com/Goykhman/numbarrow#nulls-and-validity-bitmaps">nulls and validity bitmaps</a>, <a class="reference external" href="https://github.com/Goykhman/numbarrow#strings">strings</a>, <a class="reference external" href="https://github.com/Goykhman/numbarrow#timestamps-and-time-zones">timestamps and time zones</a>,
+<a class="reference external" href="https://github.com/Goykhman/numbarrow#structs-lists-of-structs-and-maps">structs, lists of structs and maps</a>, <a class="reference external" href="https://github.com/Goykhman/numbarrow#read-only-arrays">read-only arrays</a> and <a class="reference external" href="https://github.com/Goykhman/numbarrow#explicit-signatures">explicit signatures</a>.</p>
+</section>
+<section id="module-numbarrow.core.adapters">
+<span id="module"></span><h2>Module<a class="headerlink" href="#module-numbarrow.core.adapters" title="Link to this heading"></a></h2>
+<p>The adapters that turn pyarrow arrays into numpy arrays for numba-compiled code.</p>
+<p><a class="reference internal" href="#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> takes a pyarrow array and returns its validity bitmap and its values as numpy arrays, which
+an <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> function can take as arguments. It dispatches on the class of the array, with
+<code class="xref py py-func docutils literal notranslate"><span class="pre">functools.singledispatch()</span></code>, to a handler registered in this module. The values of an <code class="docutils literal notranslate"><span class="pre">int32</span></code>, <code class="docutils literal notranslate"><span class="pre">int64</span></code>,
+<code class="docutils literal notranslate"><span class="pre">float64</span></code>, <code class="docutils literal notranslate"><span class="pre">uint8</span></code>, <code class="docutils literal notranslate"><span class="pre">date64</span></code> or timestamp array come back as a view of the Arrow buffer. Booleans, <code class="docutils literal notranslate"><span class="pre">date32</span></code>
+values and strings are copied, because numpy lays them out differently. <a class="reference internal" href="#numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array" title="numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array"><code class="xref py py-func docutils literal notranslate"><span class="pre">cast_64bit_date_arrow_to_numpy_array()</span></code></a>
+is the <code class="docutils literal notranslate"><span class="pre">datetime64</span></code> view that the <code class="docutils literal notranslate"><span class="pre">date64</span></code> and timestamp handlers share, and
+<a class="reference internal" href="numbarrow.utils.html#module-numbarrow.utils.arrow_array_utils" title="numbarrow.utils.arrow_array_utils"><code class="xref py py-mod docutils literal notranslate"><span class="pre">numbarrow.utils.arrow_array_utils</span></code></a> holds the functions that adapt numeric, string, struct and list arrays.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.core.adapters.arrow_array_adapter">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Array</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/core/adapters.html#arrow_array_adapter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.adapters.arrow_array_adapter" title="Link to this definition"></a></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">BooleanArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Date32Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Date64Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DoubleArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int32Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int64Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">UInt8Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DoubleArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int32Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int64Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">UInt8Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DoubleArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int32Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int64Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">UInt8Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DoubleArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int32Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Int64Array</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">UInt8Array</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ListArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StructArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StringArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">LargeStringArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StringArray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">LargeStringArray</span></span></em><span class="sig-paren">)</span></dt>
+<dt class="sig sig-object py">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">arrow_array_adapter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TimestampArray</span></span></em><span class="sig-paren">)</span></dt>
+<dd><p>Return the validity bitmap and the values of a pyarrow array as numpy arrays for numba-compiled code.</p>
+<p>The function dispatches on the class of <code class="docutils literal notranslate"><span class="pre">pa_array</span></code>, and a subclass of a registered class takes that class’s
+handler: a <code class="docutils literal notranslate"><span class="pre">MapArray</span></code> adapts as the <code class="docutils literal notranslate"><span class="pre">ListArray</span></code> of key and value structs that it is. For the following classes,
+the result is <code class="docutils literal notranslate"><span class="pre">(bitmap,</span> <span class="pre">data)</span></code>:</p>
+<ul class="simple">
+<li><p>An <code class="docutils literal notranslate"><span class="pre">Int32Array</span></code>, <code class="docutils literal notranslate"><span class="pre">Int64Array</span></code>, <code class="docutils literal notranslate"><span class="pre">DoubleArray</span></code> or <code class="docutils literal notranslate"><span class="pre">UInt8Array</span></code> gives a view of its values.</p></li>
+<li><p>A <code class="docutils literal notranslate"><span class="pre">Date64Array</span></code> or <code class="docutils literal notranslate"><span class="pre">TimestampArray</span></code> gives a <code class="docutils literal notranslate"><span class="pre">datetime64</span></code> view at its own unit, <code class="docutils literal notranslate"><span class="pre">ms</span></code> for a <code class="docutils literal notranslate"><span class="pre">date64</span></code>. A
+timestamp’s time zone is dropped: the values are the UTC instants that Arrow stores, as pyarrow’s <code class="docutils literal notranslate"><span class="pre">to_numpy</span></code>
+returns them.</p></li>
+<li><p>A <code class="docutils literal notranslate"><span class="pre">BooleanArray</span></code> gives a copy as <code class="docutils literal notranslate"><span class="pre">bool_</span></code>, and a <code class="docutils literal notranslate"><span class="pre">Date32Array</span></code> a copy as <code class="docutils literal notranslate"><span class="pre">datetime64[D]</span></code>.</p></li>
+<li><p>A <code class="docutils literal notranslate"><span class="pre">StringArray</span></code> or <code class="docutils literal notranslate"><span class="pre">LargeStringArray</span></code> gives a copy as a fixed-width numpy unicode array, as many characters
+wide as its longest non-null value, and at least one. The width differs from one array to the next, as between
+two batches of a Spark column, so compile a numba function that takes the strings lazily, without a signature.</p></li>
+</ul>
+<p>For a <code class="docutils literal notranslate"><span class="pre">StructArray</span></code>, and for a <code class="docutils literal notranslate"><span class="pre">ListArray</span></code> whose elements are structs, the result is
+<code class="docutils literal notranslate"><span class="pre">(struct_bitmap,</span> <span class="pre">bitmaps,</span> <span class="pre">datas)</span></code>: the struct’s own bitmap, then two dicts that map each field’s name to the
+field’s bitmap and to its values, each adapted as above. A field’s bitmap need not mark the struct’s null rows, so
+pass it with <code class="docutils literal notranslate"><span class="pre">struct_bitmap</span></code> to <a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null_struct" title="numbarrow.core.is_null.is_null_struct"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null_struct()</span></code></a>. For a list array, the values are
+the elements of all its rows in order, without the offsets that separate the rows.</p>
+<p>A bitmap is None if the array has no validity buffer, and every value is then valid. Otherwise it is a writable
+uint8 array that owns its memory, with the bit of element 0 first, even for a slice. An array without nulls can
+still have a validity buffer: a <code class="docutils literal notranslate"><span class="pre">slice</span></code>, <code class="docutils literal notranslate"><span class="pre">take</span></code> or <code class="docutils literal notranslate"><span class="pre">filter</span></code> of an array that has one keeps it. An array read
+from Arrow IPC, the format of Spark’s <code class="docutils literal notranslate"><span class="pre">mapInArrow</span></code> batches, has none if it has no nulls. A numba signature should
+therefore declare a bitmap parameter <code class="docutils literal notranslate"><span class="pre">Optional</span></code>.</p>
+<p>Every data array is read-only, a copy as well as a view, so declare it with <code class="docutils literal notranslate"><span class="pre">readonly=True</span></code> in a numba signature.
+A view keeps the Arrow buffer that it reads alive.</p>
+<p>Any other object raises <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> with a message that names its type. A <code class="docutils literal notranslate"><span class="pre">ChunkedArray</span></code>, such as a
+<code class="docutils literal notranslate"><span class="pre">Table</span></code> column, and a pyarrow scalar raise it too, with a message that says what to pass instead. The functions
+that adapt strings, structs and lists refuse some values, such as a string that ends in a NUL character or a list
+array whose rows differ in length. <a class="reference internal" href="numbarrow.utils.html#numbarrow.utils.arrow_array_utils.create_str_array" title="numbarrow.utils.arrow_array_utils.create_str_array"><code class="xref py py-func docutils literal notranslate"><span class="pre">create_str_array()</span></code></a>,
+<a class="reference internal" href="numbarrow.utils.html#numbarrow.utils.arrow_array_utils.structured_array_adapter" title="numbarrow.utils.arrow_array_utils.structured_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">structured_array_adapter()</span></code></a> and
+<a class="reference internal" href="numbarrow.utils.html#numbarrow.utils.arrow_array_utils.structured_list_array_adapter" title="numbarrow.utils.arrow_array_utils.structured_list_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">structured_list_array_adapter()</span></code></a> list the values they refuse.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.adapters.</span></span><span class="sig-name descname"><span class="pre">cast_64bit_date_arrow_to_numpy_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pa_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Array</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">np_dtype</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dtype</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/core/adapters.html#cast_64bit_date_arrow_to_numpy_array"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.adapters.cast_64bit_date_arrow_to_numpy_array" title="Link to this definition"></a></dt>
+<dd><p>Return the bitmap of a <code class="docutils literal notranslate"><span class="pre">date64</span></code> or timestamp array and a <code class="docutils literal notranslate"><span class="pre">datetime64</span></code> view of its values, without a copy.</p>
+<p>Both types hold one int64 per value, as <code class="docutils literal notranslate"><span class="pre">datetime64</span></code> does, so the function views the Arrow buffer. <code class="docutils literal notranslate"><span class="pre">np_dtype</span></code>
+must be <code class="docutils literal notranslate"><span class="pre">datetime64</span></code> at the array’s own unit: <code class="docutils literal notranslate"><span class="pre">ms</span></code> for a <code class="docutils literal notranslate"><span class="pre">date64</span></code>, and the unit of the type for a timestamp. A
+view cannot rescale the values, so any other <code class="docutils literal notranslate"><span class="pre">np_dtype</span></code> raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>. So does an array of another type,
+a <code class="docutils literal notranslate"><span class="pre">time64</span></code> or a <code class="docutils literal notranslate"><span class="pre">duration</span></code> included. The view is read-only, and the bitmap is None if the array has no validity
+buffer.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modules.html" class="btn btn-neutral float-left" title="API reference" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbarrow.core.is_null.html" class="btn btn-neutral float-right" title="numbarrow.core.is_null" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

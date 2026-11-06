@@ -1,0 +1,345 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.mapinarrow_factory &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/numbarrow.core.mapinarrow_factory.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbarrow.core.configurations" href="numbarrow.core.configurations.html" />
+    <link rel="prev" title="numbarrow.core.is_null" href="numbarrow.core.is_null.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">API reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.adapters.html">numbarrow.core.adapters</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.is_null.html">numbarrow.core.is_null</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbarrow.core.mapinarrow_factory</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbarrow.core.mapinarrow_factory">Module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.mapinarrow_factory.Nullable"><code class="docutils literal notranslate"><span class="pre">Nullable</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.mapinarrow_factory.make_mapinarrow_func"><code class="docutils literal notranslate"><span class="pre">make_mapinarrow_func()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.configurations.html">numbarrow.core.configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.utils.html">numbarrow.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">API reference</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.mapinarrow_factory</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbarrow.core.mapinarrow_factory.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbarrow-core-mapinarrow-factory">
+<h1>numbarrow.core.mapinarrow_factory<a class="headerlink" href="#numbarrow-core-mapinarrow-factory" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>PySpark’s <a class="reference external" href="https://spark.apache.org/docs/3.5.7/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.mapInArrow.html">mapInArrow</a>
+runs a Python function on an iterator of Arrow record batches and expects an iterator of batches back.
+<a class="reference internal" href="#numbarrow.core.mapinarrow_factory.make_mapinarrow_func" title="numbarrow.core.mapinarrow_factory.make_mapinarrow_func"><code class="xref py py-func docutils literal notranslate"><span class="pre">make_mapinarrow_func()</span></code></a> builds that function from a simpler one of yours,
+<code class="docutils literal notranslate"><span class="pre">main_func(data_dict,</span> <span class="pre">bitmap_dict,</span> <span class="pre">broadcasts)</span></code>. <code class="docutils literal notranslate"><span class="pre">main_func</span></code> receives the columns of each batch as numpy arrays in
+dicts, and it returns a dict of output columns:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pa</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.mapinarrow_factory</span><span class="w"> </span><span class="kn">import</span> <span class="n">Nullable</span><span class="p">,</span> <span class="n">make_mapinarrow_func</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main_func</span><span class="p">(</span><span class="n">data_dict</span><span class="p">,</span> <span class="n">bitmap_dict</span><span class="p">,</span> <span class="n">broadcasts</span><span class="p">):</span>
+    <span class="n">doubled</span> <span class="o">=</span> <span class="n">data_dict</span><span class="p">[</span><span class="s2">"value"</span><span class="p">]</span> <span class="o">*</span> <span class="n">broadcasts</span><span class="p">[</span><span class="s2">"factor"</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">"doubled"</span><span class="p">:</span> <span class="n">Nullable</span><span class="p">(</span><span class="n">doubled</span><span class="p">,</span> <span class="n">bitmap_dict</span><span class="p">[</span><span class="s2">"value"</span><span class="p">])}</span>
+
+
+<span class="n">udf</span> <span class="o">=</span> <span class="n">make_mapinarrow_func</span><span class="p">(</span><span class="n">main_func</span><span class="p">,</span> <span class="n">broadcasts</span><span class="o">=</span><span class="p">{</span><span class="s2">"factor"</span><span class="p">:</span> <span class="mf">2.0</span><span class="p">})</span>
+<span class="n">batch</span> <span class="o">=</span> <span class="n">pa</span><span class="o">.</span><span class="n">RecordBatch</span><span class="o">.</span><span class="n">from_pydict</span><span class="p">({</span><span class="s2">"value"</span><span class="p">:</span> <span class="p">[</span><span class="mf">1.5</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">]})</span>
+<span class="nb">print</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">udf</span><span class="p">(</span><span class="nb">iter</span><span class="p">([</span><span class="n">batch</span><span class="p">])))</span><span class="o">.</span><span class="n">column</span><span class="p">(</span><span class="s2">"doubled"</span><span class="p">)</span><span class="o">.</span><span class="n">to_pylist</span><span class="p">())</span>  <span class="c1"># [3.0, None, 8.0]</span>
+</pre></div>
+</div>
+<p><a class="reference internal" href="#numbarrow.core.mapinarrow_factory.Nullable" title="numbarrow.core.mapinarrow_factory.Nullable"><code class="xref py py-class docutils literal notranslate"><span class="pre">Nullable</span></code></a> pairs an output column with a validity bitmap, here the bitmap of
+the input column <code class="docutils literal notranslate"><span class="pre">value</span></code>, so that <code class="docutils literal notranslate"><span class="pre">doubled</span></code> is null where <code class="docutils literal notranslate"><span class="pre">value</span></code> is null. A plain numpy array in the returned
+dict becomes a column without nulls, except for a <code class="docutils literal notranslate"><span class="pre">NaT</span></code>, which pyarrow reads as null. The example passes no
+<code class="docutils literal notranslate"><span class="pre">output_schema</span></code>, so numbarrow infers the type of each output column from its values. In Spark, pass the same
+<code class="docutils literal notranslate"><span class="pre">udf</span></code> to <code class="docutils literal notranslate"><span class="pre">df.mapInArrow(udf,</span> <span class="pre">&quot;doubled</span> <span class="pre">double&quot;)</span></code>. The built function takes any iterator of record batches, so a
+test can call it without Spark, as the example does.</p>
+<p>For each batch, the built function converts every column of the batch with
+<a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a>, or only the columns that the <code class="docutils literal notranslate"><span class="pre">input_columns</span></code> parameter names.
+It then calls <code class="docutils literal notranslate"><span class="pre">main_func</span></code> once, with three dicts:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">data_dict</span></code> maps each column’s name to its numpy data. A struct column, or a list of structs, maps to a dict of
+its fields: <code class="docutils literal notranslate"><span class="pre">data_dict[&quot;point&quot;][&quot;x&quot;]</span></code> is the field <code class="docutils literal notranslate"><span class="pre">x</span></code> of the column <code class="docutils literal notranslate"><span class="pre">point</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bitmap_dict</span></code> has the same keys in every batch and holds the validity bitmaps, or <code class="docutils literal notranslate"><span class="pre">None</span></code> where a column has no
+validity buffer.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">broadcasts</span></code> is the dict given to <code class="docutils literal notranslate"><span class="pre">make_mapinarrow_func</span></code>.</p></li>
+</ul>
+<p>For a struct column, <code class="docutils literal notranslate"><span class="pre">bitmap_dict</span></code> differs from what <code class="docutils literal notranslate"><span class="pre">arrow_array_adapter</span></code> returns. The adapter returns the
+struct’s own bitmap apart from the bitmaps of its fields, for <a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null_struct" title="numbarrow.core.is_null.is_null_struct"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null_struct()</span></code></a> to read
+both. <code class="docutils literal notranslate"><span class="pre">bitmap_dict</span></code> holds no bitmap for the struct itself. numbarrow combines it into the bitmap of each field, which
+then also marks the rows where the whole struct is null. One <a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null" title="numbarrow.core.is_null.is_null"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null()</span></code></a> call per field is
+therefore enough.</p>
+<p>The README’s <a class="reference external" href="https://github.com/Goykhman/numbarrow#pyspark-mapinarrow">PySpark mapInArrow</a> section shows a complete Spark job. Its subsections explain how to
+<a class="reference external" href="https://github.com/Goykhman/numbarrow#returning-nulls">return nulls</a>, why columns <a class="reference external" href="https://github.com/Goykhman/numbarrow#columns-bind-by-position-not-by-name">bind by position</a> unless the <code class="docutils literal notranslate"><span class="pre">output_schema</span></code> parameter binds them by name, and how
+numbarrow chooses the <a class="reference external" href="https://github.com/Goykhman/numbarrow#output-column-types">types of the output columns</a>. The reference below documents the parameters and the errors
+that <code class="docutils literal notranslate"><span class="pre">make_mapinarrow_func</span></code> raises.</p>
+</section>
+<section id="module-numbarrow.core.mapinarrow_factory">
+<span id="module"></span><h2>Module<a class="headerlink" href="#module-numbarrow.core.mapinarrow_factory" title="Link to this heading"></a></h2>
+<p>A factory of functions for PySpark’s <code class="docutils literal notranslate"><span class="pre">mapInArrow</span></code> that compute on each batch’s columns as numpy arrays.</p>
+<p><a class="reference internal" href="#numbarrow.core.mapinarrow_factory.make_mapinarrow_func" title="numbarrow.core.mapinarrow_factory.make_mapinarrow_func"><code class="xref py py-func docutils literal notranslate"><span class="pre">make_mapinarrow_func()</span></code></a> wraps a function of the caller’s, <code class="docutils literal notranslate"><span class="pre">main_func</span></code>, into the function that
+<code class="docutils literal notranslate"><span class="pre">DataFrame.mapInArrow</span></code> calls on each partition. For each <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.RecordBatch</span></code>, the wrapper adapts the
+columns with <a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> and calls <code class="docutils literal notranslate"><span class="pre">main_func</span></code> with the arrays and their
+validity bitmaps. <code class="docutils literal notranslate"><span class="pre">main_func</span></code> typically runs numba-compiled code on them and returns a dict of output columns, from
+which the wrapper builds the output batch. <a class="reference internal" href="#numbarrow.core.mapinarrow_factory.Nullable" title="numbarrow.core.mapinarrow_factory.Nullable"><code class="xref py py-class docutils literal notranslate"><span class="pre">Nullable</span></code></a> pairs an output column with a validity bitmap, so that the
+column carries nulls out. The private functions convert each output column to an Arrow array. They refuse several kinds
+of value that pyarrow would misread without an error, with a message that names the column.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="numbarrow.core.mapinarrow_factory.Nullable">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbarrow.core.mapinarrow_factory.</span></span><span class="sig-name descname"><span class="pre">Nullable</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">object</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bitmap</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/core/mapinarrow_factory.html#Nullable"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.mapinarrow_factory.Nullable" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">NamedTuple</span></code></p>
+<p>An output column paired with a validity bitmap, so that the column carries nulls out of <code class="docutils literal notranslate"><span class="pre">main_func</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">data</span></code> is any value an output column may be: an ndarray, a list, a <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Array</span></code> or a numpy record array.
+<code class="docutils literal notranslate"><span class="pre">bitmap</span></code> is a packed uint8 bitmap in the layout of the input bitmaps that <code class="docutils literal notranslate"><span class="pre">main_func</span></code> receives:
+<code class="docutils literal notranslate"><span class="pre">(rows</span> <span class="pre">+</span> <span class="pre">7)</span> <span class="pre">//</span> <span class="pre">8</span></code> bytes, one bit per row, least significant bit first, and a set bit for a valid row. A row is
+null in the output if <code class="docutils literal notranslate"><span class="pre">data</span></code> holds a null there or its bit is clear. <code class="docutils literal notranslate"><span class="pre">bitmap</span></code> may also be <code class="docutils literal notranslate"><span class="pre">None</span></code>, the bitmap
+that <code class="docutils literal notranslate"><span class="pre">main_func</span></code> receives for an input column without a validity buffer. The column then carries only the nulls
+of <code class="docutils literal notranslate"><span class="pre">data</span></code>. A plain ndarray returned without <code class="docutils literal notranslate"><span class="pre">Nullable</span></code> carries no nulls out, except a <code class="docutils literal notranslate"><span class="pre">NaT</span></code>, which pyarrow
+reads as null.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbarrow.core.mapinarrow_factory.Nullable.bitmap">
+<span class="sig-name descname"><span class="pre">bitmap</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#numbarrow.core.mapinarrow_factory.Nullable.bitmap" title="Link to this definition"></a></dt>
+<dd><p>Alias for field number 1</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbarrow.core.mapinarrow_factory.Nullable.data">
+<span class="sig-name descname"><span class="pre">data</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">object</span></em><a class="headerlink" href="#numbarrow.core.mapinarrow_factory.Nullable.data" title="Link to this definition"></a></dt>
+<dd><p>Alias for field number 0</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.core.mapinarrow_factory.make_mapinarrow_func">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.mapinarrow_factory.</span></span><span class="sig-name descname"><span class="pre">make_mapinarrow_func</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">main_func</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">input_columns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">broadcasts</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_schema</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Schema</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/core/mapinarrow_factory.html#make_mapinarrow_func"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.mapinarrow_factory.make_mapinarrow_func" title="Link to this definition"></a></dt>
+<dd><p>Return a function for <code class="docutils literal notranslate"><span class="pre">DataFrame.mapInArrow</span></code> that runs <code class="docutils literal notranslate"><span class="pre">main_func</span></code> on each batch’s columns as numpy arrays.</p>
+<p><code class="docutils literal notranslate"><span class="pre">mapInArrow</span></code> calls the returned function once per partition, with an iterator of <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.RecordBatch</span></code>.
+For each batch, the function adapts the selected columns with <a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a>
+and calls <code class="docutils literal notranslate"><span class="pre">main_func(data_dict,</span> <span class="pre">bitmap_dict,</span> <span class="pre">broadcasts)</span></code>. It builds an output batch from the dict that
+<code class="docutils literal notranslate"><span class="pre">main_func</span></code> returns, and yields it. If a column fails to adapt or to convert, the error names the column. An
+element of the iterator that is not a RecordBatch raises <code class="xref py py-class docutils literal notranslate"><span class="pre">TypeError</span></code>. To call the function outside Spark,
+pass it <code class="docutils literal notranslate"><span class="pre">[batch]</span></code> or <code class="docutils literal notranslate"><span class="pre">table.to_batches()</span></code>.</p>
+<p>Pass <code class="docutils literal notranslate"><span class="pre">output_schema</span></code>, derived from the schema given to <code class="docutils literal notranslate"><span class="pre">mapInArrow</span></code> with
+<code class="docutils literal notranslate"><span class="pre">pyspark.sql.pandas.types.to_arrow_schema</span></code>, so that the returned function takes each output column by name and
+converts it to its declared type. Without it, Spark binds the columns by their order in the returned dict, and
+pyarrow infers each type from the values.</p>
+<p><code class="docutils literal notranslate"><span class="pre">data_dict</span></code> maps the name of each selected column to its data. A struct or list-of-struct column maps to a dict of
+its fields, <code class="docutils literal notranslate"><span class="pre">data_dict[column][field]</span></code>, so a field never shares a namespace with another column or with the
+fields of another struct. Any other column maps to one array. <code class="docutils literal notranslate"><span class="pre">bitmap_dict</span></code> has the same keys and shape. Each of
+its arrays is a packed uint8 validity bitmap. A column without a validity buffer has <code class="docutils literal notranslate"><span class="pre">None</span></code> in its place, and so
+does a struct field if neither it nor its struct has one. Every key of <code class="docutils literal notranslate"><span class="pre">data_dict</span></code> is in <code class="docutils literal notranslate"><span class="pre">bitmap_dict</span></code>, so a
+batch without nulls is indexed exactly like a batch with them.</p>
+<p>The bitmap of a struct field also marks the rows where the whole struct is null. One
+<a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null" title="numbarrow.core.is_null.is_null"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null()</span></code></a> call per field therefore sees both a null field and a null struct. For a
+list of structs, the field bitmaps cover the flattened struct elements, not the list rows. The adapter returns
+those elements without the list offsets, so a null list row could not be reported anywhere, and it would shift the
+mapping from elements to rows. A list column whose <code class="docutils literal notranslate"><span class="pre">null_count</span></code> is not zero therefore raises
+<code class="xref py py-class docutils literal notranslate"><span class="pre">NotImplementedError</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">main_func</span></code> returns a dict that maps the name of each output column to an ndarray, a list or a
+<code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Array</span></code>. A numpy record array becomes a struct column, with one child per field. A null comes out of
+a list, a tuple or an object array holding <code class="docutils literal notranslate"><span class="pre">None</span></code>, a <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Array</span></code>, a numpy masked array, and a
+<a class="reference internal" href="#numbarrow.core.mapinarrow_factory.Nullable" title="numbarrow.core.mapinarrow_factory.Nullable"><code class="xref py py-class docutils literal notranslate"><span class="pre">Nullable</span></code></a>. A plain ndarray carries no nulls out, except a <code class="docutils literal notranslate"><span class="pre">NaT</span></code>, which pyarrow reads as null. A row that
+came in null then goes out valid, with whatever <code class="docutils literal notranslate"><span class="pre">main_func</span></code> computed from the value stored under the null, which
+is <code class="docutils literal notranslate"><span class="pre">0</span></code>, <code class="docutils literal notranslate"><span class="pre">0.0</span></code> or <code class="docutils literal notranslate"><span class="pre">''</span></code> in a batch from Spark.</p>
+<p><code class="docutils literal notranslate"><span class="pre">Nullable(data,</span> <span class="pre">bitmap)</span></code> takes a bitmap in the layout of <code class="docutils literal notranslate"><span class="pre">bitmap_dict</span></code>, which
+<a class="reference internal" href="numbarrow.core.is_null.html#numbarrow.core.is_null.is_null" title="numbarrow.core.is_null.is_null"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null()</span></code></a> also reads: <code class="docutils literal notranslate"><span class="pre">(rows</span> <span class="pre">+</span> <span class="pre">7)</span> <span class="pre">//</span> <span class="pre">8</span></code> bytes of uint8, one bit per row, least
+significant bit first, and a set bit for a valid row. A result that is null exactly where one input column is null
+can pass that column’s bitmap through, as in <code class="docutils literal notranslate"><span class="pre">{&quot;out&quot;:</span> <span class="pre">Nullable(result,</span> <span class="pre">bitmap_dict[&quot;value&quot;])}</span></code>, or with
+<code class="docutils literal notranslate"><span class="pre">bitmap_dict[&quot;column&quot;][&quot;field&quot;]</span></code> for a struct field. Any other result builds its own bitmap, for instance with
+<code class="docutils literal notranslate"><span class="pre">np.packbits(valid,</span> <span class="pre">bitorder=&quot;little&quot;)</span></code> from a boolean array <code class="docutils literal notranslate"><span class="pre">valid</span></code>.</p>
+<p>A bitmap that is not a one-dimensional uint8 ndarray raises <code class="xref py py-class docutils literal notranslate"><span class="pre">TypeError</span></code>, and one of another length raises
+<code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code>. Both errors name the column. A packed bitmap cannot tell apart row counts within one byte. A
+bitmap from <code class="docutils literal notranslate"><span class="pre">bitmap_dict</span></code> therefore raises <code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code> on a column of any row count but the one it
+covers. That count is the batch’s rows for a column’s bitmap or a struct field’s, and the flattened elements for a
+field of a list of structs. A <code class="docutils literal notranslate"><span class="pre">main_func</span></code> that changes the length of a column needs a bitmap of its own.</p>
+<p>Spark binds the columns of the output batch to the schema given to <code class="docutils literal notranslate"><span class="pre">mapInArrow</span></code> by position, not by name, and it
+checks nothing about their names. It reads each column with the getter of its declared type, such as <code class="docutils literal notranslate"><span class="pre">getLong</span></code>
+for <code class="docutils literal notranslate"><span class="pre">LongType</span></code> and <code class="docutils literal notranslate"><span class="pre">TimestampType</span></code>. The column’s Arrow type decides which getter works, because Spark wraps
+each Arrow type in an accessor that provides only one getter. The Arrow types whose accessors provide the same
+getter form an accessor family: int64 and timestamps share <code class="docutils literal notranslate"><span class="pre">getLong</span></code>, and int32 and date32 share <code class="docutils literal notranslate"><span class="pre">getInt</span></code>. If a
+column’s Arrow type is in the family of its declared type, Spark reads it without any check. An int64 column
+declared as a timestamp therefore reads as a timestamp, and two columns of one family swap without an error if the
+dict is built in the other order.</p>
+<p>A column read through the accessor of another family fails in the JVM with
+<code class="docutils literal notranslate"><span class="pre">java.lang.UnsupportedOperationException</span></code>, whatever its width. Both float64 under <code class="docutils literal notranslate"><span class="pre">LongType</span></code> and int64 under
+<code class="docutils literal notranslate"><span class="pre">DoubleType</span></code> fail, though each is 64 bits wide. An int32 column under <code class="docutils literal notranslate"><span class="pre">LongType</span></code> fails too, because int32
+provides <code class="docutils literal notranslate"><span class="pre">getInt</span></code> and not <code class="docutils literal notranslate"><span class="pre">getLong</span></code>.</p>
+<p>The fields of a struct column are bound by position too. Without <code class="docutils literal notranslate"><span class="pre">output_schema</span></code>, the field order of a record
+array’s dtype, or the key order of the dicts, decides where each field lands: <code class="docutils literal notranslate"><span class="pre">{&quot;lat&quot;:</span> <span class="pre">..,</span> <span class="pre">&quot;lon&quot;:</span> <span class="pre">..}</span></code> under
+<code class="docutils literal notranslate"><span class="pre">struct&lt;lon,</span> <span class="pre">lat&gt;</span></code> swaps the two fields without an error. Build the returned dict, and any record dtype, in the
+order of the declared schema, or pass <code class="docutils literal notranslate"><span class="pre">output_schema</span></code>, and the returned function binds the columns, and the
+fields of dicts and record arrays, by name.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>main_func</strong> – the function to run on each batch, called as <code class="docutils literal notranslate"><span class="pre">main_func(data_dict,</span> <span class="pre">bitmap_dict,</span> <span class="pre">broadcasts)</span></code>.
+It returns a dict of output columns, as described above.</p></li>
+<li><p><strong>input_columns</strong> – optional names of the columns that <code class="docutils literal notranslate"><span class="pre">main_func</span></code> needs in <code class="docutils literal notranslate"><span class="pre">data_dict</span></code>. <code class="docutils literal notranslate"><span class="pre">None</span></code> selects
+every column of the batch. A name must match exactly, case included. A name that the batch lacks raises
+<code class="xref py py-class docutils literal notranslate"><span class="pre">KeyError</span></code> listing the batch’s columns. A name that the batch holds more than once raises
+<code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code>. The returned function raises both errors on the first batch. Only a batch built outside
+Spark can repeat a name, because <code class="docutils literal notranslate"><span class="pre">mapInArrow</span></code> raises an <code class="docutils literal notranslate"><span class="pre">AnalysisException</span></code> for a DataFrame with a repeated
+column name. The names are read once, when this function is called, so a one-shot iterable such as a generator
+works as well as a list. A name given twice is passed once. A single string raises <code class="xref py py-class docutils literal notranslate"><span class="pre">TypeError</span></code>, and an
+empty selection, such as a generator already used up, raises <code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code> rather than passing
+<code class="docutils literal notranslate"><span class="pre">main_func</span></code> no columns. This function raises both of these when it is called, before any batch.</p></li>
+<li><p><strong>broadcasts</strong> – optional dict that every call of <code class="docutils literal notranslate"><span class="pre">main_func</span></code> receives as its third argument, such as
+parameters or lookup tables. <code class="docutils literal notranslate"><span class="pre">None</span></code> passes an empty dict.</p></li>
+<li><p><strong>output_schema</strong> – <p>optional <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Schema</span></code> of the output batches. A string column declared
+<code class="docutils literal notranslate"><span class="pre">large_string</span></code> is built as one, and a list of dicts declared as a struct is built field by field. A list of
+dicts or of pairs declared as a map becomes a map, which no inferred type can be cast to.</p>
+<p>A column that the schema names and the dict lacks raises <code class="xref py py-class docutils literal notranslate"><span class="pre">KeyError</span></code>, and a key that the schema does not
+name raises <code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code>. A struct field that the declared type lacks raises <code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code> too,
+whether it comes as a dict key, a namedtuple field, or a field of a record array or a <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Array</span></code>.
+Arrow matches a dict’s keys to struct fields by exact name, so without this check it would fill the declared
+field with nulls. A namedtuple or pyspark Row that names the declared fields in another order raises
+<code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code> as well, because pyarrow binds the items of a tuple by position.</p>
+<p>A schema that is not a <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Schema</span></code>, such as a PySpark <code class="docutils literal notranslate"><span class="pre">StructType</span></code>, raises <code class="xref py py-class docutils literal notranslate"><span class="pre">TypeError</span></code>. A
+schema that repeats a name among its columns, or among the fields of one struct, raises <code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code>.
+This function raises both of these when it is called, before any batch.</p>
+<p>Beyond these checks, a value is refused only if pyarrow refuses it, and pyarrow converts each shape of column
+its own way. A <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Array</span></code> is cast to the declared type, and an ndarray of a numeric or datetime
+dtype goes through <code class="docutils literal notranslate"><span class="pre">pa.array</span></code>’s typed converter. Both raise <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.ArrowInvalid</span></code> for an integer out
+of the declared type’s range, a float with a fraction into an integer type, and a timestamp unit change that
+drops digits.</p>
+<p>A Python list, and any other sequence of Python objects such as an object-dtype ndarray, goes through
+<code class="docutils literal notranslate"><span class="pre">pa.array</span></code>’s sequence converter. It raises <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.ArrowInvalid</span></code> for an integer out of the declared
+type’s range, but <code class="xref py py-class docutils literal notranslate"><span class="pre">OverflowError</span></code> for a negative value under an unsigned type and for a value beyond the
+64-bit range. <code class="docutils literal notranslate"><span class="pre">except</span> <span class="pre">pa.ArrowInvalid</span></code> does not catch the <code class="xref py py-class docutils literal notranslate"><span class="pre">OverflowError</span></code>. The sequence converter
+refuses a timestamp under <code class="docutils literal notranslate"><span class="pre">time32</span></code> or <code class="docutils literal notranslate"><span class="pre">time64</span></code> and a number under <code class="docutils literal notranslate"><span class="pre">bool</span></code>.</p>
+<p>These conversions lose data without an error:</p>
+<ul>
+<li><p>a timestamp into <code class="docutils literal notranslate"><span class="pre">date32</span></code> or <code class="docutils literal notranslate"><span class="pre">date64</span></code>;</p></li>
+<li><p>a float into a narrower float, which overflows to <code class="docutils literal notranslate"><span class="pre">inf</span></code>;</p></li>
+<li><p>from a datetime ndarray or a <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Array</span></code>, a timestamp into <code class="docutils literal notranslate"><span class="pre">time32</span></code> or <code class="docutils literal notranslate"><span class="pre">time64</span></code>, which drops
+the date;</p></li>
+<li><p>from a numeric ndarray or a <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Array</span></code>, a number into <code class="docutils literal notranslate"><span class="pre">bool</span></code>, which is true for anything but
+zero;</p></li>
+<li><p>and, from a sequence of Python objects alone, a fraction into an integer type and a timestamp unit change that
+drops digits, which the sequence converter truncates.</p></li>
+</ul>
+<p>A float under a <code class="docutils literal notranslate"><span class="pre">decimal</span></code> type is refused on both routes of <code class="docutils literal notranslate"><span class="pre">pa.array</span></code>: the sequence converter takes an int
+or a <code class="xref py py-class docutils literal notranslate"><span class="pre">decimal.Decimal</span></code>, and the typed converter refuses a float dtype. A float <code class="xref py py-class docutils literal notranslate"><span class="pre">pyarrow.Array</span></code> is
+cast instead, and the cast rounds it to the declared scale.</p>
+<p>A <code class="docutils literal notranslate"><span class="pre">datetime64</span></code> or <code class="docutils literal notranslate"><span class="pre">timedelta64</span></code> ndarray is taken to a unit that pyarrow models before pyarrow reads it. A
+multiplier is applied, so <code class="docutils literal notranslate"><span class="pre">datetime64[5s]</span></code> becomes <code class="docutils literal notranslate"><span class="pre">datetime64[s]</span></code> with the same instants. A
+<code class="docutils literal notranslate"><span class="pre">datetime64</span></code> hour or minute becomes seconds, and a week, month or year becomes days. A <code class="docutils literal notranslate"><span class="pre">timedelta64</span></code> hour,
+minute, day or week becomes seconds. A unit finer than a nanosecond raises <code class="xref py py-class docutils literal notranslate"><span class="pre">TypeError</span></code>, and so does a
+<code class="docutils literal notranslate"><span class="pre">timedelta64</span></code> month or year, which has no fixed length. If the declared type is not temporal, a change of
+unit raises <code class="xref py py-class docutils literal notranslate"><span class="pre">TypeError</span></code> too.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">output_schema</span></code> is <code class="docutils literal notranslate"><span class="pre">None</span></code>, the batch is built from the dict alone. The dict’s order decides the column
+order, and each type is inferred from the values. A unicode array comes back <code class="docutils literal notranslate"><span class="pre">string</span></code> and a bytes array
+<code class="docutils literal notranslate"><span class="pre">binary</span></code>, so a <code class="docutils literal notranslate"><span class="pre">large_string</span></code> input column comes back <code class="docutils literal notranslate"><span class="pre">string</span></code>. A <code class="docutils literal notranslate"><span class="pre">datetime64</span></code> array comes back a naive
+<code class="docutils literal notranslate"><span class="pre">timestamp</span></code> of its unit after the conversion above, so <code class="docutils literal notranslate"><span class="pre">datetime64[5s]</span></code> comes back <code class="docutils literal notranslate"><span class="pre">timestamp[s]</span></code> and an
+hour or minute unit comes back in seconds. A day, week, month or year unit comes back <code class="docutils literal notranslate"><span class="pre">date32</span></code>. Spark reads a
+timestamp column back only in microseconds, so a <code class="docutils literal notranslate"><span class="pre">datetime64</span></code> array of another unit fails in the JVM unless
+<code class="docutils literal notranslate"><span class="pre">output_schema</span></code> declares the column, which converts the unit. An object array that holds only <code class="docutils literal notranslate"><span class="pre">None</span></code> comes
+back <code class="docutils literal notranslate"><span class="pre">null</span></code>. The first batch’s inferred schema is held for the rest of
+the partition. A later batch whose inferred types differ, such as an all-<code class="docutils literal notranslate"><span class="pre">None</span></code> list after a list with
+values, or ints after floats, raises <code class="xref py py-class docutils literal notranslate"><span class="pre">ValueError</span></code> naming the column. Spark’s writer would refuse that
+batch without naming anything. Declare <code class="docutils literal notranslate"><span class="pre">output_schema</span></code> if a batch may be empty or all null.</p>
+</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbarrow.core.is_null.html" class="btn btn-neutral float-left" title="numbarrow.core.is_null" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbarrow.core.configurations.html" class="btn btn-neutral float-right" title="numbarrow.core.configurations" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,253 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.is_null &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/numbarrow.core.is_null.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbarrow.core.mapinarrow_factory" href="numbarrow.core.mapinarrow_factory.html" />
+    <link rel="prev" title="numbarrow.core.adapters" href="numbarrow.core.adapters.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">API reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.adapters.html">numbarrow.core.adapters</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbarrow.core.is_null</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbarrow.core.is_null">Module</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.is_null.is_null"><code class="docutils literal notranslate"><span class="pre">is_null()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.is_null.is_null_struct"><code class="docutils literal notranslate"><span class="pre">is_null_struct()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbarrow.core.is_null.unpack_booleans"><code class="docutils literal notranslate"><span class="pre">unpack_booleans()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.mapinarrow_factory.html">numbarrow.core.mapinarrow_factory</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.core.configurations.html">numbarrow.core.configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbarrow.utils.html">numbarrow.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">API reference</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.is_null</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbarrow.core.is_null.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbarrow-core-is-null">
+<h1>numbarrow.core.is_null<a class="headerlink" href="#numbarrow-core-is-null" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Arrow marks the null rows of an array in a validity bitmap: one bit per row, packed into bytes with the least
+significant bit first, set for a valid row and clear for a null one.
+<a class="reference internal" href="numbarrow.core.adapters.html#numbarrow.core.adapters.arrow_array_adapter" title="numbarrow.core.adapters.arrow_array_adapter"><code class="xref py py-func docutils literal notranslate"><span class="pre">arrow_array_adapter()</span></code></a> returns that bitmap as a <code class="docutils literal notranslate"><span class="pre">uint8</span></code> array, and the functions of
+this module read it inside <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> code. Python code can call them too.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">is_null(i,</span> <span class="pre">bitmap)</span></code> returns <code class="docutils literal notranslate"><span class="pre">True</span></code> when row <code class="docutils literal notranslate"><span class="pre">i</span></code> is null. The function does not accept <code class="docutils literal notranslate"><span class="pre">None</span></code> for
+<code class="docutils literal notranslate"><span class="pre">bitmap</span></code>, so check a bitmap for <code class="docutils literal notranslate"><span class="pre">None</span></code> before the call.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">is_null_struct(i,</span> <span class="pre">struct_bitmap,</span> <span class="pre">field_bitmap)</span></code> returns <code class="docutils literal notranslate"><span class="pre">True</span></code> when the struct’s bitmap or the field’s bitmap
+marks row <code class="docutils literal notranslate"><span class="pre">i</span></code> null, and it accepts <code class="docutils literal notranslate"><span class="pre">None</span></code> for either. Use it with the 3-tuple that <code class="docutils literal notranslate"><span class="pre">arrow_array_adapter</span></code>
+returns for a struct, because a row that is null as a whole is not always null in its fields. The field bitmaps that
+<a class="reference internal" href="numbarrow.core.mapinarrow_factory.html#numbarrow.core.mapinarrow_factory.make_mapinarrow_func" title="numbarrow.core.mapinarrow_factory.make_mapinarrow_func"><code class="xref py py-func docutils literal notranslate"><span class="pre">make_mapinarrow_func()</span></code></a> passes already include the struct’s nulls, so
+<code class="docutils literal notranslate"><span class="pre">is_null</span></code> is enough for them.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">unpack_booleans(offset,</span> <span class="pre">length,</span> <span class="pre">packed_data)</span></code> expands bit-packed booleans into a <code class="docutils literal notranslate"><span class="pre">bool_</span></code> array. Arrow packs the
+values of a <code class="docutils literal notranslate"><span class="pre">BooleanArray</span></code> in the same layout as a validity bitmap, and the adapter uses this function to unpack
+them.</p></li>
+</ul>
+<p>In the example, the struct has no bitmap, so <code class="docutils literal notranslate"><span class="pre">is_null_struct</span></code> receives <code class="docutils literal notranslate"><span class="pre">None</span></code> for it and <code class="docutils literal notranslate"><span class="pre">bitmap</span></code> as the field’s:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.is_null</span><span class="w"> </span><span class="kn">import</span> <span class="n">is_null</span><span class="p">,</span> <span class="n">is_null_struct</span>
+
+<span class="n">bitmap</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">packbits</span><span class="p">([</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">True</span><span class="p">],</span> <span class="n">bitorder</span><span class="o">=</span><span class="s2">"little"</span><span class="p">)</span>  <span class="c1"># rows 0 and 2 valid</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">bitmap</span><span class="p">,</span> <span class="n">is_null</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">bitmap</span><span class="p">),</span> <span class="n">is_null_struct</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">bitmap</span><span class="p">))</span>  <span class="c1"># [5] True True</span>
+</pre></div>
+</div>
+<p>numba compiles the three functions when this module is first imported, each for one signature. A call converts an
+index of another integer type to <code class="docutils literal notranslate"><span class="pre">int64</span></code>, and it accepts a writable bitmap as well as a read-only one. <code class="docutils literal notranslate"><span class="pre">None</span></code> as
+the bitmap of <code class="docutils literal notranslate"><span class="pre">is_null</span></code> raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> in a call from Python, and a jitted function that passes it fails to
+compile.</p>
+<p>By default, the functions do not check an index against the length of the bitmap. An index past the end reads memory
+outside the bitmap: the answer is meaningless, and the read can crash the process.
+<code class="docutils literal notranslate"><span class="pre">NUMBARROW_JIT_OPTIONS='{&quot;boundscheck&quot;:</span> <span class="pre">true}'</span></code> makes such a read raise <code class="docutils literal notranslate"><span class="pre">IndexError</span></code>. The README section on
+<a class="reference external" href="https://github.com/Goykhman/numbarrow#compilation-and-the-cache">compilation and the cache</a> explains the variable, and how to keep numba from loading cached code that was compiled
+without bounds checks.</p>
+</section>
+<section id="module-numbarrow.core.is_null">
+<span id="module"></span><h2>Module<a class="headerlink" href="#module-numbarrow.core.is_null" title="Link to this heading"></a></h2>
+<p>Functions, compiled with numba, that read Arrow validity bitmaps and bit-packed boolean values.</p>
+<p>An Arrow validity bitmap holds one bit for each element of an array: 1 if the element is valid, 0 if it is null. The
+bits are packed into uint8 bytes from the least significant bit up, so element <code class="docutils literal notranslate"><span class="pre">i</span></code> is bit <code class="docutils literal notranslate"><span class="pre">i</span> <span class="pre">%</span> <span class="pre">8</span></code> of byte
+<code class="docutils literal notranslate"><span class="pre">i</span> <span class="pre">//</span> <span class="pre">8</span></code>. <a class="reference internal" href="#numbarrow.core.is_null.is_null" title="numbarrow.core.is_null.is_null"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null()</span></code></a> reads the bit of one element, and <a class="reference internal" href="#numbarrow.core.is_null.is_null_struct" title="numbarrow.core.is_null.is_null_struct"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null_struct()</span></code></a> reads the two bitmaps that
+together decide whether a value of a struct’s field is null. Arrow packs the values of a boolean array in the same
+way, and <a class="reference internal" href="#numbarrow.core.is_null.unpack_booleans" title="numbarrow.core.is_null.unpack_booleans"><code class="xref py py-func docutils literal notranslate"><span class="pre">unpack_booleans()</span></code></a> expands them into a numpy boolean array. numba compiles all three functions when this
+module is imported, with the options of <a class="reference internal" href="numbarrow.core.configurations.html#module-numbarrow.core.configurations" title="numbarrow.core.configurations"><code class="xref py py-mod docutils literal notranslate"><span class="pre">numbarrow.core.configurations</span></code></a>. Python code and jitted code can both
+call them.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.core.is_null.is_null">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.is_null.</span></span><span class="sig-name descname"><span class="pre">is_null</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index_</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">bitmap</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="_modules/numbarrow/core/is_null.html#is_null"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.is_null.is_null" title="Link to this definition"></a></dt>
+<dd><p>Return True if element <code class="docutils literal notranslate"><span class="pre">index_</span></code> is null in the validity bitmap <code class="docutils literal notranslate"><span class="pre">bitmap</span></code>, and False if it is valid.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bitmap</span></code> must be a one-dimensional, C-contiguous uint8 array, read-only or writable, as the adapters return it.
+Called from Python with anything else, None included, the function raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>. An adapter returns None
+for an array without a validity buffer, whose elements are all valid, so test for None before the call.</p>
+<p><code class="docutils literal notranslate"><span class="pre">index_</span></code> must satisfy <code class="docutils literal notranslate"><span class="pre">0</span> <span class="pre">&lt;=</span> <span class="pre">index_</span> <span class="pre">&lt;</span> <span class="pre">8</span> <span class="pre">*</span> <span class="pre">len(bitmap)</span></code>. numba compiles without bounds checks by default, so an
+index past the end reads memory outside the bitmap: the answer is meaningless, and the read can crash the process.
+With bounds checks, the function raises <code class="docutils literal notranslate"><span class="pre">IndexError</span></code> instead. <code class="docutils literal notranslate"><span class="pre">NUMBARROW_JIT_OPTIONS='{&quot;boundscheck&quot;:</span> <span class="pre">true}'</span></code>
+turns them on, and caching off, because the object replaces the default <code class="docutils literal notranslate"><span class="pre">{&quot;cache&quot;:</span> <span class="pre">true}</span></code>. With caching on,
+through <code class="docutils literal notranslate"><span class="pre">{&quot;cache&quot;:</span> <span class="pre">true,</span> <span class="pre">&quot;boundscheck&quot;:</span> <span class="pre">true}</span></code> or numba’s <code class="docutils literal notranslate"><span class="pre">NUMBA_BOUNDSCHECK=1</span></code>, numba still loads code that it
+cached without bounds checks, so point <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> at a new directory as well.</p>
+<p>A negative index down to <code class="docutils literal notranslate"><span class="pre">-8</span> <span class="pre">*</span> <span class="pre">len(bitmap)</span></code> counts back from the end, as a numpy index does: it reads the bit of
+element <code class="docutils literal notranslate"><span class="pre">8</span> <span class="pre">*</span> <span class="pre">len(bitmap)</span> <span class="pre">+</span> <span class="pre">index_</span></code>. That read stays inside the bitmap, so bounds checks do not catch it. A lower
+index reads outside the bitmap, and bounds checks catch it.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>index_</strong> – the zero-based index of the element</p></li>
+<li><p><strong>bitmap</strong> – the packed validity bitmap</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the element’s bit is 0, False if it is 1</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.core.is_null.is_null_struct">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.is_null.</span></span><span class="sig-name descname"><span class="pre">is_null_struct</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">index_</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_bitmap</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">field_bitmap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbarrow/core/is_null.html#is_null_struct"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.is_null.is_null_struct" title="Link to this definition"></a></dt>
+<dd><p>Return True if element <code class="docutils literal notranslate"><span class="pre">index_</span></code> of a struct’s field is null in the struct’s bitmap or in the field’s.</p>
+<p>A struct array has a validity bitmap of its own, which marks the rows that are null as a whole, and each field has
+one for its own values. A field’s bitmap need not mark the null rows of the struct, so a value is null if either
+bitmap marks it. Pass None for a bitmap that the array does not have; if both are None, the value is valid.</p>
+<p>numba compiles the function once, when the module is imported, for an <code class="docutils literal notranslate"><span class="pre">int64</span></code> index and, for each bitmap, a
+read-only uint8 array or None. Every call uses that compilation: an index of another integer type converts to
+<code class="docutils literal notranslate"><span class="pre">int64</span></code>, and a writable bitmap is accepted as well. The bounds on <code class="docutils literal notranslate"><span class="pre">index_</span></code> are those of <a class="reference internal" href="#numbarrow.core.is_null.is_null" title="numbarrow.core.is_null.is_null"><code class="xref py py-func docutils literal notranslate"><span class="pre">is_null()</span></code></a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>index_</strong> – the zero-based index of the element, converted to <code class="docutils literal notranslate"><span class="pre">int64</span></code></p></li>
+<li><p><strong>struct_bitmap</strong> – the struct array’s own validity bitmap, or None</p></li>
+<li><p><strong>field_bitmap</strong> – the field’s validity bitmap, or None</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if either bitmap marks the value null</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbarrow.core.is_null.unpack_booleans">
+<span class="sig-prename descclassname"><span class="pre">numbarrow.core.is_null.</span></span><span class="sig-name descname"><span class="pre">unpack_booleans</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">offset</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">length</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">packed_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">ndarray</span></span></span><a class="reference internal" href="_modules/numbarrow/core/is_null.html#unpack_booleans"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbarrow.core.is_null.unpack_booleans" title="Link to this definition"></a></dt>
+<dd><p>Return a new array of the <code class="docutils literal notranslate"><span class="pre">length</span></code> booleans packed in <code class="docutils literal notranslate"><span class="pre">packed_data</span></code>, from bit <code class="docutils literal notranslate"><span class="pre">offset</span></code> on.</p>
+<p>Arrow packs the values of a boolean array as it packs a validity bitmap: one bit per value, from the least
+significant bit of each byte up. <code class="docutils literal notranslate"><span class="pre">packed_data</span></code> is a one-dimensional, C-contiguous uint8 array, read-only or
+writable.</p>
+<p><code class="docutils literal notranslate"><span class="pre">offset</span> <span class="pre">+</span> <span class="pre">length</span></code> must not exceed <code class="docutils literal notranslate"><span class="pre">8</span> <span class="pre">*</span> <span class="pre">len(packed_data)</span></code>. numba compiles without bounds checks by default, so
+the bits past that end come from memory outside <code class="docutils literal notranslate"><span class="pre">packed_data</span></code>, and the read can crash the process. With bounds
+checks, which <code class="docutils literal notranslate"><span class="pre">NUMBARROW_JIT_OPTIONS='{&quot;boundscheck&quot;:</span> <span class="pre">true}'</span></code> or numba’s <code class="docutils literal notranslate"><span class="pre">NUMBA_BOUNDSCHECK=1</span></code> turns on, the
+function raises <code class="docutils literal notranslate"><span class="pre">IndexError</span></code> instead. With caching on, numba still loads code that it cached without bounds
+checks, so point <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> at a new directory as well.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>offset</strong> – the position of the first bit to read, counted from the first bit of <code class="docutils literal notranslate"><span class="pre">packed_data</span></code></p></li>
+<li><p><strong>length</strong> – the number of booleans to return</p></li>
+<li><p><strong>packed_data</strong> – the bytes that hold the packed bits</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>a new array of <code class="docutils literal notranslate"><span class="pre">length</span></code> booleans</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbarrow.core.adapters.html" class="btn btn-neutral float-left" title="numbarrow.core.adapters" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbarrow.core.mapinarrow_factory.html" class="btn btn-neutral float-right" title="numbarrow.core.mapinarrow_factory" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

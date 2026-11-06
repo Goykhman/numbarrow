@@ -1,0 +1,613 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.utils.arrow_array_utils &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/utils/arrow_array_utils.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.utils.arrow_array_utils</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.utils.arrow_array_utils</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Functions that adapt pyarrow arrays of several layouts to numpy arrays, and helpers for readable error messages.</span>
+
+<span class="sd">:func:`~numbarrow.core.adapters.arrow_array_adapter` picks one of these adapters by the type of the array it is given.</span>
+<span class="sd">Each adapter returns the array's data and its validity bitmap: a uint8 array of one bit per element, which</span>
+<span class="sd">:func:`~numbarrow.core.is_null.is_null` reads, or None for an array without one. :func:`uniform_arrow_array_adapter`</span>
+<span class="sd">views fixed-width data without a copy, and :func:`create_str_array` copies strings into a fixed-width Unicode array.</span>
+<span class="sd">:func:`structured_array_adapter` and :func:`structured_list_array_adapter` adapt a struct array and a list of structs</span>
+<span class="sd">field by field. :func:`create_bitmap` copies a validity bitmap. :func:`type_repr`, :func:`renamed` and</span>
+<span class="sd">:class:`MissingKeyError` keep the error messages of numbarrow short and readable.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pa</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.utils.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">arrays_viewers</span>
+
+
+<span class="c1"># uniform_arrow_array_adapter views each Arrow type in this map as the numpy dtype that the map gives it. The map is</span>
+<span class="c1"># written out instead of derived from pa.DataType.to_pandas_dtype(), because that method imports pandas. numbarrow</span>
+<span class="c1"># does not require pandas, and without it such a lookup would fail for every int and float column. pa.bool_() is</span>
+<span class="c1"># absent on purpose: Arrow packs booleans one bit per element, so a view of one byte per element would read wrong</span>
+<span class="c1"># values. The boolean handler in numbarrow.core.adapters unpacks the bits instead.</span>
+<span class="n">arrow_to_numpy_dtypes</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">pa</span><span class="o">.</span><span class="n">float64</span><span class="p">():</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">,</span>
+    <span class="n">pa</span><span class="o">.</span><span class="n">int32</span><span class="p">():</span> <span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span>
+    <span class="n">pa</span><span class="o">.</span><span class="n">int64</span><span class="p">():</span> <span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">,</span>
+    <span class="n">pa</span><span class="o">.</span><span class="n">uint8</span><span class="p">():</span> <span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1"># The length, in characters, of the longest type text that an error message quotes in full; type_repr cuts a longer</span>
+<span class="c1"># one.</span>
+<span class="n">TYPE_REPR_WIDTH</span> <span class="o">=</span> <span class="mi">120</span>
+
+
+<div class="viewcode-block" id="type_repr">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.type_repr">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">type_repr</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Return ``str(arrow_type)``; if it is longer than ``TYPE_REPR_WIDTH`` characters, cut it there and add a note.</span>
+
+<span class="sd">    The note counts the characters cut and, for a struct type, the struct's fields. A message that quotes a pyarrow type</span>
+<span class="sd">    grows with the schema: the text of a struct of a thousand fields with short names runs to about 13,000 characters,</span>
+<span class="sd">    and a message that long fills every log that records the traceback. A type whose text fits within the width, such</span>
+<span class="sd">    as a struct of a few fields, comes back unchanged.</span>
+<span class="sd">    """</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">TYPE_REPR_WIDTH</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">text</span>
+    <span class="n">cut</span> <span class="o">=</span> <span class="n">text</span><span class="p">[:</span><span class="n">TYPE_REPR_WIDTH</span><span class="p">]</span>
+    <span class="n">more</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="o">-</span> <span class="n">TYPE_REPR_WIDTH</span>
+    <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_struct</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">cut</span><span class="si">}</span><span class="s2">... (</span><span class="si">{</span><span class="n">arrow_type</span><span class="o">.</span><span class="n">num_fields</span><span class="si">}</span><span class="s2"> fields, </span><span class="si">{</span><span class="n">more</span><span class="si">}</span><span class="s2"> more characters)"</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">cut</span><span class="si">}</span><span class="s2">... (</span><span class="si">{</span><span class="n">more</span><span class="si">}</span><span class="s2"> more characters)"</span></div>
+
+
+
+<div class="viewcode-block" id="MissingKeyError">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.MissingKeyError">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MissingKeyError</span><span class="p">(</span><span class="ne">KeyError</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A ``KeyError`` whose message prints as written, without the quotes that a plain ``KeyError`` adds.</span>
+
+<span class="sd">    A plain ``KeyError`` prints the repr of its one argument, so a sentence raised through it prints inside a second</span>
+<span class="sd">    pair of quotes, and a sentence that holds quotes of its own can print with backslashes before them.</span>
+<span class="sd">    ``except KeyError`` still catches a ``MissingKeyError``; only the printed message differs. With no argument or with</span>
+<span class="sd">    several, it prints as a plain ``KeyError`` does.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">args</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__str__</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="renamed">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.renamed">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">renamed</span><span class="p">(</span><span class="n">exc</span><span class="p">:</span> <span class="ne">Exception</span><span class="p">,</span> <span class="n">prefix</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="ne">Exception</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Return a new exception whose message is ``prefix``, a colon and the message of ``exc``.</span>
+
+<span class="sd">    A ``KeyError`` that is not a pyarrow error comes back as a :class:`MissingKeyError`, because a ``KeyError`` prints</span>
+<span class="sd">    the repr of its argument, and one rebuilt from that text would quote the message twice. Otherwise the result keeps</span>
+<span class="sd">    the class of ``exc`` if ``exc`` is a pyarrow error, or if its class is exactly ``TypeError``, ``ValueError``,</span>
+<span class="sd">    ``NotImplementedError`` or ``OverflowError``; each of these can be built from one string. Any other exception, a</span>
+<span class="sd">    subclass of those four included, comes back as a ``ValueError``. A class such as ``UnicodeDecodeError``, whose</span>
+<span class="sd">    constructor takes five arguments, would raise a second error while the result is built, and the prefix would be</span>
+<span class="sd">    lost. Raise the result ``from exc`` to keep the original traceback.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">ArrowException</span><span class="p">):</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">exc</span><span class="o">.</span><span class="n">args</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">MissingKeyError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">text</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="bp">cls</span> <span class="o">=</span> <span class="nb">type</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+    <span class="n">kept</span> <span class="o">=</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">NotImplementedError</span><span class="p">,</span> <span class="ne">OverflowError</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">ArrowException</span><span class="p">)</span> <span class="ow">or</span> <span class="bp">cls</span> <span class="ow">in</span> <span class="n">kept</span><span class="p">):</span>
+        <span class="bp">cls</span> <span class="o">=</span> <span class="ne">ValueError</span>
+    <span class="k">return</span> <span class="bp">cls</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="create_bitmap">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.create_bitmap">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Buffer</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">offset</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">length</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Copy the validity bits of ``length`` elements, from element ``offset`` on, into a new uint8 array.</span>
+
+<span class="sd">    ``bitmap_buf`` is an Arrow validity buffer, such as ``array.buffers()[0]``, and ``offset`` and ``length`` are</span>
+<span class="sd">    usually the array's own. A ``bitmap_buf`` of ``None`` means that the array carries no validity buffer, and the</span>
+<span class="sd">    result is then ``None``. Otherwise the result holds one bit per element, from the least significant bit of its first</span>
+<span class="sd">    byte on: bit ``i`` is 1 if element ``offset + i`` is valid, that is, not null, and 0 if it is null. This is the</span>
+<span class="sd">    layout that :func:`~numbarrow.core.is_null.is_null` reads. The result has ``(length + 7) // 8`` bytes, none for a</span>
+<span class="sd">    ``length`` of 0, and the bits after the last element have no defined value. The result owns its memory, so it stays</span>
+<span class="sd">    correct after the Arrow array is freed. It is writable, and a write to it leaves the Arrow array unchanged.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">bitmap_buf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">bitmap_p</span> <span class="o">=</span> <span class="n">bitmap_buf</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">bitmap_len</span> <span class="o">=</span> <span class="n">bitmap_buf</span><span class="o">.</span><span class="n">size</span>
+    <span class="n">bitmap_viewer</span> <span class="o">=</span> <span class="n">arrays_viewers</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">]</span>
+    <span class="n">raw_bitmap</span> <span class="o">=</span> <span class="n">bitmap_viewer</span><span class="p">(</span><span class="n">bitmap_p</span><span class="p">,</span> <span class="n">bitmap_len</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">length</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">raw_bitmap</span><span class="p">[:</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">num_bytes</span> <span class="o">=</span> <span class="p">(</span><span class="n">length</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+    <span class="k">if</span> <span class="n">offset</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1"># raw_bitmap views the Arrow buffer through its address, so it neither owns the buffer nor keeps it alive. The</span>
+        <span class="c1"># bytes are therefore copied. A view would change under a caller who only reads it. Once the source array is</span>
+        <span class="c1"># freed and its memory reused, the view reads other bytes, and valid elements can then look null. A write</span>
+        <span class="c1"># through a view would also change the source's validity, even for elements outside a short slice.</span>
+        <span class="k">return</span> <span class="n">raw_bitmap</span><span class="p">[:</span><span class="n">num_bytes</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="c1"># For a non-zero offset, the bytes that cover elements offset to offset + length - 1 are unpacked, cut to those</span>
+    <span class="c1"># elements, and packed again, so that element offset lands on bit 0.</span>
+    <span class="n">first_byte</span> <span class="o">=</span> <span class="n">offset</span> <span class="o">//</span> <span class="mi">8</span>
+    <span class="n">last_byte</span> <span class="o">=</span> <span class="p">(</span><span class="n">offset</span> <span class="o">+</span> <span class="n">length</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+    <span class="n">relevant</span> <span class="o">=</span> <span class="n">raw_bitmap</span><span class="p">[</span><span class="n">first_byte</span><span class="p">:</span><span class="n">last_byte</span><span class="p">]</span>
+    <span class="n">bit_offset</span> <span class="o">=</span> <span class="n">offset</span> <span class="o">%</span> <span class="mi">8</span>
+    <span class="n">bits</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unpackbits</span><span class="p">(</span><span class="n">relevant</span><span class="p">,</span> <span class="n">bitorder</span><span class="o">=</span><span class="s2">"little"</span><span class="p">)</span>
+    <span class="n">sliced_bits</span> <span class="o">=</span> <span class="n">bits</span><span class="p">[</span><span class="n">bit_offset</span><span class="p">:</span><span class="n">bit_offset</span> <span class="o">+</span> <span class="n">length</span><span class="p">]</span>
+    <span class="n">pad</span> <span class="o">=</span> <span class="p">(</span><span class="o">-</span><span class="n">length</span><span class="p">)</span> <span class="o">%</span> <span class="mi">8</span>
+    <span class="k">if</span> <span class="n">pad</span><span class="p">:</span>
+        <span class="n">sliced_bits</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">pad</span><span class="p">(</span><span class="n">sliced_bits</span><span class="p">,</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">pad</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">"constant"</span><span class="p">)</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">packbits</span><span class="p">(</span><span class="n">sliced_bits</span><span class="p">,</span> <span class="n">bitorder</span><span class="o">=</span><span class="s2">"little"</span><span class="p">)</span>
+    <span class="c1"># np.packbits returns a new array that owns its memory, and sliced_bits was padded to whole bytes above, so the</span>
+    <span class="c1"># array holds exactly num_bytes bytes. A slice to num_bytes would remove nothing and would turn the result into a</span>
+    <span class="c1"># view whose base is the packed array, so the array is returned as it is.</span>
+    <span class="k">return</span> <span class="n">result</span></div>
+
+
+
+<div class="viewcode-block" id="create_str_array">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.create_str_array">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_str_array</span><span class="p">(</span><span class="n">pa_str_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StringArray</span> <span class="o">|</span> <span class="n">pa</span><span class="o">.</span><span class="n">LargeStringArray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Copy a string array into a read-only numpy array of fixed-width Unicode strings; return ``(bitmap, data)``.</span>
+
+<span class="sd">    ``bitmap`` is the array's validity bitmap from :func:`create_bitmap`, or ``None`` if the array carries no validity</span>
+<span class="sd">    buffer. ``data`` holds one string per element, and an empty string for a null element. Its width is the length, in</span>
+<span class="sd">    characters, of the longest valid value, and at least one. Every element takes four bytes per character of that</span>
+<span class="sd">    width, so one long value makes the whole array large. The bytes under a null element are never decoded and do not</span>
+<span class="sd">    count toward the width.</span>
+
+<span class="sd">    ``ValueError`` is raised if a valid value is not UTF-8, if a valid value ends in a NUL character, and if a non-empty</span>
+<span class="sd">    array lacks its offsets or data buffer. numpy pads a shorter value with NUL characters, so a value's trailing NUL</span>
+<span class="sd">    would be lost; a NUL at the start or in the middle of a value is kept.</span>
+<span class="sd">    """</span>
+    <span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">offsets_buf</span><span class="p">,</span> <span class="n">data_buf</span> <span class="o">=</span> <span class="n">pa_str_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()</span>
+    <span class="n">offset</span> <span class="o">=</span> <span class="n">pa_str_array</span><span class="o">.</span><span class="n">offset</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_str_array</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">n</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1"># A zero-length array returns before any buffer is read, because pyarrow's full validation accepts one whose</span>
+        <span class="c1"># offsets buffer is null. The result is read-only, as it is for a non-empty array, so that a caller gets a</span>
+        <span class="c1"># read-only array whatever the batch's length.</span>
+        <span class="n">empty</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="mi">0</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">"|U1"</span><span class="p">)</span>
+        <span class="n">empty</span><span class="o">.</span><span class="n">flags</span><span class="o">.</span><span class="n">writeable</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">empty</span>
+    <span class="k">if</span> <span class="n">offsets_buf</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">data_buf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># pyarrow refuses to build a non-empty string array without an offsets or data buffer. Imported through the</span>
+        <span class="c1"># Arrow C Data Interface, a NULL data pointer under offsets that are all zero arrives as a buffer of 0 bytes,</span>
+        <span class="c1"># not as None. The check is a guard for a pyarrow that does build one: the ValueError names the type, as the</span>
+        <span class="c1"># uniform and boolean adapters do for a missing data buffer. Without this check, the first use of the missing</span>
+        <span class="c1"># buffer raises an AttributeError or a TypeError that names neither the array nor its type.</span>
+        <span class="n">missing</span> <span class="o">=</span> <span class="s2">"offsets"</span> <span class="k">if</span> <span class="n">offsets_buf</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="s2">"data"</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">pa_str_array</span><span class="o">.</span><span class="n">type</span><span class="si">}</span><span class="s2"> array of length </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> has no </span><span class="si">{</span><span class="n">missing</span><span class="si">}</span><span class="s2"> buffer"</span>
+        <span class="p">)</span>
+    <span class="n">buf_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">data_buf</span><span class="p">)</span>
+    <span class="n">offsets_p</span> <span class="o">=</span> <span class="n">offsets_buf</span><span class="o">.</span><span class="n">address</span>
+    <span class="c1"># A string array has int32 offsets, and a large string array has int64 offsets.</span>
+    <span class="n">offset_dtype</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int64</span> <span class="k">if</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_large_string</span><span class="p">(</span><span class="n">pa_str_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">int32</span>
+    <span class="n">offsets_len</span> <span class="o">=</span> <span class="n">offsets_buf</span><span class="o">.</span><span class="n">size</span> <span class="o">//</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">offset_dtype</span><span class="p">)</span><span class="o">.</span><span class="n">itemsize</span>
+    <span class="n">offsets_array</span> <span class="o">=</span> <span class="n">arrays_viewers</span><span class="p">[</span><span class="n">offset_dtype</span><span class="p">](</span><span class="n">offsets_p</span><span class="p">,</span> <span class="n">offsets_len</span><span class="p">)</span>
+    <span class="n">logical_offsets</span> <span class="o">=</span> <span class="n">offsets_array</span><span class="p">[</span><span class="n">offset</span><span class="p">:</span><span class="n">offset</span> <span class="o">+</span> <span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+    <span class="n">bounds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">logical_offsets</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="c1"># The offsets of a null element may still span bytes: pc.if_else, for one, leaves the bytes of each value that it</span>
+    <span class="c1"># masks out in place. Those bytes belong to no value. Decoding them would return a value that the caller masked</span>
+    <span class="c1"># out and would size the array for a string that no caller can see. If the bytes are not UTF-8, it would also raise</span>
+    <span class="c1"># UnicodeDecodeError on an array that the Arrow format allows. So live marks the valid elements, and only those are</span>
+    <span class="c1"># measured and decoded.</span>
+    <span class="n">live</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pa_str_array</span><span class="o">.</span><span class="n">null_count</span><span class="p">:</span>
+        <span class="n">live</span> <span class="o">=</span> <span class="n">pa_str_array</span><span class="o">.</span><span class="n">is_valid</span><span class="p">()</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="n">zero_copy_only</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)</span>
+    <span class="c1"># numpy measures the width of a Unicode array in characters, and the difference of two Arrow offsets counts UTF-8</span>
+    <span class="c1"># bytes. A width taken from the offsets would allocate up to four times the memory needed for non-ASCII text, for</span>
+    <span class="c1"># every element of the array. Every UTF-8 byte except a continuation byte, 0b10xxxxxx, starts one character. One</span>
+    <span class="c1"># vectorized pass over the bytes therefore counts the characters of every value, without decoding any value twice.</span>
+    <span class="n">span_start</span><span class="p">,</span> <span class="n">span_stop</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">bounds</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="nb">int</span><span class="p">(</span><span class="n">bounds</span><span class="p">[</span><span class="n">n</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">span_stop</span> <span class="o">&gt;</span> <span class="n">span_start</span><span class="p">:</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">frombuffer</span><span class="p">(</span><span class="n">buf_view</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">,</span> <span class="n">count</span><span class="o">=</span><span class="n">span_stop</span> <span class="o">-</span> <span class="n">span_start</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="n">span_start</span><span class="p">)</span>
+        <span class="n">starts_a_char</span> <span class="o">=</span> <span class="p">(</span><span class="n">raw</span> <span class="o">&amp;</span> <span class="mh">0xC0</span><span class="p">)</span> <span class="o">!=</span> <span class="mh">0x80</span>
+        <span class="c1"># np.add.reduceat sums the values from each element's start index up to the next element's start index. The</span>
+        <span class="c1"># last element's range runs to the end of the array. For an empty range, reduceat returns the value at the start</span>
+        <span class="c1"># index instead of 0, so the count of every empty element is then set to 0. An empty last element starts at the</span>
+        <span class="c1"># end of the span, and reduceat refuses an index equal to the array's length. The False appended to padded puts</span>
+        <span class="c1"># that index inside the array. It adds nothing to the count of the last element, whose range now includes it.</span>
+        <span class="c1"># Clamping the index instead would also move the end of the previous element's range, which would then lose its</span>
+        <span class="c1"># last character.</span>
+        <span class="n">padded</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">starts_a_char</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="n">non_empty</span> <span class="o">=</span> <span class="n">bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="o">&gt;</span> <span class="n">bounds</span><span class="p">[:</span><span class="n">n</span><span class="p">]</span>
+        <span class="n">char_counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">add</span><span class="o">.</span><span class="n">reduceat</span><span class="p">(</span><span class="n">padded</span><span class="p">,</span> <span class="n">bounds</span><span class="p">[:</span><span class="n">n</span><span class="p">]</span> <span class="o">-</span> <span class="n">span_start</span><span class="p">)</span>
+        <span class="n">char_counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">non_empty</span><span class="p">,</span> <span class="n">char_counts</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="c1"># numpy pads each element of a fixed-width Unicode array with NUL characters, so an element cannot end in NUL:</span>
+        <span class="c1"># storing "ab\x00" stores "ab". A NUL at the start or in the middle of a value is kept. A valid value that ends</span>
+        <span class="c1"># in NUL is refused, because a silently shortened string is a wrong answer. The check leaves out two kinds of</span>
+        <span class="c1"># element: an empty one, whose last_byte index of 0 points into another value, and a null one, whose bytes</span>
+        <span class="c1"># belong to no value.</span>
+        <span class="n">last_byte</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">non_empty</span><span class="p">,</span> <span class="n">bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="o">-</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">span_start</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">trailing_nul</span> <span class="o">=</span> <span class="n">non_empty</span> <span class="o">&amp;</span> <span class="n">live</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="n">last_byte</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">trailing_nul</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="n">index_</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">trailing_nul</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"element </span><span class="si">{</span><span class="n">index_</span><span class="si">}</span><span class="s2"> of a </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">-element string array ends in a NUL, "</span>
+                <span class="sa">f</span><span class="s2">"which a numpy fixed-width unicode array cannot represent: a "</span>
+                <span class="sa">f</span><span class="s2">"trailing NUL is how it pads a shorter element"</span>
+            <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">char_counts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="n">item_sz</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">char_counts</span><span class="p">[</span><span class="n">live</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">())</span> <span class="k">if</span> <span class="n">live</span><span class="o">.</span><span class="n">any</span><span class="p">()</span> <span class="k">else</span> <span class="mi">0</span>
+    <span class="c1"># numpy fills a new unicode array with empty strings, because the U dtype needs initialization, so a null row that</span>
+    <span class="c1"># the loop below skips holds the empty string.</span>
+    <span class="n">str_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="n">n</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="sa">f</span><span class="s2">"|U</span><span class="si">{</span><span class="n">item_sz</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">live</span><span class="p">[</span><span class="n">i</span><span class="p">]:</span>
+            <span class="k">continue</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">bounds</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+        <span class="n">length</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">bounds</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span> <span class="o">-</span> <span class="n">start</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">str_array</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">buf_view</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="n">start</span> <span class="o">+</span> <span class="n">length</span><span class="p">])</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">UnicodeDecodeError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="c1"># The position that a UnicodeDecodeError reports is a byte offset inside the element, so the message adds</span>
+            <span class="c1"># the index of the element in the array.</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"element </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> of a </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">-element </span><span class="si">{</span><span class="n">pa_str_array</span><span class="o">.</span><span class="n">type</span><span class="si">}</span><span class="s2"> array is not valid UTF-8: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+    <span class="n">bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+    <span class="c1"># The array is a new allocation, but it is read-only like the views that the fixed-width adapters return, so that a</span>
+    <span class="c1"># caller gets a read-only array whatever the Arrow type.</span>
+    <span class="n">str_array</span><span class="o">.</span><span class="n">flags</span><span class="o">.</span><span class="n">writeable</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">bitmap</span><span class="p">,</span> <span class="n">str_array</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_union_layout</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return whether ``arrow_type`` is a union type, looking through any extension type to its storage type."""</span>
+    <span class="k">while</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">BaseExtensionType</span><span class="p">):</span>
+        <span class="n">arrow_type</span> <span class="o">=</span> <span class="n">arrow_type</span><span class="o">.</span><span class="n">storage_type</span>
+    <span class="k">return</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_union</span><span class="p">(</span><span class="n">arrow_type</span><span class="p">)</span>
+
+
+<span class="c1"># The struct adapters keep the validity of a struct's rows apart from the validity of each field, as Awkward Array's</span>
+<span class="c1"># BitMaskedArray over a RecordArray does:</span>
+<span class="c1"># https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html</span>
+<div class="viewcode-block" id="structured_array_adapter">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.structured_array_adapter">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">structured_array_adapter</span><span class="p">(</span><span class="n">struct_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span>
+<span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Adapt a struct array field by field; return ``(struct_bitmap, bitmaps, datas)``.</span>
+
+<span class="sd">    ``struct_bitmap`` is the validity bitmap of the struct's rows, or ``None`` if the struct carries no validity</span>
+<span class="sd">    buffer. ``bitmaps`` and ``datas`` map each field name, in field order, to the field's validity bitmap and its data,</span>
+<span class="sd">    adapted by :func:`~numbarrow.core.adapters.arrow_array_adapter` as an array of the field's type. A field's bitmap</span>
+<span class="sd">    marks only the field's own nulls, and it is ``None`` if the field carries no validity buffer. A row that is null as</span>
+<span class="sd">    a whole need not be marked in a field's bitmap, so pass both bitmaps to</span>
+<span class="sd">    :func:`~numbarrow.core.is_null.is_null_struct`. Under such a row, a string field holds an empty string, and any</span>
+<span class="sd">    other field holds whatever its buffer holds there.</span>
+
+<span class="sd">    A field's data is a read-only view of the field's buffer if the field holds int32, int64, float64, uint8, date64 or</span>
+<span class="sd">    timestamp values; the int64 values of a date64 or timestamp field need no conversion to ``datetime64``. The data is</span>
+<span class="sd">    a read-only copy for three kinds of field: numbarrow unpacks the bits of a boolean field,</span>
+<span class="sd">    turns the int32 days of a date32 field into ``datetime64[D]``, and copies a string field into fixed-width Unicode.</span>
+
+<span class="sd">    ``TypeError`` is raised if ``struct_array`` is not a ``pyarrow.StructArray``. ``NotImplementedError`` is raised</span>
+<span class="sd">    for repeated field names and for a field of a union type. A ``NotImplementedError``, ``ValueError``, ``TypeError``</span>
+<span class="sd">    or pyarrow error from the adapter of a field, such as the error for an unsupported type, is raised again through</span>
+<span class="sd">    :func:`renamed`, with ``struct field '&lt;name&gt;'`` and a colon in front of its message. A field that adapts but is</span>
+<span class="sd">    itself a struct, a list of structs or a map raises ``NotImplementedError``.</span>
+<span class="sd">    """</span>
+    <span class="c1"># numbarrow.core.adapters imports this module, so this function imports the dispatcher when it runs. An import at</span>
+    <span class="c1"># module scope would be circular.</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.adapters</span><span class="w"> </span><span class="kn">import</span> <span class="n">arrow_array_adapter</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">struct_array</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span><span class="p">):</span>
+        <span class="c1"># The type is checked with an if, not an assert, because python -O removes asserts. Any other array would then</span>
+        <span class="c1"># reach the field loop and fail there with an error about something else.</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"structured_array_adapter takes a StructArray, not </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">struct_array</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">data_type</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructType</span> <span class="o">=</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">type</span>
+    <span class="n">struct_bitmap_buf</span> <span class="o">=</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">struct_bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span>
+        <span class="n">struct_bitmap_buf</span><span class="p">,</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">struct_array</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="p">[</span><span class="n">data_type</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">data_type</span><span class="p">))]</span>
+    <span class="n">duplicates</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">names</span> <span class="k">if</span> <span class="n">names</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">}</span>
+    <span class="k">if</span> <span class="n">duplicates</span><span class="p">:</span>
+        <span class="c1"># Arrow allows repeated field names, but the dicts of the result are keyed by field name, so they cannot hold</span>
+        <span class="c1"># two fields of one name.</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Not implemented for a struct with repeated field names "</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">duplicates</span><span class="p">)</span><span class="si">}</span><span class="s2"> in </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">struct_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">bitmaps</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">datas</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="c1"># struct_array.field(i) returns the child with only its own validity bits, so a row that is null at the struct</span>
+    <span class="c1"># level can look valid in the child. Adapting that child would treat the bytes under such a row as a value. A</span>
+    <span class="c1"># string field would take its width from those bytes and decode them. It would raise UnicodeDecodeError if they</span>
+    <span class="c1"># are not UTF-8, and refuse them if they end in NUL. flatten() marks the struct's null rows as null in every child,</span>
+    <span class="c1"># so the data is adapted from the flattened children. The bitmap that this function returns for a field still</span>
+    <span class="c1"># comes from the raw child. The function returns the struct's validity and each field's apart, and is_null_struct</span>
+    <span class="c1"># takes both, so merging them here would lose which of the two made a value null.</span>
+    <span class="n">raw_children</span> <span class="o">=</span> <span class="p">[</span><span class="n">struct_array</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">data_type</span><span class="p">))]</span>
+    <span class="k">for</span> <span class="n">field_ind</span><span class="p">,</span> <span class="n">raw_child</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">raw_children</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">_is_union_layout</span><span class="p">(</span><span class="n">raw_child</span><span class="o">.</span><span class="n">type</span><span class="p">):</span>
+            <span class="c1"># flatten() writes the struct's validity into each child, and a union has no validity buffer to write it</span>
+            <span class="c1"># to. In pyarrow 24, flatten() aborts the process for a struct that has a null row and a union field. The</span>
+            <span class="c1"># dispatcher would refuse the union with a NotImplementedError anyway, so a union field is refused before</span>
+            <span class="c1"># anything is flattened, whether or not the struct has a null row.</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"struct field </span><span class="si">{</span><span class="n">data_type</span><span class="p">[</span><span class="n">field_ind</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="si">!r}</span><span class="s2">: Not implemented for an array of "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">raw_child</span><span class="p">)</span><span class="si">}</span><span class="s2"> elements of type </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">raw_child</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2">, a union layout, which "</span>
+                <span class="sa">f</span><span class="s2">"cannot take the struct's validity"</span>
+            <span class="p">)</span>
+    <span class="n">masked</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">struct_array</span><span class="o">.</span><span class="n">flatten</span><span class="p">())</span> <span class="k">if</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">null_count</span> <span class="k">else</span> <span class="n">raw_children</span>
+    <span class="k">for</span> <span class="n">field_ind</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">data_type</span><span class="p">)):</span>
+        <span class="n">field</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Field</span> <span class="o">=</span> <span class="n">data_type</span><span class="p">[</span><span class="n">field_ind</span><span class="p">]</span>
+        <span class="n">field_name</span> <span class="o">=</span> <span class="n">field</span><span class="o">.</span><span class="n">name</span>
+        <span class="n">raw_child</span> <span class="o">=</span> <span class="n">raw_children</span><span class="p">[</span><span class="n">field_ind</span><span class="p">]</span>
+        <span class="n">pa_array</span> <span class="o">=</span> <span class="n">masked</span><span class="p">[</span><span class="n">field_ind</span><span class="p">]</span>
+        <span class="c1"># Each child goes through the dispatcher, not straight to uniform_arrow_array_adapter. A boolean child holds</span>
+        <span class="c1"># one bit per element, which a uniform view would read as one byte per element. A child with more than two</span>
+        <span class="c1"># buffers, such as a string child, has no uniform layout at all. It needs its own handler, or the dispatcher's</span>
+        <span class="c1"># NotImplementedError for an unsupported type.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">adapted</span> <span class="o">=</span> <span class="n">arrow_array_adapter</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">NotImplementedError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">ArrowException</span><span class="p">)</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="c1"># The dispatcher's message names the child's type but not the field. Many common Arrow types, such as</span>
+            <span class="c1"># float32 and int16, have no handler, so the field's name is what tells the caller which field to change.</span>
+            <span class="k">raise</span> <span class="n">renamed</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"struct field </span><span class="si">{</span><span class="n">field_name</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">adapted</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"Not implemented for struct field </span><span class="si">{</span><span class="n">field_name</span><span class="si">!r}</span><span class="s2"> of type </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">pa_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2">: "</span>
+                <span class="sa">f</span><span class="s2">"a structured child adapts to per-field dictionaries, which do not fit "</span>
+                <span class="sa">f</span><span class="s2">"a single field's bitmap and data"</span>
+            <span class="p">)</span>
+        <span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">adapted</span>
+        <span class="k">if</span> <span class="n">struct_array</span><span class="o">.</span><span class="n">null_count</span><span class="p">:</span>
+            <span class="c1"># The bitmap of a flattened child includes the struct's null rows, so the field's own bitmap is rebuilt</span>
+            <span class="c1"># from buffers()[0] of the raw child. A field then gets the same bitmap whether or not the struct has null</span>
+            <span class="c1"># rows.</span>
+            <span class="n">bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">raw_child</span><span class="o">.</span><span class="n">buffers</span><span class="p">()[</span><span class="mi">0</span><span class="p">],</span> <span class="n">raw_child</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">raw_child</span><span class="p">))</span>
+        <span class="n">bitmaps</span><span class="p">[</span><span class="n">field_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">bitmap</span>
+        <span class="n">datas</span><span class="p">[</span><span class="n">field_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">data</span>
+    <span class="k">return</span> <span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">bitmaps</span><span class="p">,</span> <span class="n">datas</span></div>
+
+
+
+<div class="viewcode-block" id="structured_list_array_adapter">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.structured_list_array_adapter">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">structured_list_array_adapter</span><span class="p">(</span><span class="n">list_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">ListArray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span>
+<span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Adapt a list array of structs whose rows all have one length; return ``(struct_bitmap, bitmaps, datas)``.</span>
+
+<span class="sd">    The result is what :func:`structured_array_adapter` returns for the elements of all the array's rows, in row order,</span>
+<span class="sd">    so a field's data is a view or a copy as that function describes. The result carries no offsets: element ``k`` of</span>
+<span class="sd">    row ``r`` is at index ``r * width + k``, where ``width`` is the common row length. ``struct_bitmap`` therefore marks</span>
+<span class="sd">    null elements, not null rows. A ``pyarrow.MapArray`` is a list array whose elements are key and value structs, so</span>
+<span class="sd">    it adapts to the two fields ``key`` and ``value``.</span>
+
+<span class="sd">    ``TypeError`` is raised if ``list_array`` is not a ``pyarrow.ListArray``. ``NotImplementedError`` is raised if its</span>
+<span class="sd">    elements are not structs, if a row is null, and if the rows differ in length, an empty row among longer ones</span>
+<span class="sd">    included. Without offsets, the order of the elements alone cannot say which row an element belongs to.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">list_array</span><span class="p">,</span> <span class="n">pa</span><span class="o">.</span><span class="n">ListArray</span><span class="p">):</span>
+        <span class="c1"># The type is checked with an if, not an assert, because python -O removes asserts. Any other array would then</span>
+        <span class="c1"># reach .values below and fail there with an AttributeError.</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"structured_list_array_adapter takes a ListArray, not </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">list_array</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">values</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span> <span class="o">=</span> <span class="n">list_array</span><span class="o">.</span><span class="n">values</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">pa</span><span class="o">.</span><span class="n">types</span><span class="o">.</span><span class="n">is_struct</span><span class="p">(</span><span class="n">values</span><span class="o">.</span><span class="n">type</span><span class="p">):</span>
+        <span class="c1"># The message names the list's type and length, not the array. The repr of an array holds every value in it, so</span>
+        <span class="c1"># it can be of any size, and it would copy the caller's data into whatever log records the traceback. The list</span>
+        <span class="c1"># type already names the element type, so the message does not repeat it.</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Not implemented for a list array of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">list_array</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows of "</span>
+            <span class="sa">f</span><span class="s2">"type </span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">list_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2">: its elements are not structs"</span>
+        <span class="p">)</span>
+    <span class="c1"># The result holds the elements of all the rows with no offsets, so a caller can map element i back to its row only</span>
+    <span class="c1"># by assuming that every row has the same number of elements. A null row, an empty row and a row of another length</span>
+    <span class="c1"># each break that assumption, and each shifts every element after it. The struct-level bitmap of the result covers</span>
+    <span class="c1"># the elements, not the rows, so the result could not report such a row either. Such an array is refused instead</span>
+    <span class="c1"># of answered wrongly.</span>
+    <span class="k">if</span> <span class="n">list_array</span><span class="o">.</span><span class="n">null_count</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Not implemented for a list array of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">list_array</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows of type "</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">list_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2"> with </span><span class="si">{</span><span class="n">list_array</span><span class="o">.</span><span class="n">null_count</span><span class="si">}</span><span class="s2"> null row(s): a "</span>
+            <span class="sa">f</span><span class="s2">"null row contributes no elements, so the flattened result would "</span>
+            <span class="sa">f</span><span class="s2">"silently misalign with the rows"</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">list_array</span><span class="p">):</span>
+        <span class="n">bounds</span> <span class="o">=</span> <span class="n">list_array</span><span class="o">.</span><span class="n">offsets</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="n">zero_copy_only</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+        <span class="n">widths</span> <span class="o">=</span> <span class="n">bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="o">-</span> <span class="n">bounds</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">low</span><span class="p">,</span> <span class="n">high</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">widths</span><span class="o">.</span><span class="n">min</span><span class="p">()),</span> <span class="nb">int</span><span class="p">(</span><span class="n">widths</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+        <span class="k">if</span> <span class="n">low</span> <span class="o">!=</span> <span class="n">high</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"Not implemented for a list array of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">list_array</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows of type "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">type_repr</span><span class="p">(</span><span class="n">list_array</span><span class="o">.</span><span class="n">type</span><span class="p">)</span><span class="si">}</span><span class="s2"> whose rows are not all the same length: "</span>
+                <span class="sa">f</span><span class="s2">"they run from </span><span class="si">{</span><span class="n">low</span><span class="si">}</span><span class="s2"> to </span><span class="si">{</span><span class="n">high</span><span class="si">}</span><span class="s2">. Element order alone cannot say which "</span>
+                <span class="sa">f</span><span class="s2">"row an element belongs to unless every row is the same length, so "</span>
+                <span class="sa">f</span><span class="s2">"the result would silently misalign with the rows"</span>
+            <span class="p">)</span>
+    <span class="c1"># values is the whole child array, whatever the offset and length of this array, so a sliced list would return the</span>
+    <span class="c1"># elements of rows outside the slice. The offsets index into values directly, so the first and the last offset of</span>
+    <span class="c1"># this array bound the elements of its rows.</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">list_array</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1"># pyarrow's full validation accepts a zero-length list array whose validity and offsets buffers are null. In</span>
+        <span class="c1"># pyarrow 24, reading the offsets of such an array crashes the process instead of raising, so the empty result</span>
+        <span class="c1"># is built without reading them.</span>
+        <span class="n">data_values</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">StructArray</span> <span class="o">=</span> <span class="n">values</span><span class="o">.</span><span class="n">slice</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">offsets</span> <span class="o">=</span> <span class="n">list_array</span><span class="o">.</span><span class="n">offsets</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">offsets</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">as_py</span><span class="p">()</span>
+        <span class="n">stop</span> <span class="o">=</span> <span class="n">offsets</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">list_array</span><span class="p">)]</span><span class="o">.</span><span class="n">as_py</span><span class="p">()</span>
+        <span class="n">data_values</span> <span class="o">=</span> <span class="n">values</span><span class="o">.</span><span class="n">slice</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="n">stop</span> <span class="o">-</span> <span class="n">start</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">structured_array_adapter</span><span class="p">(</span><span class="n">data_values</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="uniform_arrow_array_adapter">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.arrow_array_utils.uniform_arrow_array_adapter">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">uniform_arrow_array_adapter</span><span class="p">(</span><span class="n">pa_array</span><span class="p">:</span> <span class="n">pa</span><span class="o">.</span><span class="n">Array</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""View the data of a fixed-width array as a read-only numpy array, without a copy; return ``(bitmap, data)``.</span>
+
+<span class="sd">    The array's type must be one that ``arrow_to_numpy_dtypes`` maps to a numpy dtype: float64, int32, int64 or uint8.</span>
+<span class="sd">    Any other type raises ``ValueError``, a boolean one included, because Arrow stores one bit per boolean value.</span>
+<span class="sd">    A non-empty array without a data buffer raises ``ValueError`` as well. ``bitmap`` is the array's validity bitmap</span>
+<span class="sd">    from :func:`create_bitmap`, or ``None`` if the array carries no validity buffer. ``data`` views the array's data</span>
+<span class="sd">    buffer from the array's offset on, and it keeps that buffer alive.</span>
+
+<span class="sd">    ``data`` is read-only, because Arrow arrays are immutable, and its ``WRITEABLE`` flag cannot be set. pyarrow's own</span>
+<span class="sd">    ``Array.to_numpy(zero_copy_only=True)`` returns the same kind of view. A slice or reshape of ``data`` that an</span>
+<span class="sd">    ``@njit`` function returns is a new array whose flag can be set, and a store through it then changes the Arrow</span>
+<span class="sd">    array. Declare a numba signature that receives ``data`` with ``readonly=True``; such a signature accepts writable</span>
+<span class="sd">    arrays as well.</span>
+<span class="sd">    """</span>
+    <span class="n">data_arrow_ty</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">type</span>
+    <span class="n">data_np_ty</span> <span class="o">=</span> <span class="n">arrow_to_numpy_dtypes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">data_arrow_ty</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">data_np_ty</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># The dtype is looked up before the buffers are unpacked, so that an array with more than two buffers, such as</span>
+        <span class="c1"># a string array, is refused with a message that names its type instead of "too many values to unpack".</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"There is no numpy view type for </span><span class="si">{</span><span class="n">data_arrow_ty</span><span class="si">}</span><span class="s2"> in "</span>
+            <span class="sa">f</span><span class="s2">"`arrow_array_utils.arrow_to_numpy_dtypes`. Add it?"</span>
+        <span class="p">)</span>
+    <span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">data_buf</span> <span class="o">=</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">buffers</span><span class="p">()</span>
+    <span class="n">data_item_byte_size</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">data_np_ty</span><span class="p">)</span><span class="o">.</span><span class="n">itemsize</span>
+    <span class="n">data_len</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">data_len</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1"># A zero-length array returns before any buffer is read. Its offset may point past the end of an empty buffer,</span>
+        <span class="c1"># where np.frombuffer raises a ValueError that names neither the array nor its type. pyarrow's full validation</span>
+        <span class="c1"># also accepts one with a null data buffer. Such an array is the same logical array as one with empty buffers,</span>
+        <span class="c1"># so both get the same empty result. structured_list_array_adapter returns early for a zero-length list for</span>
+        <span class="c1"># the same reason. The result is read-only, as it is for a non-empty array, so that a caller gets a read-only</span>
+        <span class="c1"># array whatever the batch's length.</span>
+        <span class="n">empty</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">((</span><span class="mi">0</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">data_np_ty</span><span class="p">)</span>
+        <span class="n">empty</span><span class="o">.</span><span class="n">flags</span><span class="o">.</span><span class="n">writeable</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="n">empty</span>
+    <span class="k">if</span> <span class="n">data_buf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># pyarrow refuses to build a non-empty array without a data buffer, and pyarrow 14 and 24 also refuse one</span>
+        <span class="c1"># imported through the Arrow C Data Interface. The check is a guard for a pyarrow that does not: the ValueError</span>
+        <span class="c1"># names the type, where memoryview(None) below would raise a TypeError that names neither the array nor its</span>
+        <span class="c1"># type.</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">data_arrow_ty</span><span class="si">}</span><span class="s2"> array of length </span><span class="si">{</span><span class="n">data_len</span><span class="si">}</span><span class="s2"> has no data buffer"</span><span class="p">)</span>
+    <span class="c1"># The data is viewed through the pyarrow buffer, not through its address, so that the .base chain of the result</span>
+    <span class="c1"># holds the buffer and keeps it alive. A view of a bare address owns nothing: once the caller drops the source</span>
+    <span class="c1"># array, the view reads freed memory, which can give wrong values or crash the process.</span>
+    <span class="c1">#</span>
+    <span class="c1"># The view is read-only whatever the origin of the buffer. np.frombuffer makes a read-only view only of a buffer</span>
+    <span class="c1"># that pyarrow marks immutable, and that depends on where the buffer came from. A locally built array is mutable,</span>
+    <span class="c1"># while the same data after an Arrow IPC round trip, the transport that mapInArrow uses, is not. Clearing the</span>
+    <span class="c1"># WRITEABLE flag after the view is made would not be enough, because a caller can set the flag again and then write</span>
+    <span class="c1"># into the source array. numpy refuses to set WRITEABLE on an array whose base is read-only, so the memoryview is</span>
+    <span class="c1"># made read-only first. The same rule makes pyarrow's own to_numpy(zero_copy_only=True) refuse the flag.</span>
+    <span class="c1">#</span>
+    <span class="c1"># The read-only memoryview is wrapped in a pyarrow buffer, and that buffer becomes the base of the result. Given the</span>
+    <span class="c1"># memoryview itself, np.frombuffer would keep only a wrapper of it as .base. Calling release() on that wrapper ends</span>
+    <span class="c1"># its hold on the source buffer, and a caller who did so and dropped the array would then read freed memory. A</span>
+    <span class="c1"># pa.Buffer has no release() method, holds the memoryview and through it the source buffer, and exports its memory</span>
+    <span class="c1"># read-only, so numpy still refuses to set WRITEABLE.</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">frombuffer</span><span class="p">(</span>
+        <span class="n">pa</span><span class="o">.</span><span class="n">py_buffer</span><span class="p">(</span><span class="nb">memoryview</span><span class="p">(</span><span class="n">data_buf</span><span class="p">)</span><span class="o">.</span><span class="n">toreadonly</span><span class="p">()),</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="n">data_np_ty</span><span class="p">,</span>
+        <span class="n">count</span><span class="o">=</span><span class="n">data_len</span><span class="p">,</span>
+        <span class="n">offset</span><span class="o">=</span><span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span> <span class="o">*</span> <span class="n">data_item_byte_size</span>
+    <span class="p">)</span>
+    <span class="n">bitmap</span> <span class="o">=</span> <span class="n">create_bitmap</span><span class="p">(</span><span class="n">bitmap_buf</span><span class="p">,</span> <span class="n">pa_array</span><span class="o">.</span><span class="n">offset</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">pa_array</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">bitmap</span><span class="p">,</span> <span class="n">data</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

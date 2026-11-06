@@ -1,0 +1,192 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.utils.utils &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/utils/utils.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.utils.utils</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.utils.utils</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Compiled functions, called viewers, that return a numpy array over the memory at a raw address without a copy.</span>
+
+<span class="sd">A viewer takes an address, such as ``pyarrow.Buffer.address``, and a number of elements, and returns a one-dimensional</span>
+<span class="sd">numpy array of one dtype over the memory there. :func:`numpy_array_from_ptr_factory` compiles the viewer for a dtype,</span>
+<span class="sd">and ``arrays_viewers`` keeps one viewer per key, such as ``np.uint8``, compiled the first time the key is requested. The</span>
+<span class="sd">array that a viewer returns does not keep the memory alive, and it is writable. The adapters in</span>
+<span class="sd">:mod:`numbarrow.utils.arrow_array_utils` and :mod:`numbarrow.core.adapters` therefore use viewers only to read</span>
+<span class="sd">validity bitmaps, packed booleans and string offsets, and they return copies, never the views themselves.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">carray</span><span class="p">,</span> <span class="n">from_dtype</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">intp</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">Array</span><span class="p">,</span> <span class="n">voidptr</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_with_options</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_ptr_as_int_to_voidptr</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">arg_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Convert an integer memory address to a ``voidptr`` that :func:`numba.carray` can read through.</span>
+
+<span class="sd">    The function is a numba intrinsic, so only jitted code can call it. numba types a call as ``voidptr(arg_type)`` and</span>
+<span class="sd">    compiles it to one LLVM ``inttoptr`` instruction. An intrinsic has no pure-Python form, so under</span>
+<span class="sd">    ``NUMBA_DISABLE_JIT=1`` every viewer call raises ``NotImplementedError``.</span>
+<span class="sd">    """</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">context</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">(</span><span class="n">voidptr</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">voidptr</span><span class="p">(</span><span class="n">arg_type</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="numpy_array_from_ptr_factory">
+<a class="viewcode-back" href="../../../numbarrow.utils.html#numbarrow.utils.utils.numpy_array_from_ptr_factory">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">numpy_array_from_ptr_factory</span><span class="p">(</span><span class="n">dtype_</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Compile and return the viewer for ``dtype_``: a function that views the memory at an address as a numpy array.</span>
+
+<span class="sd">    The viewer takes ``(ptr_as_int, sz)``, typed ``intp`` and ``int64``, and returns a one-dimensional C-contiguous</span>
+<span class="sd">    array of ``sz`` elements of ``dtype_`` that starts at the address ``ptr_as_int``. ``dtype_`` is anything that</span>
+<span class="sd">    ``numpy.dtype`` accepts and numba supports, a structured dtype included; the object dtype fails to compile. The</span>
+<span class="sd">    factory compiles the viewer under numbarrow's jit options, as</span>
+<span class="sd">    :func:`~numbarrow.core.configurations.jit_with_options` describes, and each call builds a new viewer;</span>
+<span class="sd">    ``arrays_viewers`` builds one per key and keeps it.</span>
+
+<span class="sd">    The viewer copies nothing. Its array views the memory at the address without keeping that memory alive, and the</span>
+<span class="sd">    array is writable. Reading it after the memory is freed is undefined behavior, and a write through it changes the</span>
+<span class="sd">    memory. :func:`~numbarrow.core.adapters.arrow_array_adapter` is the supported way to view an Arrow array, because</span>
+<span class="sd">    it returns read-only arrays that keep their Arrow buffers alive.</span>
+<span class="sd">    """</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">viewer</span><span class="p">(</span><span class="n">ptr_as_int</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">sz</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="c1"># carray makes an array of the memory at the address, without a copy.</span>
+        <span class="k">return</span> <span class="n">carray</span><span class="p">(</span><span class="n">_ptr_as_int_to_voidptr</span><span class="p">(</span><span class="n">ptr_as_int</span><span class="p">),</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">sz</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype_</span><span class="p">)</span>
+    <span class="c1"># numba names the cache files of a function after its module file, its qualified name and its first line number.</span>
+    <span class="c1"># Python gives every viewer that this factory makes the same first line and the same qualified name,</span>
+    <span class="c1"># numpy_array_from_ptr_factory.&lt;locals&gt;.viewer. Under that name, the viewers would share one index file and one set</span>
+    <span class="c1"># of data files, which numba writes without a lock. Processes that import numbarrow together on a cold cache could</span>
+    <span class="c1"># read the same index and pick the same data-file name for different viewers. A later process could then load the</span>
+    <span class="c1"># wrong machine code. A qualified name per dtype gives each viewer its own index and data files. With one entry per</span>
+    <span class="c1"># index, two writers have nothing to disagree about.</span>
+    <span class="n">dtype_</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">dtype_</span><span class="p">)</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"view_</span><span class="si">{</span><span class="n">dtype_</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">"</span>
+    <span class="k">if</span> <span class="n">dtype_</span><span class="o">.</span><span class="n">fields</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># numpy gives every structured dtype of one itemsize the same name, void&lt;bits&gt;, so two such dtypes would get</span>
+        <span class="c1"># viewers of one name. If two processes compiled them into one cache, a later process that loads both can run</span>
+        <span class="c1"># the code of the first for the second. The repr of a dtype tells them apart, so a hash of it goes into the</span>
+        <span class="c1"># name. The hash is of the repr, not of dtype.descr, because numpy refuses to build descr for a dtype with</span>
+        <span class="c1"># out-of-order or overlapping fields. Such a dtype is what multi-field indexing, rec[["b", "a"]], returns.</span>
+        <span class="n">name</span> <span class="o">+=</span> <span class="s2">"_"</span> <span class="o">+</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha1</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">dtype_</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">())</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">12</span><span class="p">]</span>
+    <span class="n">viewer</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="n">name</span>
+    <span class="n">viewer</span><span class="o">.</span><span class="vm">__qualname__</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">numpy_array_from_ptr_factory</span><span class="o">.</span><span class="vm">__qualname__</span><span class="si">}</span><span class="s2">.&lt;locals&gt;.</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">"</span>
+    <span class="k">return</span> <span class="n">jit_with_options</span><span class="p">(</span><span class="n">Array</span><span class="p">(</span><span class="n">from_dtype</span><span class="p">(</span><span class="n">dtype_</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">)(</span><span class="n">intp</span><span class="p">,</span> <span class="n">int64</span><span class="p">))(</span><span class="n">viewer</span><span class="p">)</span></div>
+
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_Viewers</span><span class="p">(</span><span class="nb">dict</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A dict of viewers by dtype that compiles each viewer the first time its key is requested, then keeps it.</span>
+
+<span class="sd">    ``arrays_viewers[np.int32]`` compiles the int32 viewer through :func:`numpy_array_from_ptr_factory` on the first</span>
+<span class="sd">    request and returns that same function on every later request. A dtype that nothing requests is never compiled.</span>
+<span class="sd">    The adapters request uint8 for validity bitmaps and packed booleans, and int32 and int64 for string offsets. Each</span>
+<span class="sd">    dtype has an index file and data files of its own in numba's cache.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__missing__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dtype_</span><span class="p">):</span>
+        <span class="n">viewer</span> <span class="o">=</span> <span class="bp">self</span><span class="p">[</span><span class="n">dtype_</span><span class="p">]</span> <span class="o">=</span> <span class="n">numpy_array_from_ptr_factory</span><span class="p">(</span><span class="n">dtype_</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">viewer</span>
+
+
+<span class="n">arrays_viewers</span> <span class="o">=</span> <span class="n">_Viewers</span><span class="p">()</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

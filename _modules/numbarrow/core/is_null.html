@@ -1,0 +1,215 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbarrow.core.is_null &mdash; numbarrow  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbarrow/_modules/numbarrow/core/is_null.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbarrow
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">API reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbarrow</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbarrow.core.is_null</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbarrow.core.is_null</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Functions, compiled with numba, that read Arrow validity bitmaps and bit-packed boolean values.</span>
+
+<span class="sd">An Arrow validity bitmap holds one bit for each element of an array: 1 if the element is valid, 0 if it is null. The</span>
+<span class="sd">bits are packed into uint8 bytes from the least significant bit up, so element ``i`` is bit ``i % 8`` of byte</span>
+<span class="sd">``i // 8``. :func:`is_null` reads the bit of one element, and :func:`is_null_struct` reads the two bitmaps that</span>
+<span class="sd">together decide whether a value of a struct's field is null. Arrow packs the values of a boolean array in the same</span>
+<span class="sd">way, and :func:`unpack_booleans` expands them into a numpy boolean array. numba compiles all three functions when this</span>
+<span class="sd">module is imported, with the options of :mod:`numbarrow.core.configurations`. Python code and jitted code can both</span>
+<span class="sd">call them.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">boolean</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">Array</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">uint8</span><span class="p">,</span> <span class="n">bool_</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbarrow.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_with_options</span>
+
+
+<div class="viewcode-block" id="is_null">
+<a class="viewcode-back" href="../../../numbarrow.core.is_null.html#numbarrow.core.is_null.is_null">[docs]</a>
+<span class="nd">@jit_with_options</span><span class="p">(</span><span class="n">boolean</span><span class="p">(</span><span class="n">int64</span><span class="p">,</span> <span class="n">Array</span><span class="p">(</span><span class="n">uint8</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">,</span> <span class="n">readonly</span><span class="o">=</span><span class="kc">True</span><span class="p">)))</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">is_null</span><span class="p">(</span><span class="n">index_</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bitmap</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Return True if element ``index_`` is null in the validity bitmap ``bitmap``, and False if it is valid.</span>
+
+<span class="sd">    ``bitmap`` must be a one-dimensional, C-contiguous uint8 array, read-only or writable, as the adapters return it.</span>
+<span class="sd">    Called from Python with anything else, None included, the function raises ``TypeError``. An adapter returns None</span>
+<span class="sd">    for an array without a validity buffer, whose elements are all valid, so test for None before the call.</span>
+
+<span class="sd">    ``index_`` must satisfy ``0 &lt;= index_ &lt; 8 * len(bitmap)``. numba compiles without bounds checks by default, so an</span>
+<span class="sd">    index past the end reads memory outside the bitmap: the answer is meaningless, and the read can crash the process.</span>
+<span class="sd">    With bounds checks, the function raises ``IndexError`` instead. ``NUMBARROW_JIT_OPTIONS='{"boundscheck": true}'``</span>
+<span class="sd">    turns them on, and caching off, because the object replaces the default ``{"cache": true}``. With caching on,</span>
+<span class="sd">    through ``{"cache": true, "boundscheck": true}`` or numba's ``NUMBA_BOUNDSCHECK=1``, numba still loads code that it</span>
+<span class="sd">    cached without bounds checks, so point ``NUMBA_CACHE_DIR`` at a new directory as well.</span>
+
+<span class="sd">    A negative index down to ``-8 * len(bitmap)`` counts back from the end, as a numpy index does: it reads the bit of</span>
+<span class="sd">    element ``8 * len(bitmap) + index_``. That read stays inside the bitmap, so bounds checks do not catch it. A lower</span>
+<span class="sd">    index reads outside the bitmap, and bounds checks catch it.</span>
+
+<span class="sd">    :param index\\_: the zero-based index of the element</span>
+<span class="sd">    :param bitmap: the packed validity bitmap</span>
+<span class="sd">    :returns: True if the element's bit is 0, False if it is 1</span>
+<span class="sd">    """</span>
+    <span class="n">byte_for_index</span> <span class="o">=</span> <span class="n">bitmap</span><span class="p">[</span><span class="n">index_</span> <span class="o">//</span> <span class="mi">8</span><span class="p">]</span>
+    <span class="n">bit_position_in_byte</span> <span class="o">=</span> <span class="n">index_</span> <span class="o">%</span> <span class="mi">8</span>
+    <span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="n">byte_for_index</span> <span class="o">&gt;&gt;</span> <span class="n">bit_position_in_byte</span><span class="p">)</span> <span class="o">%</span> <span class="mi">2</span></div>
+
+
+
+<div class="viewcode-block" id="unpack_booleans">
+<a class="viewcode-back" href="../../../numbarrow.core.is_null.html#numbarrow.core.is_null.unpack_booleans">[docs]</a>
+<span class="nd">@jit_with_options</span><span class="p">(</span><span class="n">Array</span><span class="p">(</span><span class="n">bool_</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">)(</span><span class="n">int64</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">Array</span><span class="p">(</span><span class="n">uint8</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">,</span> <span class="n">readonly</span><span class="o">=</span><span class="kc">True</span><span class="p">)))</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">unpack_booleans</span><span class="p">(</span><span class="n">offset</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">length</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">packed_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Return a new array of the ``length`` booleans packed in ``packed_data``, from bit ``offset`` on.</span>
+
+<span class="sd">    Arrow packs the values of a boolean array as it packs a validity bitmap: one bit per value, from the least</span>
+<span class="sd">    significant bit of each byte up. ``packed_data`` is a one-dimensional, C-contiguous uint8 array, read-only or</span>
+<span class="sd">    writable.</span>
+
+<span class="sd">    ``offset + length`` must not exceed ``8 * len(packed_data)``. numba compiles without bounds checks by default, so</span>
+<span class="sd">    the bits past that end come from memory outside ``packed_data``, and the read can crash the process. With bounds</span>
+<span class="sd">    checks, which ``NUMBARROW_JIT_OPTIONS='{"boundscheck": true}'`` or numba's ``NUMBA_BOUNDSCHECK=1`` turns on, the</span>
+<span class="sd">    function raises ``IndexError`` instead. With caching on, numba still loads code that it cached without bounds</span>
+<span class="sd">    checks, so point ``NUMBA_CACHE_DIR`` at a new directory as well.</span>
+
+<span class="sd">    :param offset: the position of the first bit to read, counted from the first bit of ``packed_data``</span>
+<span class="sd">    :param length: the number of booleans to return</span>
+<span class="sd">    :param packed_data: the bytes that hold the packed bits</span>
+<span class="sd">    :returns: a new array of ``length`` booleans</span>
+<span class="sd">    """</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">length</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">bool_</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">length</span><span class="p">):</span>
+        <span class="n">byte_idx</span> <span class="o">=</span> <span class="p">(</span><span class="n">offset</span> <span class="o">+</span> <span class="n">i</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+        <span class="n">bit_idx</span> <span class="o">=</span> <span class="p">(</span><span class="n">offset</span> <span class="o">+</span> <span class="n">i</span><span class="p">)</span> <span class="o">%</span> <span class="mi">8</span>
+        <span class="n">result</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">packed_data</span><span class="p">[</span><span class="n">byte_idx</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="n">bit_idx</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">result</span></div>
+
+
+
+<span class="c1"># is_null_struct reads a struct's nulls in two layers, a design inspired by Awkward Array's BitMaskedArray(RecordArray):</span>
+<span class="c1"># https://awkward-array.org/doc/main/reference/generated/ak.contents.BitMaskedArray.html</span>
+<span class="c1">#</span>
+<span class="c1"># The signature is explicit, so numba's on-disk cache holds one entry for is_null_struct. Without a signature, numba</span>
+<span class="c1"># would cache an entry for each combination of argument types that callers pass. numba names a new entry's data file</span>
+<span class="c1"># with the lowest number that the index it has just read does not use. Two processes that fill an empty cache at the</span>
+<span class="c1"># same time can therefore write different code under one file name, and a later process can then load the wrong code.</span>
+
+
+<div class="viewcode-block" id="is_null_struct">
+<a class="viewcode-back" href="../../../numbarrow.core.is_null.html#numbarrow.core.is_null.is_null_struct">[docs]</a>
+<span class="nd">@jit_with_options</span><span class="p">(</span><span class="n">boolean</span><span class="p">(</span><span class="n">int64</span><span class="p">,</span> <span class="n">Optional</span><span class="p">(</span><span class="n">Array</span><span class="p">(</span><span class="n">uint8</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">,</span> <span class="n">readonly</span><span class="o">=</span><span class="kc">True</span><span class="p">)),</span>
+                          <span class="n">Optional</span><span class="p">(</span><span class="n">Array</span><span class="p">(</span><span class="n">uint8</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">,</span> <span class="n">readonly</span><span class="o">=</span><span class="kc">True</span><span class="p">))))</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">is_null_struct</span><span class="p">(</span><span class="n">index_</span><span class="p">,</span> <span class="n">struct_bitmap</span><span class="p">,</span> <span class="n">field_bitmap</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return True if element ``index_`` of a struct's field is null in the struct's bitmap or in the field's.</span>
+
+<span class="sd">    A struct array has a validity bitmap of its own, which marks the rows that are null as a whole, and each field has</span>
+<span class="sd">    one for its own values. A field's bitmap need not mark the null rows of the struct, so a value is null if either</span>
+<span class="sd">    bitmap marks it. Pass None for a bitmap that the array does not have; if both are None, the value is valid.</span>
+
+<span class="sd">    numba compiles the function once, when the module is imported, for an ``int64`` index and, for each bitmap, a</span>
+<span class="sd">    read-only uint8 array or None. Every call uses that compilation: an index of another integer type converts to</span>
+<span class="sd">    ``int64``, and a writable bitmap is accepted as well. The bounds on ``index_`` are those of :func:`is_null`.</span>
+
+<span class="sd">    :param index\\_: the zero-based index of the element, converted to ``int64``</span>
+<span class="sd">    :param struct_bitmap: the struct array's own validity bitmap, or None</span>
+<span class="sd">    :param field_bitmap: the field's validity bitmap, or None</span>
+<span class="sd">    :returns: True if either bitmap marks the value null</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">struct_bitmap</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">is_null</span><span class="p">(</span><span class="n">index_</span><span class="p">,</span> <span class="n">struct_bitmap</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">field_bitmap</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">is_null</span><span class="p">(</span><span class="n">index_</span><span class="p">,</span> <span class="n">field_bitmap</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="kc">False</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025-2026, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
