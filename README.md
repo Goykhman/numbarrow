@@ -519,12 +519,13 @@ column without a validity buffer still converts, and `is_null` runs as plain Pyt
 | pyarrow | 14.0.0 to 25.0.1 |
 | pyspark | 3.4.0 to 3.5.x (optional; 3.5 on Python 3.13, none on 3.14) |
 | pandas | 2.2.2+ (optional; pyspark's `mapInArrow` requires it) |
+| Java | 8, 11 or 17 (for pyspark) |
 
-[`pyproject.toml`][pyproject] declares these ranges and is authoritative, with one exception: it declares no pyarrow
-floor, and 14.0.0 is the oldest pyarrow that CI tests. CI runs the test suite on Python 3.12, with the newest numba in
-the range, pandas 2.3.2 and pyspark 3.5.7, on Linux x86-64, Linux ARM and Windows. A separate job runs it on Linux with
-pyarrow 14.0.0 and 25.0.1, without pandas or pyspark. CI tests no other pandas or pyspark version, and no Python above
-3.12.
+[`pyproject.toml`][pyproject] declares the Python and package ranges and is authoritative, with one exception: it
+declares no pyarrow floor, and 14.0.0 is the oldest pyarrow that CI tests. CI runs the test suite on Python 3.12, with
+the newest numba in the range, pandas 2.3.2 and pyspark 3.5.7, on Linux x86-64, Linux ARM and Windows. A separate job
+runs it on Linux with pyarrow 14.0.0 and 25.0.1, without pandas or pyspark. CI tests no other pandas or pyspark
+version, and no Python above 3.12.
 
 numbarrow 0.2.1 and later require Python 3.12. On Python 3.10 or 3.11, `pip install numbarrow` does not fail: it
 installs numbarrow 0.2.0, the newest release that declares support for them. The current test suite passes on both
@@ -533,23 +534,35 @@ when numbarrow is installed with `--ignore-requires-python`, but those versions 
 numba 0.60.0 has wheels for Python up to 3.12. Python 3.13 needs numba 0.61 or later, and Python 3.14 needs numba
 0.63 or later.
 
-pyarrow 14 fails to import next to numpy 2, with `ImportError: numpy.core.multiarray failed to import`, and its
-requirements do not exclude numpy 2. Install pyarrow 14 with `numpy<2`. pyarrow 15 requires `numpy<2` itself.
+pyarrow 14 fails to import when numpy 2 is installed, with `ImportError: numpy.core.multiarray failed to import`, and
+its requirements do not exclude numpy 2. Install pyarrow 14 with `numpy<2`. pyarrow 15 requires `numpy<2` itself.
 
 pyspark 3.4 does not import on Python 3.13, so Python 3.13 needs pyspark 3.5. pyspark 3.4 also refuses a struct output
 column with `NotImplementedError: Invalid return type in mapInPandas`, so a struct output column needs pyspark 3.5 on
 any Python. On Python 3.14, pyspark 3.5 cannot serialize a Python function, so no pyspark in the range runs
-`mapInArrow` there. The job fails with `PicklingError: Could not serialize object: RecursionError: Stack overflow`.
-numbarrow's conversions do not need pyspark.
+`mapInArrow` there. The Spark job fails with
+`PicklingError: Could not serialize object: RecursionError: Stack overflow`. numbarrow's conversions do not need
+pyspark.
 
 pyspark 3.3 cannot run a Python UDF on Python 3.12, so 3.4.0 is the floor. Under pyspark 3.3, the driver fails with
 `PicklingError: Could not serialize object: IndexError: tuple index out of range`, or a worker fails with
 `TypeError: code() argument 13 must be str, not int`.
 
-The pandas floor, 2.2.2, is the first pandas release that works with numpy 2. pandas 2.1.1, for example, installs next
-to numpy 2 but fails to import with `ValueError: numpy.dtype size changed, may indicate binary incompatibility`.
+The pandas floor, 2.2.2, is the first pandas release that works with numpy 2. pandas 2.1.1, for example, installs
+alongside numpy 2 but fails to import with `ValueError: numpy.dtype size changed, may indicate binary incompatibility`.
+
+[Spark 3.4][spark34] and [Spark 3.5][spark35] run on Java 8, 11 and 17. CI runs the Spark tests on Java 17. On Java
+21 and 25, Spark fails as follows:
+
+- On Java 25, a Spark session fails to start with `UnsupportedOperationException: getSubject is not supported`.
+- On Java 21 with pyspark 3.4, a session fails to start with
+  `NoSuchMethodException: java.nio.DirectByteBuffer.<init>(long,int)`.
+- On Java 21 with pyspark 3.5, the session starts, but `mapInArrow` fails with
+  `UnsupportedOperationException: sun.misc.Unsafe or java.nio.DirectByteBuffer.<init>(long, int) not available`.
 
 [pyproject]: https://github.com/Goykhman/numbarrow/blob/main/pyproject.toml
+[spark34]: https://github.com/apache/spark/blob/v3.4.4/docs/index.md#downloading
+[spark35]: https://spark.apache.org/docs/3.5.7/#downloading
 
 ## Documentation
 
