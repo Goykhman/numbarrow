@@ -45,7 +45,11 @@ jobs:
       - name: Every guard term must be covered by a test
         # Deletes one term per run and requires the suite to fail. A stale
         # catalogue entry is an error, not a skip, so rewriting a guard forces
-        # the catalogue to be updated with it.
+        # the catalogue to be updated with it. The Spark tests are required, as
+        # in the build job's linux cells, so that a jvm that cannot run them
+        # fails the baseline instead of turning those tests into skips.
+        env:
+          NUMBARROW_REQUIRE_SPARK: "1"
         run: python .github/scripts/mutation_guard_check.py
 
   extras-sufficiency:
