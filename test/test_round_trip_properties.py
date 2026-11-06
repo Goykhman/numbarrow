@@ -1,11 +1,13 @@
-"""Round-trip invariants over the whole mapInArrow path.
+"""Tests that a column comes out of a mapInArrow function with the values and nulls it went in with.
 
-The adapter side was tested in isolation and the output side was not tested at
-all, which is how a trailing NUL came to be refused on the way in while leading
-and interior NULs were silently destroyed on the way out. A value that a
-pass-through UDF returns unchanged must arrive unchanged, and the column a UDF
-names must be the column that arrives. Both are properties of the path, not of
-either end, so they are asserted here rather than in the adapter tests.
+The tests run one-column batches through ``make_mapinarrow_func``, most with a UDF that returns its input. They check
+that each value comes out as it went in, and that each output column is the one the UDF named. The columns cover each
+type the adapters support apart from structs and lists, among them strings with non-ASCII characters and with a
+leading or an interior NUL.
+The adapter refuses only a trailing NUL, so a leading or an interior NUL reaches the output side, where ``pa.array``
+given the numpy unicode array would cut the value at that NUL. Both properties belong to the whole path rather than
+to either end; the adapter tests check the input side alone. No Spark session runs here, and
+``test_mapinarrow_spark.py`` runs the path under Spark.
 """
 import numpy as np
 import pyarrow as pa
@@ -24,8 +26,8 @@ def _round_trip(column, udf=_identity, name="c"):
     return list(fn(iter([batch])))[0]
 
 
-# Every shape a supported column can take, with no nulls so that value
-# preservation is isolated from null handling.
+# One column of each type the adapters support, apart from struct and list columns. The columns hold no nulls, so that
+# a changed value cannot be blamed on null handling.
 COLUMNS = {
     "int64": pa.array([1, -2, 3], type=pa.int64()),
     "int32": pa.array([1, -2], type=pa.int32()),
@@ -45,10 +47,9 @@ COLUMNS = {
     "timestamp tz": pa.array([1, 2], type=pa.int64()).cast(pa.timestamp("us", "UTC")),
 }
 
-# Where the type that comes back differs from the type that went in, and why:
-# the numpy dtype is all the output side has, so a large_string is a string,
-# a date64 is the timestamp[ms] its int64 milliseconds imply, and a zoned
-# timestamp is naive. output_schema restores each, which is tested below.
+# The columns whose type comes back changed, and the type they come back as. The output side has only the numpy dtype
+# to go on: a large_string comes back a string, a date64 comes back the timestamp[ms] of its datetime64[ms] values, and
+# a zoned timestamp comes back naive. output_schema restores each, as test_output_schema_restores_a_drifted_type checks.
 DRIFT = {
     "large_string": pa.string(),
     "date64": pa.timestamp("ms"),
@@ -58,8 +59,7 @@ DRIFT = {
 
 @pytest.mark.parametrize("label", sorted(COLUMNS))
 def test_a_value_survives_the_round_trip(label):
-    # The type is asserted too: a value comparison alone could not see a
-    # column change type on the way through.
+    # The type is checked as well, because a comparison of values cannot see a column change type on the way.
     column = COLUMNS[label]
     got = _round_trip(column).column("c")
     assert got.type == DRIFT.get(label, column.type), f"{label}: {column.type} came back {got.type}"
@@ -79,8 +79,8 @@ def test_output_schema_restores_a_drifted_type(label):
 
 
 def test_a_udf_names_its_output_columns():
-    # Returned columns are bound by name, not by the order the dict happens to
-    # iterate in, or two same-typed columns silently swap.
+    # The output batch takes each column's name from its key in the returned dict, not from the dict's order. Bound by
+    # order, two columns of one type could swap places with no error to show it.
     def swap(data_dict, bitmap_dict, broadcasts):
         return {"second": np.array([10, 20], dtype=np.int64),
                 "first": np.array([1, 2], dtype=np.int64)}
@@ -92,14 +92,13 @@ def test_a_udf_names_its_output_columns():
 
 
 def test_a_string_column_keeps_its_width_across_the_round_trip():
-    # The |U width is data-dependent, so a column whose widest value is under a
-    # null must not size the output from a value no caller can see.
+    # The adapter sets the width of a string column's numpy dtype from its widest non-null value. The widest value
+    # here, 40 characters, lies under a null, so the UDF must receive a <U2 array, and the two non-null values must
+    # come back.
     #
-    # The null slot has to still hold that value's bytes for this to test
-    # anything: pa.array(["ab", None, "cd"]) leaves the offsets at [0, 2, 2, 4],
-    # so nothing is hidden under the null and any width passes. if_else against
-    # a null scalar keeps the wide value's bytes in place and only clears the
-    # validity bit.
+    # The null slot must still hold the wide value's bytes for the test to mean anything. pa.array(["ab", None, "cd"])
+    # gives offsets [0, 2, 2, 4], with nothing under the null, and any width would pass. pc.if_else against a null
+    # scalar keeps the wide value's bytes and clears only the validity bit.
     values = pa.array(["ab", "x" * 40, "cd"], type=pa.string())
     column = pc.if_else(pa.array([True, False, True]), values,
                         pa.scalar(None, pa.string()))
@@ -120,8 +119,8 @@ def _nullable_identity(data_dict, bitmap_dict, broadcasts):
 
 @pytest.mark.parametrize("label", sorted(COLUMNS))
 def test_a_null_survives_the_round_trip_through_nullable(label):
-    # The second row is masked out with its bytes left in place, which is what
-    # a bare pass-through republishes; Nullable carries the validity out.
+    # pc.if_else nulls the second row. A UDF that returned the bare array would bring the row back as a value, because
+    # a bare array carries no nulls out other than a NaT. Nullable carries the bitmap out with the data.
     column = COLUMNS[label]
     keep = pa.array([i != 1 for i in range(len(column))])
     nulled = pc.if_else(keep, column, pa.scalar(None, column.type))

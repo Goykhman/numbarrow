@@ -1,11 +1,12 @@
-"""Invariants tying the documented behaviour to the code.
+"""Tests that hold the README and the docstring of ``make_mapinarrow_func`` to what the code does.
 
-These exist because the docs drifted from the code repeatedly: a type table
-that did not match the dispatcher, a copy-versus-view claim that was wrong for
-one type, and a conversion the docs promised would raise for every output
-shape while one of the shapes truncated it. A prose fix closes one instance;
-these fail the build the next time any of it drifts, which is the only thing
-that stops it recurring.
+The README's Supported Types table is parsed row by row. Its type names must match the array types that the
+dispatcher, ``arrow_array_adapter``, registers, and its Copy? column must say whether each adapter returns fresh memory
+or a view of the Arrow buffer. Other tests find a phrase of the factory docstring or of the README verbatim, and then
+run the conversion that the phrase describes. The rest compare the README's pandas row with the floors in
+``pyproject.toml``, and check in a child process when numba reads ``NUMBA_CACHE_DIR``. A test fails when the text and
+the behavior disagree. A rewording that drops a pinned phrase fails as well, and the phrase in the test then changes
+with it. ``test_mapinarrow_spark.py`` pins two more phrases of the factory docstring and checks them against Spark.
 """
 import datetime
 import decimal
@@ -24,16 +25,16 @@ from numbarrow.core.mapinarrow_factory import Nullable, make_mapinarrow_func
 README = Path(__file__).resolve().parent.parent / "README.md"
 PYPROJECT = README.parent / "pyproject.toml"
 
-# The docstring as one line, so a claim that wraps is still one string.
+# The docstring with its white space collapsed, so that a phrase that wraps across lines matches as one string.
 FACTORY_DOC = " ".join(make_mapinarrow_func.__doc__.split())
 
-# The README the same way, for the sentences it repeats.
+# The README with its white space collapsed the same way.
 README_TEXT = " ".join(README.read_text().split())
 
 SUB_SECOND = datetime.datetime(2020, 1, 1, 12, 34, 56, 789012)
 
-# One representative array per documented type. Kept beside the table it
-# checks, so adding a row to the table without adding a sample fails here.
+# One sample array for each type that the README table names. A row added to the table without a sample here fails
+# test_every_documented_type_has_a_sample.
 SAMPLES = {
     "Int32Array": pa.array([1, 2], type=pa.int32()),
     "Int64Array": pa.array([1, 2], type=pa.int64()),
@@ -51,7 +52,7 @@ SAMPLES = {
 
 
 def _table_rows():
-    """The Supported Types table as [(type names, copy answer)]."""
+    """Return the README's Supported Types table as a list of (type names, Copy? cell) pairs, one per row."""
     text = README.read_text()
     section = text.split("## Supported Types", 1)[1].split("\n## ", 1)[0]
     rows = []
@@ -70,6 +71,7 @@ def _documented_types():
 
 
 def _registered_types():
+    """Return the names of the array types that the dispatcher registers, leaving out its fallback for ``object``."""
     return {k.__name__ for k in arrow_array_adapter.registry if k is not object}
 
 
@@ -89,7 +91,10 @@ def test_every_documented_type_has_a_sample():
 
 
 def _is_view(array):
-    """True when the result views an Arrow buffer rather than owning fresh memory."""
+    """Return True when ``array`` views an Arrow buffer, and False when it owns fresh memory.
+
+    A view has a memoryview or a ``pa.Buffer`` within eight steps along its chain of ``.base`` objects.
+    """
     node = array
     for _ in range(8):
         if isinstance(node, (memoryview, pa.Buffer)):
@@ -105,13 +110,14 @@ def test_documented_copy_column_matches_reality(names, copy_answer):
     for name in names:
         result = arrow_array_adapter(SAMPLES[name])
         if len(result) == 3:
-            # A struct or list row adapts per field; its children are covered
-            # by the scalar rows, so the only claim to hold it to is the label.
+            # The adapter returns three items for a struct or list column, whose fields it adapts one by one. The
+            # scalar rows already cover the fields' types, so these rows are held only to their per-field label.
             assert copy_answer.lower().startswith("per-field"), (
                 f"{name}: adapts per field, README says {copy_answer!r}"
             )
             continue
-        # Asserted rather than skipped: a reworded cell used to disarm its row.
+        # A cell that starts with neither yes nor no fails the test instead of being skipped, so a reworded cell cannot
+        # switch its row's check off.
         assert copy_answer.lower().startswith(("yes", "no")), (
             f"{name}: README says {copy_answer!r}, which is neither yes nor no"
         )
@@ -126,7 +132,7 @@ def test_documented_copy_column_matches_reality(names, copy_answer):
 
 
 def _one_output_column(value, arrow_type):
-    """The column a UDF returning *value* under a declared *arrow_type* yields."""
+    """Return the column that a UDF returning ``value`` produces under a declared ``arrow_type``."""
     batch = pa.RecordBatch.from_pydict({"v": [1.0]})
     fn = make_mapinarrow_func(lambda d, b, br: {"out": value},
                               output_schema=pa.schema([("out", arrow_type)]))
@@ -134,10 +140,13 @@ def _one_output_column(value, arrow_type):
 
 
 def test_the_refusals_hold_for_the_shapes_the_docstring_names_them_for():
-    # The docstring anchored its promise to pa.array without saying that
-    # pa.array has two converters: the typed one raises on these two, and the
-    # sequence converter a list goes through truncates both without a word.
-    assert "For an ndarray of a numeric or datetime dtype, or a :class:`pyarrow.Array`" in FACTORY_DOC
+    """Check that a fraction into ``int64`` and a sub-second timestamp into a seconds unit raise ``ArrowInvalid`` from
+    an ndarray, a shape for which the factory docstring says they raise. ``pa.array`` has two converters: the typed
+    converter that an ndarray goes through raises on these two conversions, and the sequence converter that a list goes
+    through truncates both without an error."""
+    assert "an ndarray of a numeric or datetime dtype goes through ``pa.array``'s typed converter" in FACTORY_DOC
+    assert ("Both raise :class:`pyarrow.ArrowInvalid` for an integer out of the declared type's range, a float with "
+            "a fraction into an integer type, and a timestamp unit change that drops digits") in FACTORY_DOC
     with pytest.raises(pa.ArrowInvalid):
         _one_output_column(np.array([1.5]), pa.int64())
     with pytest.raises(pa.ArrowInvalid):
@@ -145,8 +154,10 @@ def test_the_refusals_hold_for_the_shapes_the_docstring_names_them_for():
 
 
 def test_the_truncations_the_docstring_admits_for_a_list_are_the_ones_it_makes():
+    """Check that a list truncates a fraction into ``int64`` and a sub-second timestamp into a seconds unit without an
+    error, the two truncations that the factory docstring admits for a list."""
     assert "goes through ``pa.array``'s sequence converter" in FACTORY_DOC
-    assert ("from a list alone, a fraction into an integer type and a timestamp unit change "
+    assert ("from a sequence of Python objects alone, a fraction into an integer type and a timestamp unit change "
             "that drops digits") in FACTORY_DOC
     assert _one_output_column([1.5], pa.int64()).to_pylist() == [1]
     assert _one_output_column([SUB_SECOND], pa.timestamp("s")).to_pylist() == [
@@ -155,9 +166,10 @@ def test_the_truncations_the_docstring_admits_for_a_list_are_the_ones_it_makes()
 
 
 def test_a_float_under_a_declared_decimal_is_refused_as_the_docstring_says():
-    # The docstring listed a float into decimal among the conversions that
-    # pass without a word, rounding to the declared scale; both routes refuse
-    # it, the sequence converter wanting an int or a Decimal.
+    """Check that a float under a declared ``decimal`` type is refused from a list and from an ndarray, as the factory
+    docstring says, and that the docstring does not count it among the conversions that pass without an error. The
+    sequence converter takes only an int or a ``decimal.Decimal`` under a decimal type, and the ndarray route refuses a
+    float dtype; an exact ``Decimal`` passes."""
     assert "A float under a ``decimal`` type is refused on both routes" in FACTORY_DOC
     assert "a float into ``decimal``" not in FACTORY_DOC
     with pytest.raises(pa.ArrowException):
@@ -169,22 +181,24 @@ def test_a_float_under_a_declared_decimal_is_refused_as_the_docstring_says():
 
 
 def _inferred_output_column(value):
-    """The column a UDF returning *value* with no output_schema yields."""
+    """Return the column that a UDF returning ``value`` produces with no ``output_schema``."""
     batch = pa.RecordBatch.from_pydict({"v": [1.0]})
     fn = make_mapinarrow_func(lambda d, b, br: {"out": value})
     return list(fn(iter([batch])))[0].column("out")
 
 
 def test_an_inferred_datetime64_column_comes_back_as_the_docs_say():
-    # Both sentences promised a timestamp of the array's unit for every unit,
-    # and pa.array infers date32 for the day one, which the round-trip test's
-    # own drift table admits by leaving date32 out of it.
-    assert ("a ``datetime64`` array comes back a naive ``timestamp`` of its unit, with a multiplier such as "
-            "``datetime64[5s]`` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
-            "unit comes back ``date32``, a unit finer than a nanosecond is refused") in FACTORY_DOC
-    assert ("a `datetime64` output becomes a naive timestamp of its unit, with a multiplier such as "
-            "`datetime64[5s]` folded in and an hour or minute unit taken to seconds; a day, week, month or year "
-            "unit becomes `date32`, a unit finer than a nanosecond is refused") in README_TEXT
+    """Check that an inferred ``datetime64`` column comes back ``date32`` for the day unit, and a timestamp of its unit
+    for seconds through nanoseconds, as the factory docstring and the README both say. ``pa.array`` infers ``date32``
+    from a day-unit array, so a timestamp promised for every unit would be wrong for that one."""
+    assert ("A ``datetime64`` array comes back a naive ``timestamp`` of its unit after the conversion above, so "
+            "``datetime64[5s]`` comes back ``timestamp[s]`` and an hour or minute unit comes back in seconds. A day, "
+            "week, month or year unit comes back ``date32``.") in FACTORY_DOC
+    assert "A unit finer than a nanosecond raises :class:`TypeError`" in FACTORY_DOC
+    assert ("a `datetime64` output becomes a timestamp of the same unit, without a time zone. A unit with a "
+            "multiplier, such as `datetime64[5s]`, is converted to its base unit, and an hour or minute unit to "
+            "seconds. A day, week, month or year unit becomes `date32`. A unit finer than a nanosecond raises "
+            "`TypeError`.") in README_TEXT
     days = np.array(["2020-01-01", "2020-01-02"], dtype="datetime64[D]")
     column = _inferred_output_column(days)
     assert column.type == pa.date32()
@@ -197,8 +211,8 @@ def test_an_inferred_datetime64_column_comes_back_as_the_docs_say():
 
 
 def test_the_readme_names_the_pandas_floor_the_extras_declare():
-    # The README kept explaining a 2.2.2 row against a 1.5.0 extra after both
-    # extras had moved to 2.2.2, so the floors are read from the file.
+    # The floors are read from pyproject.toml, so the test follows a change to the extras. The README must not
+    # mention 1.5.0, a pandas floor that the extras do not declare.
     floors = set(re.findall(r'"pandas>=([\d.]+)"', PYPROJECT.read_text()))
     row = re.search(r"\| pandas \| ([\d.]+)\+", README.read_text()).group(1)
     assert floors == {row}, (floors, row)
@@ -206,11 +220,11 @@ def test_the_readme_names_the_pandas_floor_the_extras_declare():
 
 
 def test_the_cache_dir_is_read_at_numbas_import_as_the_readme_says(tmp_path):
-    # The README said both variables are read when numbarrow is first
-    # imported. NUMBA_CACHE_DIR is numba's, read when numba is imported and
-    # again only when it compiles something, so a directory set between the
-    # two imports missed the first function numbarrow compiles, and all of
-    # them when the old cache was warm.
+    """Check that numba reads ``NUMBA_CACHE_DIR`` when numba is imported, as the README says, so that a directory set
+    after numba is imported and before numbarrow is misses ``is_null``, the first function that numbarrow compiles."""
+    # numba reads the variable again only when it compiles something, and it sets up a function's cache before it
+    # compiles the function. The first function that numbarrow compiles therefore caches in the directory set first,
+    # and every function does when the cache there is warm.
     assert "`NUMBA_CACHE_DIR` when numba is" in README_TEXT
     assert "misses at least the first function numbarrow compiles" in README_TEXT
     first, late = tmp_path / "first", tmp_path / "late"
@@ -228,14 +242,16 @@ def test_the_cache_dir_is_read_at_numbas_import_as_the_readme_says(tmp_path):
 
 
 def _output_column(value):
+    """Return the column that a UDF returning ``value`` produces from a two-row batch, with its type inferred."""
     batch = pa.RecordBatch.from_arrays([pa.array([0, 0], type=pa.int64())], names=["c"])
     fn = make_mapinarrow_func(lambda data, bitmap, broadcasts: {"o": value}, input_columns=["c"])
     return list(fn(iter([batch])))[0].column("o")
 
 
 def test_the_shapes_the_docstring_says_carry_a_null_out_do():
-    # The sentence named four shapes while a tuple and an object array
-    # holding None carried a null out too.
+    """Check that each shape the factory docstring lists carries a null into the output column: a list, a tuple and
+    an object array holding ``None``, a pyarrow Array, a numpy masked array and a ``Nullable``. A plain integer ndarray
+    carries none."""
     assert ("A null comes out of a list, a tuple or an object array holding ``None``, a :class:`pyarrow.Array`, "
             "a numpy masked array, and a :class:`Nullable`") in FACTORY_DOC
     shapes = {

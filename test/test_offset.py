@@ -1,3 +1,11 @@
+"""Tests of the adapters on arrays sliced to a non-zero offset, and of is_null_struct.
+
+pyarrow slices an array without copying it: the slice shares its parent's buffers and records where it starts as an
+offset. Most tests slice a column of one supported type, with and without nulls, and check the values and the
+bitmaps that the adapters return for the slice. The struct tests read both validity layers, the struct's and each
+field's, and ``TestIsNullStruct`` checks ``is_null_struct`` on hand-built bitmaps, from Python and from jitted code.
+``test_arrow_array_utils.py`` covers sliced list columns, and boolean slices at five offsets from 1 to 15.
+"""
 import numpy as np
 import pyarrow as pa
 
@@ -115,7 +123,7 @@ class TestStringOffset:
         bitmap, result = create_str_array(s)
         assert is_null(0, bitmap) and is_null(2, bitmap) and not is_null(1, bitmap) and not is_null(3, bitmap)
         assert len(result) == 4
-        # Null strings become empty strings in the NumPy array
+        # The values are checked at the valid slots only.
         assert result[1] == "gamma"
         assert result[3] == "epsilon"
 
@@ -166,7 +174,7 @@ class TestStructOffset:
         assert is_null(3, bitmaps["ratio"])
 
     def test_struct_null_rows_sliced(self):
-        """Struct array with null rows, sliced."""
+        """Check a sliced struct column with null rows: the struct bitmap marks them, and the fields have no bitmap."""
         arr = pa.array([
             {"a": 1, "b": 10},
             None,
@@ -188,7 +196,7 @@ class TestStructOffset:
         assert datas["b"][2] == 50
 
     def test_struct_both_null_layers_sliced(self):
-        """Both struct-level and field-level nulls with offset."""
+        """Check a sliced struct column with nulls at both layers, read layer by layer and through is_null_struct."""
         arr = pa.array([
             {"a": 1, "b": None},
             None,
@@ -208,7 +216,7 @@ class TestStructOffset:
         assert bitmaps["a"] is not None
         assert is_null(1, bitmaps["a"])
         assert not is_null(3, bitmaps["a"])
-        # Two-layer check with is_null_struct
+        # is_null_struct reports a null at either layer.
         assert is_null_struct(0, struct_bitmap, bitmaps["a"])      # struct null
         assert is_null_struct(1, struct_bitmap, bitmaps["a"])      # field null
         assert is_null_struct(2, struct_bitmap, bitmaps["a"])      # struct null
@@ -217,12 +225,12 @@ class TestStructOffset:
 
 class TestBitmapOffset:
     def test_bitmap_offset_across_byte_boundary(self):
-        """Offset that crosses a byte boundary in the bitmap."""
+        """Check a slice that starts at offset 9, in the second byte of the parent's bitmap."""
         values = [None if i % 3 == 0 else i for i in range(16)]
         a = pa.array(values, type=pa.int32())
-        s = a[9:]  # offset=9, crosses into byte 1
+        s = a[9:]  # offset 9, in the second byte of the bitmap
         bitmap, data = uniform_arrow_array_adapter(s)
-        # Original: [None,10,11,None,13,14,None]
+        # The slice holds [None, 10, 11, None, 13, 14, None].
         assert is_null(0, bitmap)      # index 9 -> None
         assert not is_null(1, bitmap)  # index 10
         assert not is_null(2, bitmap)  # index 11

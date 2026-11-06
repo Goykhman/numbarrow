@@ -10,6 +10,9 @@ include = ["numbarrow*"]
 name = "numbarrow"
 dependencies = [
     "numba>=0.60.0,<0.68.0",
+    # No floor is declared, and CI tests both 14.0.0 and 25.0.1. pyarrow 14
+    # fails to import next to numpy 2 but does not exclude it, so CI installs
+    # it with numpy<2. pyarrow 15 excludes numpy 2 itself.
     "pyarrow<=25.0.1"
 ]
 dynamic = ["version"]
@@ -27,10 +30,10 @@ test = [
     # it and fails to import.
     "pandas>=2.2.2",
     # pyspark 3.3 bundles cloudpickle 2.0.0, which predates the co_qualname
-    # argument Python 3.11 added to code(), so on the declared Python every
-    # UDF dies: the factory's closure on the driver while cloudpickle walks its
-    # globals, a trivial one in the worker. 3.4.0 is the first release that
-    # runs one, and the first that imports on 3.13 is 3.5.0.
+    # argument that Python 3.11 added to code(). On the declared Python, no UDF
+    # runs: the driver cannot pickle the function that make_mapinarrow_func
+    # returns, and a worker cannot unpickle even a trivial one. 3.4.0 is the
+    # first release that runs a UDF, and 3.5.0 the first that imports on 3.13.
     "pyspark>=3.4.0,<4.0.0; python_version < '3.13'",
     "pyspark>=3.5.0,<4.0.0; python_version >= '3.13'",
     "pytest",
@@ -39,11 +42,12 @@ test = [
 ]
 mapinarrow = [
     "pandas>=2.2.2",
-    # pyspark's mapInArrow path imports distutils, which PEP 632 removed from
-    # the standard library in 3.12, the floor this package declares. setuptools
-    # is the only supplier, and without it mapInArrow dies on
-    # ModuleNotFoundError. The test extra already pins it, which is why CI
-    # never saw this.
+    # pyspark's mapInArrow imports distutils, which PEP 632 removed from the
+    # standard library in Python 3.12, the floor this package declares.
+    # setuptools still provides it; without setuptools, mapInArrow raises
+    # ModuleNotFoundError. The test extra lists setuptools as well, so only
+    # .github/scripts/extras_sufficiency_check.py, which installs each extra
+    # alone, can catch its absence from this one.
     "setuptools>=75.0.0",
 ]
 docs = [

@@ -260,8 +260,6 @@ MUTATIONS = [
         "empty uniform result stops being read-only",
         "numbarrow/utils/arrow_array_utils.py",
         "        empty = np.empty((0,), dtype=data_np_ty)\n"
-        "        # Read-only like the non-empty path below, so that the contract does\n"
-        "        # not depend on whether the batch happened to be empty.\n"
         "        empty.flags.writeable = False",
         "        empty = np.empty((0,), dtype=data_np_ty)",
     ),
@@ -463,8 +461,8 @@ MUTATIONS = [
     (
         'a Nullable inside a Nullable stops being refused',
         'numbarrow/core/mapinarrow_factory.py',
-        "    if isinstance(value, Nullable):\n        # A helper's Nullable",
-        "    if False:\n        # A helper's Nullable",
+        "    if isinstance(value, Nullable):\n        # pa.array would read the inner Nullable",
+        "    if False:\n        # pa.array would read the inner Nullable",
     ),
     (
         'tuple rows stop being checked by position',
@@ -527,8 +525,8 @@ MUTATIONS = [
     (
         'a chunked array from pa.array stops being combined',
         'numbarrow/core/mapinarrow_factory.py',
-        '    if isinstance(array, pa.ChunkedArray):\n        # A pandas Series over a multi-chunk',
-        '    if False:\n        # A pandas Series over a multi-chunk',
+        '    if isinstance(array, pa.ChunkedArray):\n        # pa.array returns a ChunkedArray',
+        '    if False:\n        # pa.array returns a ChunkedArray',
     ),
     (
         'the field guard stops seeing through an extension type',
@@ -559,9 +557,9 @@ MUTATIONS = [
         'an extension column stops being masked through its storage',
         'numbarrow/core/mapinarrow_factory.py',
         '    if isinstance(array, pa.ExtensionArray):\n'
-        '        # The flat test below',
+        '        # An extension type reports no fields',
         '    if False:\n'
-        '        # The flat test below',
+        '        # An extension type reports no fields',
     ),
     (
         'a union child stops being refused before flatten',
@@ -591,9 +589,9 @@ MUTATIONS = [
         'a zero-length temporal column stops keeping its bitmap presence',
         'numbarrow/core/adapters.py',
         '    if not len(pa_array):\n'
-        '        # The cast of a zero-length array drops its validity buffer, and a',
+        '        # The cast of a zero-length array drops its validity buffer. The bitmap',
         '    if False:\n'
-        '        # The cast of a zero-length array drops its validity buffer, and a',
+        '        # The cast of a zero-length array drops its validity buffer. The bitmap',
     ),
     (
         'the unexpected-keys listing stops being cut',

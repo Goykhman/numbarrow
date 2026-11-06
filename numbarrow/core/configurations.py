@@ -1,5 +1,9 @@
-"""
-Default configuration options for Numba JIT compilation used throughout numbarrow.
+"""numbarrow's njit options, and the decorator that compiles numbarrow's functions with them.
+
+:func:`get_jit_options` reads the options from the ``NUMBARROW_JIT_OPTIONS`` environment variable, and ``jit_options``
+holds what it returned when this module was first imported. Every function that numbarrow compiles goes through
+:func:`jit_with_options`, which passes ``jit_options`` to numba's ``njit``. If numba cannot cache a function, the
+decorator compiles it without a cache and warns.
 """
 
 import inspect
@@ -10,28 +14,31 @@ import warnings
 from numba import njit
 
 
+#: The text that begins the ``ValueError`` message for a ``NUMBARROW_JIT_OPTIONS`` value that is not a JSON object.
 invalid_jit_options_err = (
     """NUMBARROW_JIT_OPTIONS must be a JSON object, e.g., export NUMBARROW_JIT_OPTIONS='{"cache": false}'"""
 )
 
 
 def get_jit_options():
-    """
-    Numba JIT options taken from the ``NUMBARROW_JIT_OPTIONS`` environment variable.
+    """Return the njit options that ``NUMBARROW_JIT_OPTIONS`` sets, or ``{"cache": True}`` if it is unset or empty.
 
-    The value must be a JSON object and is passed to ``@njit`` as keyword arguments unchanged, for example
-    ``export NUMBARROW_JIT_OPTIONS='{"cache": false}'``. Unset or empty means ``{"cache": True}``; anything else
-    raises ``ValueError``. The object replaces the default rather than extending it, so ``'{}'`` turns caching
-    off. ``"cache"`` must be a JSON boolean: numba reads the string ``"false"`` as true, so it is refused rather
-    than passed on, and so is a string for any other option but ``"error_model"`` and ``"inline"``, the two
-    numba reads as strings: ``{"boundscheck": "false"}`` would turn bounds checking on. Each call reads the
-    environment afresh; the module-level ``jit_options`` holds the value read when this module was first
-    imported, and that is what the decorators use.
+    The variable holds a JSON object, whose entries numbarrow passes to ``njit`` as keyword arguments, unchanged::
 
-    numba's on-disk cache index records a function's signature, target and bytecode but not the options it
-    was compiled with, so a cache warmed under one set of options is a hit for a run that asked for another:
-    ``{"cache": true, "boundscheck": true}`` over a directory warmed with the default loads the unchecked
-    code. Point ``NUMBA_CACHE_DIR`` at a fresh directory when an option changes.
+        export NUMBARROW_JIT_OPTIONS='{"cache": false}'
+
+    The object replaces the default instead of adding to it, so ``'{}'`` turns caching off. A value that is not a JSON
+    object raises ``ValueError``. So does a ``"cache"`` that is not ``true`` or ``false``, and a string for any option
+    but ``"error_model"`` and ``"inline"``, the two options that take a string. numba reads a non-empty string as true
+    for a boolean option, so ``{"boundscheck": "false"}`` would turn bounds checks on.
+
+    The function reads the variable each time it is called. The decorators use ``jit_options`` instead, which holds
+    what the function returned when this module was first imported.
+
+    The key under which numba's on-disk cache stores compiled code does not include the options that the code was
+    compiled with. A run that asks for other options therefore loads the code that an earlier run cached:
+    ``{"cache": true, "boundscheck": true}`` over a cache filled under the default options loads code without bounds
+    checks. Point ``NUMBA_CACHE_DIR`` at a new directory when an option changes.
     """
     as_str = os.environ.get("NUMBARROW_JIT_OPTIONS")
     if not as_str:
@@ -41,8 +48,6 @@ def get_jit_options():
     except json.JSONDecodeError as error:
         raise ValueError(f"{invalid_jit_options_err}; {as_str!r} is not valid JSON: {error}") from None
     if not isinstance(as_json, dict):
-        # One message for both failures told a value that was valid JSON that
-        # it must be valid JSON, and showed neither the value nor the rule.
         raise ValueError(
             f"{invalid_jit_options_err}; {as_str!r} is valid JSON but a {type(as_json).__name__}, not an object"
         )
@@ -60,36 +65,49 @@ def get_jit_options():
     return as_json
 
 
+#: The njit options that :func:`jit_with_options` passes to numba: what :func:`get_jit_options` returned when this
+#: module was first imported.
 jit_options = get_jit_options()
 
 
 def jit_with_options(signature):
-    """``njit`` under the options ``NUMBARROW_JIT_OPTIONS`` gives, compiling uncached where no cache can be written.
+    """Return a decorator that compiles a function for ``signature`` with numba's ``njit`` and ``jit_options``.
 
-    numba sets a cached function up when it is decorated, and raises ``RuntimeError`` there when no cache
-    location can be written: a read-only install, an unwritable ``site-packages`` and user cache directory, or
-    an import from an ``.egg``, ``.whl`` or ``.pyz`` archive, which Spark's ``--py-files`` ships. For a ``.zip``
-    it takes the user's cache directory without checking that it can be written, and the first write raises
-    ``OSError`` instead. Nothing then named the way out. Such a function compiles without a cache, with a
-    warning naming the remedy: ``NUMBA_CACHE_DIR`` for a source file on disk, and for an archive, where numba
-    never reads it, an unpacked install or a ``.zip``, which numba 0.61 and later cache in the user's cache
-    directory. Either way ``NUMBARROW_JIT_OPTIONS='{"cache": false}'`` turns caching off and silences the
-    warning. An error that is not the cache's comes back from the uncached compile.
+    numba compiles the function when the decorator is applied, because the signature is given. If caching is on and
+    numba cannot cache the function, the decorator compiles it without a cache and issues a ``RuntimeWarning``. That
+    happens for a read-only install, where numba can write neither in numbarrow's own directory nor in the user's
+    cache directory, unless ``NUMBA_CACHE_DIR`` names a directory that it can write. It also happens for an import
+    from an archive, such as an ``.egg`` that ``spark-submit --py-files`` puts on the workers' path, or a ``.whl`` or
+    ``.pyz`` file placed on ``sys.path``. From version 0.61, numba caches a module imported from a ``.zip`` and writes
+    the cache to the user's cache directory. The decorator then warns only if that directory cannot be written.
+
+    The warning names a way to a cache. For a source file on disk, that is ``NUMBA_CACHE_DIR`` set to a writable
+    directory. numba ignores ``NUMBA_CACHE_DIR`` for a module in an archive, so there the warning names an unpacked
+    install or a ``.zip`` instead. In either case, ``NUMBARROW_JIT_OPTIONS='{"cache": false}'`` turns caching off and
+    silences the warning. Any other error propagates, and so does every error with caching off.
     """
     def decorate(func):
         try:
             return njit(signature, **jit_options)(func)
         except (RuntimeError, OSError) as error:
+            # numba looks for a cache directory that it can write when the function is decorated, and raises
+            # RuntimeError with "no locator available" if it finds none. For a .zip, numba 0.61 and later take the
+            # user's cache directory without that check, and the first save into it raises OSError instead. That save
+            # happens during the decoration too, because numba compiles a function with an explicit signature at once.
             cache_failed = isinstance(error, OSError) or "no locator available" in str(error)
+            # Another RuntimeError, or any error with caching off, is not the cache's and propagates. The decorator
+            # treats every OSError as the cache's; if one has another cause, the compilation without a cache below
+            # raises it again.
             if not cache_failed or not jit_options.get("cache"):
                 raise
             silence = "NUMBARROW_JIT_OPTIONS='{\"cache\": false}' to turn caching off and silence this warning"
             if os.path.exists(inspect.getfile(func)):
                 remedy = f"Set NUMBA_CACHE_DIR to a writable directory, or {silence}"
             else:
-                # Every location numba reads NUMBA_CACHE_DIR for needs the source
-                # file on disk, so for an archive the warning named a remedy
-                # that changed nothing.
+                # numba reads NUMBA_CACHE_DIR only for a function whose source file is on disk. For a module in an
+                # archive, the warning names an unpacked install or a .zip instead. numba 0.61 and later cache a module
+                # from an archive only if a part of its path ends in .zip, so a .whl, .pyz or .egg is not cached,
+                # although each is a zip file.
                 remedy = (
                     "NUMBA_CACHE_DIR has no effect here, because the source is not a file on disk: to cache, "
                     "install numbarrow unpacked or import it from a .zip, which numba 0.61 and later cache in the "

@@ -1,21 +1,20 @@
-"""The on-disk numba cache, as the viewers and is_null_struct use it.
+"""Tests of how numbarrow caches its compiled functions, of the options its decorators take, and of the cache fallback.
 
-numba names a cache entry after the function's qualname and source line, so
-the viewers one factory makes shared one index file and one set of data
-files, and numba writes those without a lock. Processes importing together on
-a cold cache read one index and picked the same data-file name for different
-viewers, so every process afterwards loaded the wrong machine code: an int32
-column read as float64, or a crash in NRT_adapt_ndarray_to_python. A Spark
-executor starting its Python workers on a node with an empty cache is exactly
-that shape.
-
-``is_null_struct`` shared an index file the other way: lazily typed, it took
-one entry per signature, and numba names the next data file by counting the
-entries in the index it just read. Its signature is explicit, so there is one
-entry there too, whatever a caller hands it.
-
-Every check here runs in a subprocess with its own NUMBA_CACHE_DIR, so the
-cache under test is the one the subprocess wrote and nothing else.
+numba keeps an index file (``.nbi``) for each cached function, named after its module, its qualified name and its
+first source line. The index records which data file (``.nbc``) holds the machine code of each compiled signature, and
+numba updates both kinds of file without a lock. If two processes compile different entries into one index at the
+same time, they can give both entries one data-file name, and a later process can then load the wrong machine code. A
+Spark executor that starts several Python workers on a node with an empty cache can meet this case. numbarrow avoids
+it in two ways. Each viewer, the compiled function that reads raw memory as a numpy array of one dtype, has a
+qualified name of its own and therefore its own index, and ``is_null_struct`` has one explicit signature and therefore
+one entry. Some tests check both layouts, and two of them run eight processes at once on an empty cache. Other tests
+check that ``NUMBARROW_JIT_OPTIONS`` reaches the decorators. The rest check the fallback for an import that numba
+cannot cache, from an archive or from a read-only install. numbarrow then compiles without a cache, and its warning
+says how to get a cache or how to turn caching off. numba 0.61 and later cache an import from a ``.zip``. A test that
+needs a directory it cannot write to is skipped on Windows and when run as root. Each test runs numbarrow in a child
+process with cache directories of its own, because this process imported numbarrow and read numba's settings before
+the test began. ``test_configurations.py`` tests how the options are parsed, and which errors the fallback catches,
+with numba's ``njit`` replaced by a stub.
 """
 import json
 import os
@@ -29,10 +28,14 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 
-# chmod takes write access from a directory neither on Windows nor from root.
+# On Windows, chmod does not stop a process from writing in a directory, and root writes in a directory whatever its
+# mode. A test that needs a directory that it cannot write in is skipped in both cases.
 needs_a_directory_it_cannot_write = pytest.mark.skipif(
     os.name == "nt" or os.geteuid() == 0, reason="needs a directory this user cannot write to")
 
+# The child imports the adapters, which import is_null.py, and numba compiles that module's three functions at
+# import because their signatures are explicit. The child prints the file it imported the adapters from, so that a
+# test can check that it imported numbarrow from the place that PYTHONPATH names.
 IMPORT_AND_SHOW_FILE = "import numbarrow.core.adapters as a; print(a.__file__)"
 
 IMPORT_AND_VIEW = (
@@ -42,6 +45,8 @@ IMPORT_AND_VIEW = (
     "assert arrays_viewers[np.int32](src.ctypes.data, 3).tolist() == src.tolist()\n"
 )
 
+# The three dtypes are the ones the adapters ask for: uint8 for validity bitmaps and packed booleans, and int32 and
+# int64 for string offsets.
 CHECK_EVERY_VIEWER = (
     "import numpy as np\n"
     "from numbarrow.utils.utils import arrays_viewers\n"
@@ -54,6 +59,8 @@ CHECK_EVERY_VIEWER = (
 )
 
 
+# The child calls is_null_struct with each of eight index types, and with the bitmap or None in each of the two bitmap
+# arguments. Row 0 is null in the bitmap, so every call returns True unless both arguments are None.
 CHECK_EVERY_STRUCT_SHAPE = (
     "import numpy as np\n"
     "from numbarrow.core.is_null import is_null_struct\n"
@@ -69,7 +76,7 @@ CHECK_EVERY_STRUCT_SHAPE = (
 
 
 def _one_struct_shape(variant):
-    """A child that calls is_null_struct with one index type and one bitmap pair."""
+    """Return a child script that calls is_null_struct with the index type and bitmap pair that ``variant`` picks."""
     return (
         "import numpy as np\n"
         "from numbarrow.core.is_null import is_null_struct\n"
@@ -84,8 +91,8 @@ def _one_struct_shape(variant):
 
 
 def _env(cache_dir, options):
-    # PYTHONPATH names the tree under test: from a neutral cwd the child would
-    # otherwise import whichever numbarrow its interpreter finds installed.
+    # The child runs in a directory outside the checkout, so without PYTHONPATH it would import whatever numbarrow its
+    # interpreter has installed. PYTHONPATH points it at the tree under test.
     env = dict(os.environ)
     env["PYTHONPATH"] = str(REPO)
     env["NUMBA_CACHE_DIR"] = str(cache_dir)
@@ -103,7 +110,7 @@ def _index_files(cache_dir):
 
 
 def _data_files(cache_dir, function):
-    """The compiled-code files numba wrote for one function, one per index entry."""
+    """Return the sorted names of the data files that numba wrote for ``function``, one per entry of its index."""
     return sorted(path.name for path in Path(cache_dir).rglob("*.nbc") if function in path.name)
 
 
@@ -112,8 +119,11 @@ def _viewer_index_files(cache_dir):
 
 
 def test_each_viewer_has_its_own_cache_index(tmp_path):
-    # A viewer is compiled when a dtype is first asked for, so one request
-    # leaves one index file, and the three the adapters use leave three.
+    """Check that a viewer is compiled when its dtype is first asked for, into an index file named after that dtype.
+
+    One request leaves one viewer index, and the three dtypes the adapters use leave three. An index shared by several
+    viewers can let processes that warm a cold cache together load the wrong viewer's machine code.
+    """
     env = _env(tmp_path / "cache", {"cache": True})
     out = _run(IMPORT_AND_VIEW, env, tmp_path)
     assert out.returncode == 0, out.stderr
@@ -128,17 +138,17 @@ def test_each_viewer_has_its_own_cache_index(tmp_path):
 
 
 def test_jit_options_reach_the_decorators(tmp_path):
-    # NUMBARROW_JIT_OPTIONS had no end-to-end test: hard-coding the options in
-    # the decorators kept every other test green.
+    """Check that ``{"cache": false}`` in ``NUMBARROW_JIT_OPTIONS`` leaves the cache directory empty after a viewer
+    compiles. A viewer decorator that ignored the variable would still pass every other test."""
     out = _run(IMPORT_AND_VIEW, _env(tmp_path / "cache", {"cache": False}), tmp_path)
     assert out.returncode == 0, out.stderr
     assert _index_files(tmp_path / "cache") == []
 
 
 def test_a_cold_cache_survives_a_concurrent_first_import(tmp_path):
-    # Eight processes asking for the int32 viewer together on an empty cache
-    # directory, then a ninth reading it back and building the other two
-    # beside it.
+    """Check that eight processes asking for the int32 viewer at once, on one empty cache directory, all succeed, and
+    that a ninth then reads int32, int64 and uint8 arrays correctly with what they left. This is the first import on a
+    Spark executor that starts several Python workers on a node with an empty cache."""
     env = _env(tmp_path / "cache", {"cache": True})
     procs = [
         subprocess.Popen([sys.executable, "-c", IMPORT_AND_VIEW], env=env, cwd=str(tmp_path),
@@ -153,11 +163,12 @@ def test_a_cold_cache_survives_a_concurrent_first_import(tmp_path):
 
 
 def test_is_null_struct_has_one_cache_entry_for_every_shape(tmp_path):
-    # Lazily typed it took one entry per signature, and numba picks a data
-    # file name by counting the entries in the index it just read, so two
-    # processes compiling different signatures could pick the same name. Its
-    # signature is explicit instead: every index type and bitmap combination
-    # resolves to the one entry compiled at import.
+    """Check that every index type and bitmap pair resolves to the one signature that is_null_struct compiles at
+    import, so that its cache holds one index file and one data file.
+
+    numba names a new data file with the lowest number that no entry in the index it just read uses. With an entry per
+    signature, two processes compiling different signatures into one cold index could therefore pick the same name.
+    """
     out = _run(CHECK_EVERY_STRUCT_SHAPE, _env(tmp_path / "cache", {"cache": True}), tmp_path)
     assert out.returncode == 0, out.stderr
     indexes = [name for name in _index_files(tmp_path / "cache") if "is_null_struct" in name]
@@ -167,9 +178,10 @@ def test_is_null_struct_has_one_cache_entry_for_every_shape(tmp_path):
 
 
 def test_a_cold_cache_survives_a_concurrent_first_import_of_is_null_struct(tmp_path):
-    # Eight processes compiling into one empty cache directory, each calling
-    # is_null_struct with an index type and a bitmap pair of its own, then a
-    # ninth reading every combination back from what they wrote.
+    """Check that eight processes on one empty cache directory, each calling is_null_struct with an index type of its
+    own and one of the four bitmap pairs, all succeed, and that a ninth then gets the right answer for every
+    combination. If is_null_struct were typed lazily, each process would compile a signature of its own into the
+    shared index."""
     env = _env(tmp_path / "cache", {"cache": True})
     procs = [
         subprocess.Popen([sys.executable, "-c", _one_struct_shape(variant)], env=env,
@@ -184,7 +196,11 @@ def test_a_cold_cache_survives_a_concurrent_first_import_of_is_null_struct(tmp_p
 
 
 def _archive(path):
-    """numbarrow's modules zipped into ``path``, which goes on PYTHONPATH as it is."""
+    """Write numbarrow's modules into a zip archive at ``path`` and return ``path``, for the caller's PYTHONPATH.
+
+    Python imports from the archive whatever its suffix, but numba goes by the name: numba 0.61 and later cache a
+    module from an archive only when the archive's name ends in ``.zip``.
+    """
     with zipfile.ZipFile(path, "w") as zipped:
         for source in sorted((REPO / "numbarrow").rglob("*.py")):
             zipped.write(source, str(source.relative_to(REPO)))
@@ -193,12 +209,15 @@ def _archive(path):
 
 @pytest.mark.parametrize("name", ["numbarrow-0.0.0-py3.12.egg", "numbarrow-0.0.0-py3-none-any.whl"])
 def test_an_import_from_an_archive_compiles_uncached_with_a_warning_naming_the_remedy(tmp_path, name):
-    # numba's cache locators need the source file on disk, so an import from
-    # an .egg, .whl or .pyz archive, which Spark's --py-files ships, raised
-    # RuntimeError at decoration, naming neither the way to a cache nor the
-    # option that turns caching off. NUMBA_CACHE_DIR is no way to one: it is
-    # set and writable here, the warning fires all the same and nothing is
-    # written there, so the warning says so instead of offering it.
+    """Check that an import from an ``.egg`` or a ``.whl`` compiles without a cache and warns that ``NUMBA_CACHE_DIR``
+    has no effect, and that with caching off it gives no warning.
+
+    numba finds no cache location for a module inside such an archive. Without the fallback, numba would raise
+    ``RuntimeError`` at the first decorated function, and its message names neither a way to a cache nor the option
+    that turns caching off. Spark's ``--py-files`` puts ``.egg`` archives on its workers' Python path.
+    """
+    # NUMBA_CACHE_DIR names a writable directory, and numba writes nothing there: numba reads it only for a source
+    # file on disk, so the warning does not offer it.
     archive = _archive(tmp_path / name)
     env = dict(os.environ, PYTHONPATH=str(archive), NUMBA_CACHE_DIR=str(tmp_path / "cache"))
     env.pop("NUMBARROW_JIT_OPTIONS", None)
@@ -208,6 +227,7 @@ def test_an_import_from_an_archive_compiles_uncached_with_a_warning_naming_the_r
     assert "compiles without a cache" in run.stderr
     assert "NUMBA_CACHE_DIR has no effect here" in run.stderr and "Set NUMBA_CACHE_DIR" not in run.stderr
     assert _index_files(tmp_path / "cache") == []
+    # With caching off, numbarrow does not try to cache, and -W error turns any warning into a failure of the child.
     quiet = subprocess.run([sys.executable, "-W", "error", "-c", IMPORT_AND_SHOW_FILE],
                            capture_output=True, text=True,
                            env=dict(env, NUMBARROW_JIT_OPTIONS='{"cache": false}'), cwd=str(tmp_path))
@@ -215,9 +235,10 @@ def test_an_import_from_an_archive_compiles_uncached_with_a_warning_naming_the_r
 
 
 def test_a_zip_import_is_cached_by_numba_from_0_61(tmp_path):
-    # The warning and the README send an archive's user to a .zip, which
-    # numba caches from 0.61 on, in the user's cache directory whatever
-    # NUMBA_CACHE_DIR says. Before that a .zip is one more archive.
+    """Check that numba 0.61 and later cache numbarrow imported from a ``.zip``, without a warning, in the user's cache
+    directory and not under ``NUMBA_CACHE_DIR``. With numba 0.60, numbarrow compiles a ``.zip`` import without a cache
+    and warns, as for any other archive. The warning for an archive offers a ``.zip`` as the way to a cache, and this
+    test checks that advice."""
     import numba
     archive = _archive(tmp_path / "numbarrow.zip")
     home = tmp_path / "home"
@@ -231,16 +252,20 @@ def test_a_zip_import_is_cached_by_numba_from_0_61(tmp_path):
     assert ("compiles without a cache" not in run.stderr) == cached, run.stderr
     assert _index_files(tmp_path / "cache") == []
     if os.name != "nt":
-        # On Windows numba asks the system for the user's cache directory, and
-        # no variable set here moves it.
+        # The check is skipped on Windows, where numba asks the system for the user's cache directory, and HOME and
+        # XDG_CACHE_HOME do not move it.
         assert bool(_index_files(home)) == cached
 
 
 @needs_a_directory_it_cannot_write
 def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_with_a_warning(tmp_path):
-    # numba takes the user's cache directory for a .zip without checking that
-    # it can be written, so where it cannot, an executor with a read-only
-    # home, the first save raised PermissionError and the import died on it.
+    """Check that an import from a ``.zip`` under a read-only home compiles without a cache and warns that
+    ``NUMBA_CACHE_DIR`` has no effect.
+
+    From version 0.61, numba takes the user's cache directory for a ``.zip`` without checking that it can write there.
+    Without the fallback, the first save would raise ``PermissionError`` and fail the import, as on an executor whose
+    home is read-only. Before 0.61, numba finds no cache location for a ``.zip`` at all, and the warning is the same.
+    """
     archive = _archive(tmp_path / "numbarrow.zip")
     home = tmp_path / "home"
     home.mkdir()
@@ -259,10 +284,10 @@ def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_wi
 
 @needs_a_directory_it_cannot_write
 def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(tmp_path):
-    # The other way to have no cache location: the source is on disk, and
-    # neither its directory nor the user's cache directory can be written.
-    # NUMBA_CACHE_DIR is the remedy there, and nothing showed that the warning
-    # names it or that setting it works.
+    """Check that a read-only install compiles without a cache and warns with ``Set NUMBA_CACHE_DIR``, and that with
+    the variable set to a writable directory the import caches there without a warning. A read-only install has its
+    source on disk, but numba can write neither beside it nor in the user's cache directory, so ``NUMBA_CACHE_DIR`` is
+    the way to a cache there."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbarrow", site / "numbarrow", ignore=shutil.ignore_patterns("__pycache__"))
     home = tmp_path / "home"
@@ -288,11 +313,11 @@ def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(
             path.chmod(0o755)
 
 
-# The bitmap is the first byte of an array that holds every byte the calls
-# reach, so without bounds checking they read past the bitmap and stay inside
-# memory the array owns. Behind a one-byte array of its own they read whatever
-# followed it on the heap, and where that was an unmapped page the child died
-# of an access violation, as it did once on Windows.
+# The child makes is_null and unpack_booleans read past the end of the bitmap, and prints for each call whether it
+# returned or raised IndexError. The bitmap is a one-byte slice of an array long enough to hold every byte the calls
+# read. Without bounds checking, the calls read past the slice but stay inside memory that the array owns. If the
+# bitmap were a one-byte array of its own, the calls would read whatever follows it on the heap, and a read that
+# reached an unmapped page would crash the child with an access violation.
 CHECK_BOUNDS = (
     "import numpy as np\n"
     "from numbarrow.core.is_null import is_null, unpack_booleans\n"
@@ -307,6 +332,7 @@ CHECK_BOUNDS = (
     "print(' '.join(outcomes))\n"
 )
 
+# The child prints the nogil option of each of is_null.py's three dispatchers.
 SHOW_NOGIL = (
     "from numbarrow.core.is_null import is_null, unpack_booleans, is_null_struct\n"
     "print(' '.join(str(f.targetoptions.get('nogil')) for f in (is_null, unpack_booleans, is_null_struct)))\n"
@@ -314,26 +340,26 @@ SHOW_NOGIL = (
 
 
 def test_jit_options_reach_the_is_null_decorators(tmp_path):
-    # The options test imported only the viewers, so hard-coding the options
-    # on is_null.py's three decorators kept the suite green, and the documented
-    # boundscheck contract had no test at all. Bounds checking shows on the two
-    # functions that index a bitmap; is_null_struct indexes nothing and calls
-    # is_null, whose own flags decide, so on its decorator the option that
-    # shows is the cache: off, nothing reaches the cache directory from any of
-    # the three, and on, each of the three leaves an index there. An option
-    # that shows on none of them, nogil, is read back from the three
-    # dispatchers, so a decorator forwarding only the two that show is caught
-    # as well.
+    """Check that ``NUMBARROW_JIT_OPTIONS`` reaches each of the three decorators in ``is_null.py``. A decorator that
+    hard-coded its options would pass every other test, and only this test checks that ``boundscheck`` turns an index
+    past the bitmap into ``IndexError``."""
+    # Bounds checking shows on is_null and unpack_booleans, the two functions that index a bitmap. is_null_struct
+    # indexes nothing itself: it calls is_null, whose own options decide.
     checked = _run(CHECK_BOUNDS, _env(tmp_path / "checked", {"cache": False, "boundscheck": True}), tmp_path)
     assert checked.returncode == 0 and checked.stdout.split() == ["IndexError", "IndexError"], checked.stderr
     unchecked = _run(CHECK_BOUNDS, _env(tmp_path / "unchecked", {"cache": False}), tmp_path)
     assert unchecked.returncode == 0 and unchecked.stdout.split() == ["returned", "returned"], unchecked.stderr
+    # The cache option shows on all three: with caching off, none of them writes to the cache directory, and with
+    # caching on, each leaves one index file there.
     assert _index_files(tmp_path / "checked") == [] and _index_files(tmp_path / "unchecked") == []
     cached = _run(CHECK_BOUNDS, _env(tmp_path / "cached", {"cache": True}), tmp_path)
     assert cached.returncode == 0 and cached.stdout.split() == ["returned", "returned"], cached.stderr
     indexes = _index_files(tmp_path / "cached")
     assert len(indexes) == 3, indexes
+    # The dash after is_null keeps the name from matching is_null_struct's index file.
     for function in ("is_null-", "unpack_booleans", "is_null_struct"):
         assert any(function in name for name in indexes), (function, indexes)
+    # nogil changes nothing that a call can show, so the child reads it back from each dispatcher. This catches a
+    # decorator that forwards only the options that show.
     forwarded = _run(SHOW_NOGIL, _env(tmp_path / "nogil", {"cache": False, "nogil": True}), tmp_path)
     assert forwarded.returncode == 0 and forwarded.stdout.split() == ["True", "True", "True"], forwarded.stderr
